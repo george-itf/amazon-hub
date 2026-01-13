@@ -349,10 +349,10 @@ export async function getReviewStats() {
   return request('/review/stats/summary');
 }
 
-export async function resolveReview(id, bomId, saveAsRule) {
+export async function resolveReview(id, body) {
   return request(`/review/${id}/resolve`, {
     method: 'POST',
-    body: { bom_id: bomId, save_as_rule: saveAsRule }
+    body: body
   });
 }
 
