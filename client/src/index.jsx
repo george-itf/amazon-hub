@@ -16,11 +16,11 @@ import './styles.css';
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <AppProvider i18n={enTranslations}>
-      <AuthProvider>
-        <BrowserRouter>
+      <BrowserRouter>
+        <AuthProvider>
           <App />
-        </BrowserRouter>
-      </AuthProvider>
+        </AuthProvider>
+      </BrowserRouter>
     </AppProvider>
   </React.StrictMode>
 );
