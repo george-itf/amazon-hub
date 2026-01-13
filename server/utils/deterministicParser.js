@@ -18,15 +18,17 @@
 
 // Known battery indicators with their counts
 const BATTERY_PATTERNS = [
+  // "2x 5.0Ah Batteries" format (most specific first)
+  { pattern: /\b(\d+)\s*x\s*\d+\.?\d*\s*ah\s*batter(?:y|ies)\b/i, extract: (m) => parseInt(m[1]) },
+  // "with 2x 5.0Ah" format (no "batteries" word needed)
+  { pattern: /\b(\d+)\s*x\s*\d+\.?\d*\s*ah\b/i, extract: (m) => parseInt(m[1]) },
+  // Standard patterns
   { pattern: /\b(\d+)\s*x?\s*batter(?:y|ies)\b/i, extract: (m) => parseInt(m[1]) },
   { pattern: /\bwith\s+(\d+)\s*batter(?:y|ies)\b/i, extract: (m) => parseInt(m[1]) },
   { pattern: /\b(\d+)\s*ah\s+batter(?:y|ies)\b/i, extract: (m) => parseInt(m[1]) },
   { pattern: /\bdual\s+batter(?:y|ies)\b/i, extract: () => 2 },
   { pattern: /\btwin\s+batter(?:y|ies)\b/i, extract: () => 2 },
   { pattern: /\btriple\s+batter(?:y|ies)\b/i, extract: () => 3 },
-  { pattern: /\b2\s*x\s*\d+\.?\d*\s*ah\b/i, extract: () => 2 },
-  { pattern: /\b3\s*x\s*\d+\.?\d*\s*ah\b/i, extract: () => 3 },
-  { pattern: /\b1\s*x\s*\d+\.?\d*\s*ah\b/i, extract: () => 1 },
 ];
 
 // Charger indicators
