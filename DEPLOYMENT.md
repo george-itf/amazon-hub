@@ -145,29 +145,30 @@ NODE_ENV=production npm start
 
 ### Railway Deployment
 
-Railway auto-detects the `Dockerfile` at the repository root. No custom build commands needed.
+Railway auto-detects the `Dockerfile` at the repository root. No Railpack custom commands needed.
 
 **Setup steps:**
 
 1. Create a new project in Railway
 2. Connect your GitHub repository
-3. Railway will automatically detect the Dockerfile and build
+3. Railway will automatically detect the root Dockerfile and build
 4. Configure environment variables in Railway dashboard:
-   - `SUPABASE_URL`
-   - `SUPABASE_ANON_KEY`
-   - `SUPABASE_SERVICE_KEY`
-   - `SESSION_SECRET`
-   - `SHOPIFY_STORE_URL`
-   - `SHOPIFY_ACCESS_TOKEN`
-   - `ALLOWED_ORIGINS` (your frontend domain)
-   - `KEEPA_API_KEY` (optional)
+   - `SUPABASE_URL` - Supabase project URL
+   - `SUPABASE_ANON_KEY` - Supabase anon/public key
+   - `SUPABASE_SERVICE_KEY` - Supabase service role key
+   - `SESSION_SECRET` - Random 32+ byte string for sessions
+   - `SHOPIFY_STORE_URL` - Your Shopify store domain
+   - `SHOPIFY_ACCESS_TOKEN` - Shopify Admin API token
+   - `ALLOWED_ORIGINS` - Your frontend domain(s) for CORS
+   - `KEEPA_API_KEY` - (optional) Keepa API key
 5. Railway automatically sets `PORT` - the server reads this at runtime
 6. Deploy
 
 **Notes:**
-- The server listens on `process.env.PORT` (Railway provides this)
+- The server listens on `process.env.PORT` (Railway provides this automatically)
 - Default port is 3001 if PORT is not set
 - Health check endpoint: `GET /health`
+- The Docker build uses `npm ci` which requires `server/package-lock.json` (committed to repo)
 
 ### Docker Deployment (Manual)
 
