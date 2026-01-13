@@ -221,7 +221,7 @@ describe('suggestComponents', () => {
   });
 
   test('confidence is LOW when uncertain', () => {
-    const intent = { battery_qty: null, charger_included: null };
+    const intent = { battery_qty: null, charger_included: null, bare_tool: null, tool_core: null };
     const result = suggestComponents(intent);
     expect(result.confidence).toBe('LOW');
     expect(result.notes.length).toBeGreaterThan(0);

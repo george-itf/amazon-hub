@@ -32,9 +32,9 @@ const app = express();
 // Trust proxy for correct IP detection behind load balancers
 app.set('trust proxy', true);
 
-// CORS configuration
+// CORS configuration - trim whitespace from origins
 const allowedOrigins = process.env.ALLOWED_ORIGINS
-  ? process.env.ALLOWED_ORIGINS.split(',')
+  ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
   : ['http://localhost:3000', 'http://localhost:5173'];
 
 app.use(cors({
@@ -44,14 +44,25 @@ app.use(cors({
     if (allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
+      console.warn(`CORS blocked origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true
 }));
 
-// Parse JSON request bodies
-app.use(express.json({ limit: '10mb' }));
+// Security headers for production
+if (process.env.NODE_ENV === 'production') {
+  app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
+  });
+}
+
+// Parse JSON request bodies (5MB limit for production safety)
+app.use(express.json({ limit: '5mb' }));
 
 // Correlation ID middleware - adds unique ID to every request
 app.use(correlationIdMiddleware);
