@@ -12,12 +12,22 @@ RUN cd server && npm ci --omit=dev
 # Copy server source
 COPY server ./server
 
+# Change ownership to node user for security
+RUN chown -R node:node /app
+
 ENV NODE_ENV=production
 
 # Set working directory to server for runtime
 WORKDIR /app/server
 
-# Document the default port (actual port is set by PORT env var at runtime)
-EXPOSE 3000
+# Run as non-root user for security
+USER node
+
+# Document the default port (Railway sets PORT env var at runtime)
+EXPOSE 3001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "require('http').get('http://localhost:' + (process.env.PORT || 3001) + '/health', (r) => { if (r.statusCode !== 200) process.exit(1) })"
 
 CMD ["npm", "start"]
