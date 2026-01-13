@@ -7,8 +7,8 @@ import {
   Banner,
   InlineStack,
 } from '@shopify/polaris';
-import { InvictaButton, InvictaButtonGroup } from './InvictaButton.js';
-import { generateIdempotencyKey } from '../../utils/api.js';
+import { InvictaButton, InvictaButtonGroup } from './InvictaButton.jsx';
+import { generateIdempotencyKey } from '../../utils/api.jsx';
 
 /**
  * InvictaConfirmModal - Confirmation modal for irreversible actions

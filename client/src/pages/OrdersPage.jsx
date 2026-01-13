@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Page, Card, Button, DataTable, Spinner } from '@shopify/polaris';
-import { importOrders, getOrders } from '../utils/api.js';
+import { importOrders, getOrders } from '../utils/api.jsx';
 
 /**
  * OrdersPage lists all orders stored in the system and provides a

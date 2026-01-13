@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Page, Card, DataTable, Spinner, Select, TextField, Button, FormLayout, Modal, Stack } from '@shopify/polaris';
-import { getReviewQueue, getBoms, resolveReview } from '../utils/api.js';
+import { Page, Card, DataTable, Spinner, Select, TextField, Button, FormLayout, Modal, BlockStack } from '@shopify/polaris';
+import { getReviewQueue, getBoms, resolveReview } from '../utils/api.jsx';
 
 /**
  * ReviewPage displays the current items in the review queue and lets
@@ -84,7 +84,7 @@ export default function ReviewPage() {
       >
         {resolveState.item && (
           <Modal.Section>
-            <Stack vertical>
+            <BlockStack gap="400">
               <Select
                 label="BOM"
                 options={bomOptions}
@@ -106,7 +106,7 @@ export default function ReviewPage() {
                 value={resolveState.title}
                 onChange={(value) => setResolveState((prev) => ({ ...prev, title: value }))}
               />
-            </Stack>
+            </BlockStack>
           </Modal.Section>
         )}
       </Modal>

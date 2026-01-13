@@ -12,7 +12,7 @@ import {
   InlineStack,
   Tabs,
 } from '@shopify/polaris';
-import { useAuth } from '../context/AuthContext.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 /**
  * Login page with email/password authentication.

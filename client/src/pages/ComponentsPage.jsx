@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Page, Layout, Card, DataTable, TextField, Button, FormLayout, Spinner } from '@shopify/polaris';
-import { getComponents, createComponent } from '../utils/api.js';
+import { getComponents, createComponent } from '../utils/api.jsx';
 
 /**
  * ComponentsPage lists all components and provides a simple form to

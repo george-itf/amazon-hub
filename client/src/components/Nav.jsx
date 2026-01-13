@@ -7,7 +7,7 @@ import {
   ListBulletedIcon,
   InventoryIcon,
   ProductIcon,
-  ListIcon,
+  CartIcon,
   QuestionCircleIcon,
   ArrowDownIcon,
   ChartVerticalFilledIcon,
@@ -15,7 +15,7 @@ import {
   ClockIcon,
   ExitIcon,
 } from '@shopify/polaris-icons';
-import { useAuth } from '../context/AuthContext.js';
+import { useAuth } from '../context/AuthContext.jsx';
 
 /**
  * Renders the persistent left-hand navigation used throughout the Hub.
@@ -37,7 +37,7 @@ export default function Nav() {
   const inventoryItems = [
     { label: 'Components', url: '/components', icon: InventoryIcon },
     { label: 'BOMs / Bundles', url: '/bundles', icon: ProductIcon },
-    { label: 'Listings', url: '/listings', icon: ListIcon },
+    { label: 'Listings', url: '/listings', icon: CartIcon },
     { label: 'Returns', url: '/returns', icon: ExchangeIcon },
   ];
 

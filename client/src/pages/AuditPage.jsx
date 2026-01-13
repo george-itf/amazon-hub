@@ -19,8 +19,8 @@ import {
   InvictaButton,
   InvictaLoading,
   InvictaTable,
-} from '../components/ui/index.js';
-import * as api from '../utils/api.js';
+} from '../components/ui/index.jsx';
+import * as api from '../utils/api.jsx';
 
 const ENTITY_TYPES = [
   { label: 'All Types', value: '' },

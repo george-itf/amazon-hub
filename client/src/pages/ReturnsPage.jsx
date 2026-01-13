@@ -11,7 +11,7 @@ import {
   TextField,
   Select,
 } from '@shopify/polaris';
-import { useAuth } from '../context/AuthContext.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import {
   InvictaSectionHeader,
   InvictaPanel,
@@ -21,8 +21,8 @@ import {
   InvictaLoading,
   InvictaConfirmModal,
   useTableState,
-} from '../components/ui/index.js';
-import * as api from '../utils/api.js';
+} from '../components/ui/index.jsx';
+import * as api from '../utils/api.jsx';
 
 const DISPOSITIONS = [
   { label: 'Restock', value: 'RESTOCK' },
