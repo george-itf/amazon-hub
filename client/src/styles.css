@@ -1,0 +1,43 @@
+/*
+ * Global styles to align the Hub UI with Invicta’s branding.  These
+ * overrides adjust the background colours, typography and accent
+ * colours used by Shopify Polaris.  Polaris uses CSS variables
+ * internally; overriding them at the :root level allows you to
+ * customise colours without invasive changes.  Feel free to adjust
+ * these values to more closely match your storefront.
+ */
+
+:root {
+  /* Base background colour for content areas */
+  --p-background: #f5f5f5;
+  /* Base surface colour for cards and tables */
+  --p-surface: #ffffff;
+  /* Text colour for primary content */
+  --p-text: #0d0d0d;
+  /* Critical / accent colour (Invicta red) */
+  --p-interactive-critical: #d32f2f;
+  --p-interactive-critical-hovered: #b71c1c;
+}
+
+body {
+  background-color: var(--p-background);
+  color: var(--p-text);
+}
+
+/* Darken the navigation menu to match the Invicta admin aesthetic */
+.Polaris-Navigation {
+  background-color: #202020;
+}
+
+.Polaris-Navigation__Item {
+  color: #ffffff;
+}
+
+.Polaris-Navigation__Item--selected {
+  background-color: var(--p-interactive-critical);
+  color: #ffffff;
+}
+
+.Polaris-Frame__Navigation {
+  border-right: none;
+}
