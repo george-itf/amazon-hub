@@ -6,7 +6,7 @@
  */
 
 import supabase from '../../services/supabase.js';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 
 const SALT_ROUNDS = 10;
