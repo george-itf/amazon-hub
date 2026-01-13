@@ -32,6 +32,12 @@ const app = express();
 // Trust proxy for correct IP detection behind load balancers
 app.set('trust proxy', true);
 
+// First-line request debug logging (before any middleware)
+app.use((req, res, next) => {
+  console.log(`[DEBUG] Incoming request: ${req.method} ${req.url} from ${req.ip}`);
+  next();
+});
+
 // CORS configuration - trim whitespace from origins
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim())
