@@ -98,6 +98,19 @@ export default function AuditPage() {
     console.log('Event clicked:', event);
   };
 
+  // Filter events by search query (client-side)
+  const filteredEvents = searchQuery
+    ? events.filter((event) => {
+        const query = searchQuery.toLowerCase();
+        return (
+          (event.changes_summary && event.changes_summary.toLowerCase().includes(query)) ||
+          (event.entity_id && event.entity_id.toLowerCase().includes(query)) ||
+          (event.actor_display && event.actor_display.toLowerCase().includes(query)) ||
+          (event.entity_type && event.entity_type.toLowerCase().includes(query))
+        );
+      })
+    : events;
+
   const columns = [
     {
       id: 'created_at',
@@ -218,11 +231,13 @@ export default function AuditPage() {
             {/* Events Table */}
             <InvictaTable
               columns={columns}
-              data={events}
+              data={filteredEvents}
               loading={loading}
               emptyState={{
-                heading: 'No audit events',
-                description: 'System changes will appear here.',
+                heading: searchQuery ? 'No matching events' : 'No audit events',
+                description: searchQuery
+                  ? `No events match "${searchQuery}". Try a different search term.`
+                  : 'System changes will appear here.',
               }}
               resourceName={{ singular: 'event', plural: 'events' }}
               pagination={{
@@ -244,6 +259,12 @@ export default function AuditPage() {
                   <Text>Total Events</Text>
                   <Text fontWeight="semibold">{total}</Text>
                 </InlineStack>
+                {searchQuery && (
+                  <InlineStack align="space-between">
+                    <Text>Matching Search</Text>
+                    <Text fontWeight="semibold">{filteredEvents.length}</Text>
+                  </InlineStack>
+                )}
                 <InlineStack align="space-between">
                   <Text>Today</Text>
                   <Text fontWeight="semibold">
