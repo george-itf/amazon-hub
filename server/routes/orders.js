@@ -69,13 +69,50 @@ router.post('/import', requireStaff, async (req, res) => {
         ? Math.round(parseFloat(shopifyOrder.total_price) * 100)
         : null;
 
-      // Insert order
+      // Pre-process line items to determine resolution status BEFORE inserting order
+      // This prevents race condition where order is visible with wrong status
+      const processedLines = [];
+      let allLinesResolved = true;
+
+      for (const lineItem of shopifyOrder.line_items || []) {
+        // Extract ASIN from properties if present
+        const asinProp = lineItem.properties?.find(p =>
+          p.name.toLowerCase() === 'asin' || p.name.toLowerCase() === '_asin'
+        );
+        const asin = asinProp ? normalizeAsin(asinProp.value) : null;
+        const sku = normalizeSku(lineItem.sku);
+        const title = lineItem.title || lineItem.name;
+        const fingerprint = fingerprintTitle(title);
+
+        // Attempt to resolve listing
+        const resolution = await resolveListing(asin, sku, title);
+        const isResolved = resolution !== null && resolution.bom_id !== null;
+
+        if (!isResolved) {
+          allLinesResolved = false;
+        }
+
+        processedLines.push({
+          lineItem,
+          asin,
+          sku,
+          title,
+          fingerprint,
+          resolution,
+          isResolved
+        });
+      }
+
+      // Determine final status BEFORE inserting order
+      const finalStatus = allLinesResolved ? 'READY_TO_PICK' : 'NEEDS_REVIEW';
+
+      // Insert order with correct final status (no race condition)
       const { data: newOrder, error: orderError } = await supabase
         .from('orders')
         .insert({
           external_order_id: externalOrderId,
           channel: 'shopify',
-          status: 'IMPORTED',
+          status: finalStatus,
           order_date: shopifyOrder.created_at ? shopifyOrder.created_at.split('T')[0] : null,
           customer_email: customerEmail,
           customer_name: customerName,
@@ -92,26 +129,9 @@ router.post('/import', requireStaff, async (req, res) => {
         continue;
       }
 
-      // Process line items
-      let allLinesResolved = true;
-
-      for (const lineItem of shopifyOrder.line_items || []) {
-        // Extract ASIN from properties if present
-        const asinProp = lineItem.properties?.find(p =>
-          p.name.toLowerCase() === 'asin' || p.name.toLowerCase() === '_asin'
-        );
-        const asin = asinProp ? normalizeAsin(asinProp.value) : null;
-        const sku = normalizeSku(lineItem.sku);
-        const title = lineItem.title || lineItem.name;
-        const fingerprint = fingerprintTitle(title);
-
-        // Attempt to resolve listing
-        const resolution = await resolveListing(asin, sku, title);
-
-        const isResolved = resolution !== null && resolution.bom_id !== null;
-        if (!isResolved) {
-          allLinesResolved = false;
-        }
+      // Insert pre-processed line items
+      for (const processed of processedLines) {
+        const { lineItem, asin, sku, title, fingerprint, resolution, isResolved } = processed;
 
         // Insert order line
         const { error: lineError } = await supabase
@@ -140,7 +160,7 @@ router.post('/import', requireStaff, async (req, res) => {
         if (!isResolved) {
           await supabase.from('review_queue').insert({
             order_id: newOrder.id,
-            order_line_id: null, // We don't have the line ID yet
+            order_line_id: null,
             external_id: `${externalOrderId}-${lineItem.id}`,
             asin: asin,
             sku: sku,
@@ -151,13 +171,6 @@ router.post('/import', requireStaff, async (req, res) => {
           });
         }
       }
-
-      // Update order status based on line resolution
-      const newStatus = allLinesResolved ? 'READY_TO_PICK' : 'NEEDS_REVIEW';
-      await supabase
-        .from('orders')
-        .update({ status: newStatus })
-        .eq('id', newOrder.id);
 
       imported++;
       importedOrderIds.push(newOrder.id);
