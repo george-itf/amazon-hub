@@ -14,7 +14,10 @@ COPY server ./server
 
 ENV NODE_ENV=production
 
+# Set working directory to server for runtime
+WORKDIR /app/server
+
 # Document the default port (actual port is set by PORT env var at runtime)
 EXPOSE 3000
 
-CMD ["sh", "-c", "cd server && npm start"]
+CMD ["npm", "start"]
