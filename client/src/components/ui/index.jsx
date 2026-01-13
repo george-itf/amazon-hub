@@ -1,24 +1,24 @@
 // Invicta UI Kit - Custom components for Amazon Hub Brain
 // Uses Shopify Polaris as base with Invicta branding
 
-export { InvictaSectionHeader } from './InvictaSectionHeader.js';
-export { InvictaButton, InvictaButtonGroup } from './InvictaButton.js';
-export { InvictaBadge, InvictaStockBadge, InvictaResolutionBadge } from './InvictaBadge.js';
-export { InvictaPanel, InvictaStatPanel, InvictaPanelGrid } from './InvictaPanel.js';
-export { InvictaTable, useTableState } from './InvictaTable.js';
+export { InvictaSectionHeader } from './InvictaSectionHeader.jsx';
+export { InvictaButton, InvictaButtonGroup } from './InvictaButton.jsx';
+export { InvictaBadge, InvictaStockBadge, InvictaResolutionBadge } from './InvictaBadge.jsx';
+export { InvictaPanel, InvictaStatPanel, InvictaPanelGrid } from './InvictaPanel.jsx';
+export { InvictaTable, useTableState } from './InvictaTable.jsx';
 export {
   InvictaConfirmModal,
   InvictaDeleteConfirmModal,
   InvictaDispatchConfirmModal,
   useConfirmModal
-} from './InvictaConfirmModal.js';
+} from './InvictaConfirmModal.jsx';
 export {
   InvictaLoading,
   InvictaPageLoading,
   InvictaTableLoading,
   InvictaInlineLoading
-} from './InvictaLoading.js';
-export { InvictaTimeline, InvictaActivityFeed } from './InvictaTimeline.js';
+} from './InvictaLoading.jsx';
+export { InvictaTimeline, InvictaActivityFeed } from './InvictaTimeline.jsx';
 
 // Color constants for Invicta branding
 export const INVICTA_COLORS = {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Page, Layout, Card, DataTable, Spinner, TextField, Select, Button, FormLayout } from '@shopify/polaris';
-import { getListings, createListing, getBoms } from '../utils/api.js';
+import { getListings, createListing, getBoms } from '../utils/api.jsx';
 
 /**
  * ListingsPage lists all entries in the listing memory and allows

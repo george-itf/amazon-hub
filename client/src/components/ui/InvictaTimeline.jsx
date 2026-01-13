@@ -1,6 +1,6 @@
 import React from 'react';
 import { Card, BlockStack, Text, InlineStack } from '@shopify/polaris';
-import { InvictaBadge } from './InvictaBadge.js';
+import { InvictaBadge } from './InvictaBadge.jsx';
 
 /**
  * InvictaTimeline - Audit timeline display

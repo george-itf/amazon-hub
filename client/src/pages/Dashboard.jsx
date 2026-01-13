@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Page, Layout, Banner, Text, BlockStack, InlineStack, InlineGrid } from '@shopify/polaris';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.js';
+import { useAuth } from '../context/AuthContext.jsx';
 import {
   InvictaSectionHeader,
   InvictaPanel,
@@ -12,8 +12,8 @@ import {
   InvictaButtonGroup,
   InvictaLoading,
   InvictaActivityFeed,
-} from '../components/ui/index.js';
-import * as api from '../utils/api.js';
+} from '../components/ui/index.jsx';
+import * as api from '../utils/api.jsx';
 
 /**
  * Dashboard - Ops Command Center

@@ -1,23 +1,23 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Frame } from '@shopify/polaris';
-import Nav from './components/Nav.js';
-import { useAuth } from './context/AuthContext.js';
-import { InvictaLoading } from './components/ui/index.js';
+import Nav from './components/Nav.jsx';
+import { useAuth } from './context/AuthContext.jsx';
+import { InvictaLoading } from './components/ui/index.jsx';
 
 // Import pages
-import Dashboard from './pages/Dashboard.js';
-import OrdersPage from './pages/OrdersPage.js';
-import PicklistsPage from './pages/PicklistsPage.js';
-import ComponentsPage from './pages/ComponentsPage.js';
-import BundlesPage from './pages/BundlesPage.js';
-import ListingsPage from './pages/ListingsPage.js';
-import ReviewPage from './pages/ReviewPage.js';
-import ReplenishmentPage from './pages/ReplenishmentPage.js';
-import ProfitPage from './pages/ProfitPage.js';
-import LoginPage from './pages/LoginPage.js';
-import ReturnsPage from './pages/ReturnsPage.js';
-import AuditPage from './pages/AuditPage.js';
+import Dashboard from './pages/Dashboard.jsx';
+import OrdersPage from './pages/OrdersPage.jsx';
+import PicklistsPage from './pages/PicklistsPage.jsx';
+import ComponentsPage from './pages/ComponentsPage.jsx';
+import BundlesPage from './pages/BundlesPage.jsx';
+import ListingsPage from './pages/ListingsPage.jsx';
+import ReviewPage from './pages/ReviewPage.jsx';
+import ReplenishmentPage from './pages/ReplenishmentPage.jsx';
+import ProfitPage from './pages/ProfitPage.jsx';
+import LoginPage from './pages/LoginPage.jsx';
+import ReturnsPage from './pages/ReturnsPage.jsx';
+import AuditPage from './pages/AuditPage.jsx';
 
 /**
  * Layout wrapper that renders the navigation and page content.

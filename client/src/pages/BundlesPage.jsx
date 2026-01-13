@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Page, Layout, Card, DataTable, Spinner, TextField, FormLayout, Button } from '@shopify/polaris';
-import { getBoms, createBom, getComponents } from '../utils/api.js';
+import { getBoms, createBom, getComponents } from '../utils/api.jsx';
 
 /**
  * BundlesPage lists all bundles/BOMs with their component lines and

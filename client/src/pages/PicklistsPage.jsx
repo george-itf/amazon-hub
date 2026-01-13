@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Page, Card, DataTable, Spinner, Button } from '@shopify/polaris';
-import { getPicklist } from '../utils/api.js';
+import { getPickBatches } from '../utils/api.jsx';
 
 /**
  * PicklistsPage displays the aggregated picklist generated from all
@@ -14,7 +14,7 @@ export default function PicklistsPage() {
   async function loadPicklist() {
     setLoading(true);
     try {
-      const data = await getPicklist();
+      const data = await getPickBatches();
       setPicklist(data);
     } catch (err) {
       console.error(err);
