@@ -16,7 +16,7 @@ export default function ComponentsPage() {
     setLoading(true);
     try {
       const data = await getComponents();
-      setComponents(data);
+      setComponents(data.components || []);
     } catch (err) {
       console.error(err);
     } finally {

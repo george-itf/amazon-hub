@@ -17,8 +17,8 @@ export default function ReviewPage() {
     setLoading(true);
     try {
       const [queueData, bomData] = await Promise.all([getReviewQueue(), getBoms()]);
-      setQueue(queueData);
-      setBoms(bomData);
+      setQueue(queueData.items || []);
+      setBoms(bomData.boms || []);
     } catch (err) {
       console.error(err);
     } finally {
