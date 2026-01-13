@@ -15,7 +15,7 @@ export default function PicklistsPage() {
     setLoading(true);
     try {
       const data = await getPickBatches();
-      setPicklist(data);
+      setPicklist(data.pick_batches || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -25,7 +25,11 @@ export default function PicklistsPage() {
   useEffect(() => {
     loadPicklist();
   }, []);
-  const rows = picklist.map((item) => [item.internal_sku, item.description, item.quantity_required]);
+  const rows = picklist.map((batch) => [
+    batch.batch_number || batch.id?.substring(0, 8),
+    batch.status,
+    batch.pick_batch_lines?.length || 0
+  ]);
   return (
     <Page title="Picklists" primaryAction={{ content: 'Refresh', onAction: loadPicklist }}>
       <Card>
@@ -34,7 +38,7 @@ export default function PicklistsPage() {
         ) : (
           <DataTable
             columnContentTypes={['text', 'text', 'numeric']}
-            headings={['SKU', 'Description', 'Quantity']}
+            headings={['Batch #', 'Status', 'Lines']}
             rows={rows}
           />
         )}

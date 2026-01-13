@@ -19,8 +19,8 @@ export default function BundlesPage() {
     setLoading(true);
     try {
       const [bomData, compData] = await Promise.all([getBoms(), getComponents()]);
-      setBoms(bomData);
-      setComponents(compData);
+      setBoms(bomData.boms || []);
+      setComponents(compData.components || []);
     } catch (err) {
       console.error(err);
     } finally {

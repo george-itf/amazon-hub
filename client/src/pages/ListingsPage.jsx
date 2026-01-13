@@ -16,8 +16,8 @@ export default function ListingsPage() {
     setLoading(true);
     try {
       const [listingData, bomData] = await Promise.all([getListings(), getBoms()]);
-      setListings(listingData);
-      setBoms(bomData);
+      setListings(listingData.listings || []);
+      setBoms(bomData.boms || []);
     } catch (err) {
       console.error(err);
     } finally {

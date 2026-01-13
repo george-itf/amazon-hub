@@ -15,7 +15,7 @@ export default function OrdersPage() {
     setLoading(true);
     try {
       const data = await getOrders();
-      setOrders(data);
+      setOrders(data.orders || []);
     } catch (err) {
       console.error(err);
     } finally {

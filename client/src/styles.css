@@ -58,3 +58,35 @@ body {
 .Polaris-Frame__Navigation {
   border-right: none;
 }
+
+/* Prevent white flash during navigation */
+.Polaris-Frame__Main {
+  background-color: var(--p-background);
+  min-height: 100vh;
+}
+
+.Polaris-Frame__Content {
+  background-color: var(--p-background);
+}
+
+/* Ensure page content area has consistent background */
+.Polaris-Page {
+  background-color: var(--p-background);
+}
+
+/* Spinner loading states - ensure consistent background */
+.Polaris-Spinner {
+  margin: 20px auto;
+}
+
+/* Card styling - ensure they don't flash white unexpectedly */
+.Polaris-Card {
+  background-color: var(--p-surface);
+}
+
+/* Smooth transition for loading states */
+.Polaris-Page,
+.Polaris-Card,
+.Polaris-Frame__Content {
+  transition: opacity 0.15s ease-in-out;
+}
