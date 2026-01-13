@@ -79,6 +79,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// Ultra-simple ping endpoint for debugging (bypasses all helpers)
+app.get('/ping', (req, res) => {
+  res.status(200).json({ pong: true, time: Date.now() });
+});
+
 // Health check endpoint (no auth required)
 app.get('/health', (req, res) => {
   sendSuccess(res, {
@@ -163,8 +168,9 @@ app.use((err, req, res, next) => {
 
 // Start listening for incoming requests
 const port = process.env.PORT || 3001;
-const server = app.listen(port, () => {
-  console.log(`Amazon Hub Brain API listening on port ${port}`);
+const host = '0.0.0.0'; // Bind to all interfaces for container environments
+const server = app.listen(port, host, () => {
+  console.log(`Amazon Hub Brain API listening on ${host}:${port}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
