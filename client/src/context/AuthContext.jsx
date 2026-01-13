@@ -1,13 +1,14 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as api from '../utils/api.jsx';
+import { setStoredToken, clearStoredToken, getStoredToken } from '../utils/api.jsx';
 
 // Create a React context for authentication
 const AuthContext = createContext(null);
 
 /**
  * Provides authentication state and actions to children.
- * Uses session-based authentication with cookies.
+ * Uses token-based authentication stored in localStorage.
  */
 export function AuthProvider({ children }) {
   const navigate = useNavigate();
@@ -24,13 +25,21 @@ export function AuthProvider({ children }) {
    * Check if there's an active session
    */
   const checkSession = useCallback(async () => {
+    // If no token stored, skip session check
+    const token = getStoredToken();
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       const userData = await api.getCurrentUser();
       setUser(userData);
       setError(null);
     } catch (err) {
-      // Session not valid or expired
+      // Session not valid or expired - clear token
+      clearStoredToken();
       setUser(null);
       if (err.status !== 401) {
         console.error('Session check error:', err);
@@ -49,6 +58,8 @@ export function AuthProvider({ children }) {
     try {
       setError(null);
       const result = await api.login(email, password);
+      // Store the token for future requests
+      setStoredToken(result.token);
       setUser(result.user);
       navigate('/');
       return result;
@@ -68,6 +79,8 @@ export function AuthProvider({ children }) {
     try {
       setError(null);
       const result = await api.register(email, password, name);
+      // Store the token for future requests
+      setStoredToken(result.token);
       setUser(result.user);
       navigate('/');
       return result;
@@ -86,6 +99,8 @@ export function AuthProvider({ children }) {
     } catch (err) {
       console.error('Logout error:', err);
     } finally {
+      // Clear stored token
+      clearStoredToken();
       setUser(null);
       navigate('/login');
     }

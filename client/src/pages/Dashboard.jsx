@@ -41,7 +41,7 @@ export default function Dashboard() {
       setData(dashboardData);
     } catch (err) {
       console.error('Dashboard load error:', err);
-      setError(err.message);
+      setError(typeof err === 'string' ? err : err.message || JSON.stringify(err));
     } finally {
       setLoading(false);
     }

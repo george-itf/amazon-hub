@@ -32,12 +32,27 @@ body {
 }
 
 .Polaris-Navigation__Item {
-  color: #ffffff;
+  color: #ffffff !important;
+}
+
+.Polaris-Navigation__Item:hover {
+  background-color: #383838 !important;
+  color: #ffffff !important;
 }
 
 .Polaris-Navigation__Item--selected {
-  background-color: var(--p-interactive-critical);
-  color: #ffffff;
+  background-color: var(--p-interactive-critical) !important;
+  color: #ffffff !important;
+}
+
+.Polaris-Navigation__Item--selected:hover {
+  background-color: var(--p-interactive-critical-hovered) !important;
+  color: #ffffff !important;
+}
+
+/* Fix text color in navigation */
+.Polaris-Navigation__Text {
+  color: inherit !important;
 }
 
 .Polaris-Frame__Navigation {

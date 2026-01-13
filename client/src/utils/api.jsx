@@ -1,18 +1,43 @@
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001';
 
+// Token storage helpers
+const TOKEN_KEY = 'amazon_hub_token';
+
+export function getStoredToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setStoredToken(token) {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+}
+
+export function clearStoredToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
 /**
  * Helper to make an authenticated HTTP request.
- * Handles session cookies automatically via credentials: 'include'.
+ * Sends the stored token via Authorization header.
  * Parses JSON responses and throws on non-2xx statuses with structured error info.
  *
  * @param {string} url
  * @param {Object} options
  */
 async function request(url, options = {}) {
+  const token = getStoredToken();
   const headers = {
     'Content-Type': 'application/json',
     ...(options.headers || {})
   };
+
+  // Add auth token if available
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
 
   // Add idempotency key if provided
   if (options.idempotencyKey) {
@@ -22,7 +47,6 @@ async function request(url, options = {}) {
   const resp = await fetch(`${API_BASE}${url}`, {
     ...options,
     headers,
-    credentials: 'include', // Include session cookies
     body: options.body ? JSON.stringify(options.body) : undefined
   });
 
