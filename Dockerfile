@@ -23,11 +23,7 @@ WORKDIR /app/server
 # Run as non-root user for security
 USER node
 
-# Document the default port (Railway sets PORT env var at runtime)
-EXPOSE 3001
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:' + (process.env.PORT || 3001) + '/health', (r) => { if (r.statusCode !== 200) process.exit(1) })"
+# Railway sets PORT env var at runtime
+EXPOSE 8080
 
 CMD ["npm", "start"]
