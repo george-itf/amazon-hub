@@ -32,6 +32,8 @@ export default function Dashboard() {
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const [importError, setImportError] = useState(null);
 
   const loadDashboard = useCallback(async () => {
     try {
@@ -54,13 +56,15 @@ export default function Dashboard() {
   const handleImportOrders = async () => {
     try {
       setImporting(true);
+      setImportResult(null);
+      setImportError(null);
       const result = await api.importOrders();
       await loadDashboard();
-      // Show result
-      alert(`Imported ${result.imported} orders, updated ${result.updated}, skipped ${result.skipped}`);
+      setImportResult(result);
     } catch (err) {
       console.error('Import error:', err);
-      alert('Import failed: ' + err.message);
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Import failed');
+      setImportError(errorMsg);
     } finally {
       setImporting(false);
     }
@@ -104,6 +108,30 @@ export default function Dashboard() {
       ]}
     >
       <BlockStack gap="600">
+        {/* Import Result Banner */}
+        {importResult && (
+          <Banner
+            title="Import Complete"
+            tone="success"
+            onDismiss={() => setImportResult(null)}
+          >
+            <p>
+              Imported: {importResult.imported} | Updated: {importResult.updated} | Skipped: {importResult.skipped}
+            </p>
+          </Banner>
+        )}
+
+        {/* Import Error Banner */}
+        {importError && (
+          <Banner
+            title="Import Failed"
+            tone="critical"
+            onDismiss={() => setImportError(null)}
+          >
+            <p>{importError}</p>
+          </Banner>
+        )}
+
         {/* Urgent Actions Banner */}
         {needsReview.length > 0 && (
           <Banner

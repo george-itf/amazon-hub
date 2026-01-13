@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Page,
   Layout,
@@ -12,8 +12,11 @@ import {
   Text,
   BlockStack,
   Badge,
+  Modal,
+  Select,
+  InlineStack,
 } from '@shopify/polaris';
-import { getComponents, createComponent } from '../utils/api.jsx';
+import { getComponents, createComponent, adjustStock } from '../utils/api.jsx';
 
 /**
  * Format price from pence to pounds
@@ -34,6 +37,17 @@ export default function ComponentsPage() {
   const [form, setForm] = useState({ internal_sku: '', description: '', brand: '', cost_ex_vat_pence: '' });
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
+  const [successMessage, setSuccessMessage] = useState(null);
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [stockFilter, setStockFilter] = useState('all');
+
+  // Stock adjustment modal state
+  const [adjustModal, setAdjustModal] = useState({ open: false, component: null });
+  const [adjustForm, setAdjustForm] = useState({ quantity: '', reason: 'STOCK_COUNT', note: '' });
+  const [adjusting, setAdjusting] = useState(false);
+  const [adjustError, setAdjustError] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -53,6 +67,35 @@ export default function ComponentsPage() {
     load();
   }, []);
 
+  // Filter and search
+  const filteredComponents = useMemo(() => {
+    return components.filter((c) => {
+      // Stock filter
+      if (stockFilter === 'low' && (c.total_available === null || c.total_available >= 10)) return false;
+      if (stockFilter === 'out' && (c.total_available === null || c.total_available > 0)) return false;
+      if (stockFilter === 'in' && (c.total_available === null || c.total_available <= 0)) return false;
+
+      // Search filter
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        return (
+          c.internal_sku?.toLowerCase().includes(query) ||
+          c.description?.toLowerCase().includes(query) ||
+          c.brand?.toLowerCase().includes(query)
+        );
+      }
+
+      return true;
+    });
+  }, [components, searchQuery, stockFilter]);
+
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setStockFilter('all');
+  };
+
+  const hasFilters = searchQuery || stockFilter !== 'all';
+
   function handleChange(field) {
     return (value) => setForm((prev) => ({ ...prev, [field]: value }));
   }
@@ -70,11 +113,55 @@ export default function ComponentsPage() {
         cost_ex_vat_pence: costPence,
       });
       setForm({ internal_sku: '', description: '', brand: '', cost_ex_vat_pence: '' });
+      setSuccessMessage(`Component ${form.internal_sku} created successfully`);
       await load();
     } catch (err) {
       setCreateError(err.message || 'Failed to create component');
     } finally {
       setCreating(false);
+    }
+  }
+
+  function openAdjustModal(component) {
+    setAdjustModal({ open: true, component });
+    setAdjustForm({ quantity: '', reason: 'STOCK_COUNT', note: '' });
+    setAdjustError(null);
+  }
+
+  function closeAdjustModal() {
+    setAdjustModal({ open: false, component: null });
+    setAdjustForm({ quantity: '', reason: 'STOCK_COUNT', note: '' });
+    setAdjustError(null);
+  }
+
+  async function handleAdjustStock() {
+    if (!adjustModal.component) return;
+
+    const qty = parseInt(adjustForm.quantity);
+    if (isNaN(qty) || qty === 0) {
+      setAdjustError('Please enter a valid quantity');
+      return;
+    }
+
+    setAdjusting(true);
+    setAdjustError(null);
+    try {
+      // adjustStock(componentId, location, delta, reason, note, idempotencyKey)
+      await adjustStock(
+        adjustModal.component.id,
+        'DEFAULT', // Default warehouse location
+        qty,
+        adjustForm.reason,
+        adjustForm.note || undefined
+      );
+      setSuccessMessage(`Stock adjusted for ${adjustModal.component.internal_sku}`);
+      closeAdjustModal();
+      await load();
+    } catch (err) {
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Failed to adjust stock');
+      setAdjustError(errorMsg);
+    } finally {
+      setAdjusting(false);
     }
   }
 
@@ -91,20 +178,27 @@ export default function ComponentsPage() {
     return <Badge tone="success">{available} available</Badge>;
   }
 
-  const rows = components.map((c) => [
+  const rows = filteredComponents.map((c) => [
     <Text variant="bodyMd" fontWeight="semibold" key={c.id}>
       {c.internal_sku}
     </Text>,
     c.description || '-',
     c.brand || '-',
     formatPrice(c.cost_ex_vat_pence),
-    getStockBadge(c.total_available),
+    <InlineStack gap="200" key={`stock-${c.id}`} blockAlign="center">
+      {getStockBadge(c.total_available)}
+      <Button size="slim" onClick={() => openAdjustModal(c)}>Adjust</Button>
+    </InlineStack>,
   ]);
+
+  // Calculate stats
+  const lowStockCount = components.filter((c) => c.total_available !== null && c.total_available > 0 && c.total_available < 10).length;
+  const outOfStockCount = components.filter((c) => c.total_available !== null && c.total_available <= 0).length;
 
   return (
     <Page
       title="Components"
-      subtitle="Manage individual parts and components"
+      subtitle={`${components.length} components${lowStockCount > 0 ? ` · ${lowStockCount} low stock` : ''}${outOfStockCount > 0 ? ` · ${outOfStockCount} out of stock` : ''}`}
       secondaryActions={[{ content: 'Refresh', onAction: load }]}
     >
       <Layout>
@@ -164,11 +258,51 @@ export default function ComponentsPage() {
 
         <Layout.Section>
           <BlockStack gap="400">
+            {/* Success message */}
+            {successMessage && (
+              <Banner tone="success" onDismiss={() => setSuccessMessage(null)}>
+                <p>{successMessage}</p>
+              </Banner>
+            )}
+
             {error && (
               <Banner tone="critical" onDismiss={() => setError(null)}>
                 <p>{error}</p>
               </Banner>
             )}
+
+            {/* Search and Filter */}
+            <Card>
+              <InlineStack gap="400" wrap={false}>
+                <div style={{ flex: 1 }}>
+                  <TextField
+                    label="Search"
+                    labelHidden
+                    placeholder="Search by SKU, description, brand..."
+                    value={searchQuery}
+                    onChange={setSearchQuery}
+                    clearButton
+                    onClearButtonClick={() => setSearchQuery('')}
+                    autoComplete="off"
+                  />
+                </div>
+                <Select
+                  label="Stock"
+                  labelHidden
+                  options={[
+                    { label: 'All stock levels', value: 'all' },
+                    { label: 'In stock', value: 'in' },
+                    { label: 'Low stock', value: 'low' },
+                    { label: 'Out of stock', value: 'out' },
+                  ]}
+                  value={stockFilter}
+                  onChange={setStockFilter}
+                />
+                {hasFilters && (
+                  <Button onClick={handleClearFilters}>Clear</Button>
+                )}
+              </InlineStack>
+            </Card>
 
             <Card>
               {loading ? (
@@ -184,18 +318,92 @@ export default function ComponentsPage() {
                     </Text>
                   </BlockStack>
                 </div>
+              ) : filteredComponents.length === 0 ? (
+                <div style={{ padding: '40px', textAlign: 'center' }}>
+                  <BlockStack gap="200" inlineAlign="center">
+                    <Text variant="headingMd">No matching components</Text>
+                    <Text tone="subdued">
+                      Try adjusting your search or filter criteria.
+                    </Text>
+                    <Button onClick={handleClearFilters}>Clear filters</Button>
+                  </BlockStack>
+                </div>
               ) : (
                 <DataTable
                   columnContentTypes={['text', 'text', 'text', 'numeric', 'text']}
                   headings={['SKU', 'Description', 'Brand', 'Cost', 'Stock']}
                   rows={rows}
-                  footerContent={`${components.length} component(s)`}
+                  footerContent={`${filteredComponents.length} of ${components.length} component(s)`}
                 />
               )}
             </Card>
           </BlockStack>
         </Layout.Section>
       </Layout>
+
+      {/* Stock Adjustment Modal */}
+      {adjustModal.open && (
+        <Modal
+          open={adjustModal.open}
+          onClose={closeAdjustModal}
+          title={`Adjust Stock: ${adjustModal.component?.internal_sku}`}
+          primaryAction={{
+            content: 'Adjust Stock',
+            onAction: handleAdjustStock,
+            loading: adjusting,
+          }}
+          secondaryActions={[{
+            content: 'Cancel',
+            onAction: closeAdjustModal,
+          }]}
+        >
+          <Modal.Section>
+            <BlockStack gap="400">
+              {adjustError && (
+                <Banner tone="critical" onDismiss={() => setAdjustError(null)}>
+                  <p>{adjustError}</p>
+                </Banner>
+              )}
+
+              <Text>
+                Current stock: <strong>{adjustModal.component?.total_available ?? 'Unknown'}</strong>
+              </Text>
+
+              <FormLayout>
+                <TextField
+                  label="Quantity Change"
+                  type="number"
+                  value={adjustForm.quantity}
+                  onChange={(value) => setAdjustForm((prev) => ({ ...prev, quantity: value }))}
+                  helpText="Use positive numbers to add stock, negative to remove"
+                  placeholder="e.g., 10 or -5"
+                  autoComplete="off"
+                />
+                <Select
+                  label="Reason"
+                  options={[
+                    { label: 'Stock Count', value: 'STOCK_COUNT' },
+                    { label: 'Purchase', value: 'PURCHASE' },
+                    { label: 'Damage/Loss', value: 'DAMAGE' },
+                    { label: 'Return to Supplier', value: 'SUPPLIER_RETURN' },
+                    { label: 'Customer Return', value: 'CUSTOMER_RETURN' },
+                    { label: 'Adjustment', value: 'ADJUSTMENT' },
+                  ]}
+                  value={adjustForm.reason}
+                  onChange={(value) => setAdjustForm((prev) => ({ ...prev, reason: value }))}
+                />
+                <TextField
+                  label="Note (optional)"
+                  value={adjustForm.note}
+                  onChange={(value) => setAdjustForm((prev) => ({ ...prev, note: value }))}
+                  placeholder="Add a note about this adjustment"
+                  multiline={2}
+                />
+              </FormLayout>
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
+      )}
     </Page>
   );
 }
