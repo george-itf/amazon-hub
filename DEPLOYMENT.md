@@ -143,9 +143,39 @@ NODE_ENV=production npm start
 
 ## Production Deployment
 
-### Railway Deployment
+### Architecture: Railway + Supabase + Vercel
 
-Railway auto-detects the `Dockerfile` at the repository root. No Railpack custom commands needed.
+This application is designed for a three-tier deployment:
+- **Backend API**: Railway (Node.js/Express)
+- **Database**: Supabase (PostgreSQL)
+- **Frontend**: Vercel (React/Vite static hosting)
+
+**CRITICAL: Cross-Origin Authentication**
+
+Since Railway and Vercel are different domains, you have two options:
+
+**Option A: Custom Domain (Recommended)**
+Use a custom domain so both services share a parent domain:
+- API: `api.yourdomain.com` (Railway)
+- Frontend: `app.yourdomain.com` (Vercel)
+
+This allows cookies to work across subdomains.
+
+**Option B: Same Domain via Vercel Rewrites**
+Configure Vercel to proxy API requests to Railway:
+```json
+// vercel.json
+{
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://your-railway-app.railway.app/:path*" }
+  ]
+}
+```
+Then set `VITE_API_BASE=/api` in Vercel.
+
+### Railway Deployment (Backend)
+
+Railway auto-detects the `Dockerfile` at the repository root.
 
 **Setup steps:**
 
@@ -153,22 +183,45 @@ Railway auto-detects the `Dockerfile` at the repository root. No Railpack custom
 2. Connect your GitHub repository
 3. Railway will automatically detect the root Dockerfile and build
 4. Configure environment variables in Railway dashboard:
-   - `SUPABASE_URL` - Supabase project URL
-   - `SUPABASE_ANON_KEY` - Supabase anon/public key
-   - `SUPABASE_SERVICE_KEY` - Supabase service role key
-   - `SESSION_SECRET` - Random 32+ byte string for sessions
-   - `SHOPIFY_STORE_URL` - Your Shopify store domain
-   - `SHOPIFY_ACCESS_TOKEN` - Shopify Admin API token
-   - `ALLOWED_ORIGINS` - Your frontend domain(s) for CORS
-   - `KEEPA_API_KEY` - (optional) Keepa API key
-5. Railway automatically sets `PORT` - the server reads this at runtime
-6. Deploy
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `SUPABASE_URL` | ✅ | Your Supabase project URL (e.g., `https://xxx.supabase.co`) |
+| `SUPABASE_ANON_KEY` | ✅ | Supabase anon/public key |
+| `SUPABASE_SERVICE_KEY` | ✅ | Supabase service role key |
+| `SESSION_SECRET` | ✅ | Random 32+ byte string (generate with `openssl rand -base64 32`) |
+| `ALLOWED_ORIGINS` | ✅ | Comma-separated list of allowed origins (e.g., `https://your-app.vercel.app,https://app.yourdomain.com`) |
+| `SHOPIFY_STORE_URL` | ✅ | Your Shopify store domain (e.g., `your-store.myshopify.com`) |
+| `SHOPIFY_ACCESS_TOKEN` | ✅ | Shopify Admin API token with `read_orders` scope |
+| `KEEPA_API_KEY` | ❌ | Keepa API key for market intelligence |
+| `NODE_ENV` | Auto | Set to `production` automatically by Railway |
+| `PORT` | Auto | Set automatically by Railway |
+
+5. Deploy
 
 **Notes:**
 - The server listens on `process.env.PORT` (Railway provides this automatically)
 - Default port is 3001 if PORT is not set
 - Health check endpoint: `GET /health`
 - The Docker build uses `npm ci` which requires `server/package-lock.json` (committed to repo)
+- Container runs as non-root user `node` for security
+
+### Vercel Deployment (Frontend)
+
+1. Connect the repository to Vercel
+2. Set the root directory to `client`
+3. Configure environment variables:
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VITE_API_BASE` | ✅ | Full URL to Railway backend (e.g., `https://your-app.railway.app`) or `/api` if using rewrites |
+
+4. Deploy
+
+**Build settings:**
+- Framework: Vite
+- Build Command: `npm run build`
+- Output Directory: `dist`
 
 ### Docker Deployment (Manual)
 
