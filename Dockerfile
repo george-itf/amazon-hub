@@ -1,5 +1,6 @@
 FROM node:20-alpine
 
+# Railway deployment - backend only
 WORKDIR /app
 
 # Copy server package files (both package.json and package-lock.json required for npm ci)
