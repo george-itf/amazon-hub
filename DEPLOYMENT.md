@@ -143,34 +143,55 @@ NODE_ENV=production npm start
 
 ## Production Deployment
 
-### Docker Deployment
+### Railway Deployment
 
-```dockerfile
-# Dockerfile
-FROM node:18-alpine
+Railway auto-detects the `Dockerfile` at the repository root. No custom build commands needed.
 
-WORKDIR /app
+**Setup steps:**
 
-# Copy server
-COPY server/package*.json ./server/
-RUN cd server && npm ci --production
+1. Create a new project in Railway
+2. Connect your GitHub repository
+3. Railway will automatically detect the Dockerfile and build
+4. Configure environment variables in Railway dashboard:
+   - `SUPABASE_URL`
+   - `SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_KEY`
+   - `SESSION_SECRET`
+   - `SHOPIFY_STORE_URL`
+   - `SHOPIFY_ACCESS_TOKEN`
+   - `ALLOWED_ORIGINS` (your frontend domain)
+   - `KEEPA_API_KEY` (optional)
+5. Railway automatically sets `PORT` - the server reads this at runtime
+6. Deploy
 
-# Copy client and build
-COPY client/package*.json ./client/
-RUN cd client && npm ci
-COPY client ./client
-RUN cd client && npm run build
+**Notes:**
+- The server listens on `process.env.PORT` (Railway provides this)
+- Default port is 3001 if PORT is not set
+- Health check endpoint: `GET /health`
 
-# Copy server source
-COPY server ./server
+### Docker Deployment (Manual)
 
-# Copy built client to server public folder
-RUN cp -r client/dist server/public
+A `Dockerfile` is provided at the repository root for the backend service:
 
-WORKDIR /app/server
-EXPOSE 3001
-CMD ["node", "index.js"]
+```bash
+# Build the image
+docker build -t amazon-hub-brain .
+
+# Run locally
+docker run -p 3000:3000 \
+  -e PORT=3000 \
+  -e NODE_ENV=production \
+  -e SUPABASE_URL=... \
+  -e SUPABASE_ANON_KEY=... \
+  -e SESSION_SECRET=... \
+  amazon-hub-brain
 ```
+
+The Dockerfile:
+- Uses `node:20-alpine` base image
+- Installs only production dependencies
+- Runs the server via `npm start`
+- Reads `PORT` from environment at runtime
 
 ### Environment-Specific Configs
 
