@@ -79,6 +79,11 @@ app.use((req, res, next) => {
   next();
 });
 
+// Ultra-simple ping endpoint for debugging (bypasses all helpers)
+app.get('/ping', (req, res) => {
+  res.status(200).json({ pong: true, time: Date.now() });
+});
+
 // Health check endpoint (no auth required)
 app.get('/health', (req, res) => {
   sendSuccess(res, {
