@@ -28,35 +28,70 @@ body {
 
 /* Darken the navigation menu to match the Invicta admin aesthetic */
 .Polaris-Navigation {
-  background-color: #202020;
+  background-color: #202020 !important;
+}
+
+.Polaris-Navigation__PrimaryNavigation {
+  background-color: #202020 !important;
 }
 
 .Polaris-Navigation__Item {
   color: #ffffff !important;
+  background-color: transparent !important;
 }
 
-.Polaris-Navigation__Item:hover {
+.Polaris-Navigation__Item:hover,
+.Polaris-Navigation__Item:focus,
+.Polaris-Navigation__Item:active {
   background-color: #383838 !important;
   color: #ffffff !important;
 }
 
-.Polaris-Navigation__Item--selected {
+/* Fix all inner wrappers on hover */
+.Polaris-Navigation__Item:hover *,
+.Polaris-Navigation__Item:focus *,
+.Polaris-Navigation__Item:active * {
+  color: #ffffff !important;
+  background-color: transparent !important;
+}
+
+.Polaris-Navigation__ItemWrapper,
+.Polaris-Navigation__ItemInnerWrapper {
+  background-color: transparent !important;
+}
+
+.Polaris-Navigation__ItemWrapper:hover,
+.Polaris-Navigation__ItemInnerWrapper:hover {
+  background-color: transparent !important;
+}
+
+.Polaris-Navigation__Item--selected,
+.Polaris-Navigation__Item--selected:hover,
+.Polaris-Navigation__Item--selected:focus {
   background-color: var(--p-interactive-critical) !important;
   color: #ffffff !important;
 }
 
 .Polaris-Navigation__Item--selected:hover {
   background-color: var(--p-interactive-critical-hovered) !important;
-  color: #ffffff !important;
 }
 
-/* Fix text color in navigation */
-.Polaris-Navigation__Text {
+/* Fix text and icon colors in navigation */
+.Polaris-Navigation__Text,
+.Polaris-Navigation__Icon,
+.Polaris-Navigation__Item svg {
   color: inherit !important;
+  fill: currentColor !important;
+}
+
+/* Section headers in navigation */
+.Polaris-Navigation__SectionHeading {
+  color: #999999 !important;
 }
 
 .Polaris-Frame__Navigation {
   border-right: none;
+  background-color: #202020 !important;
 }
 
 /* Prevent white flash during navigation */
