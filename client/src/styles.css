@@ -1,5 +1,7 @@
+@import '@shopify/polaris/build/esm/styles.css';
+
 /*
- * Global styles to align the Hub UI with Invicta’s branding.  These
+ * Global styles to align the Hub UI with Invicta's branding.  These
  * overrides adjust the background colours, typography and accent
  * colours used by Shopify Polaris.  Polaris uses CSS variables
  * internally; overriding them at the :root level allows you to
