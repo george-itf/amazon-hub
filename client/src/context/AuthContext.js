@@ -1,68 +1,136 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { loginWithGoogleToken } from '../utils/api.js';
+import * as api from '../utils/api.js';
 
 // Create a React context for authentication
 const AuthContext = createContext(null);
 
 /**
- * Provides authentication state and actions to children.  It stores
- * the current user and JWT in localStorage so that sessions survive
- * page reloads.  The `login` function exchanges a Google id_token
- * for a backend JWT.
+ * Provides authentication state and actions to children.
+ * Uses session-based authentication with cookies.
  */
 export function AuthProvider({ children }) {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
-  const [token, setToken] = useState(null);
-  // Load stored credentials on mount
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  // Check session on mount
   useEffect(() => {
-    const stored = localStorage.getItem('auth');
-    if (stored) {
-      try {
-        const { user: u, token: t } = JSON.parse(stored);
-        setUser(u);
-        setToken(t);
-      } catch (err) {
-        console.error('Failed to parse stored auth');
+    checkSession();
+  }, []);
+
+  /**
+   * Check if there's an active session
+   */
+  const checkSession = useCallback(async () => {
+    try {
+      setLoading(true);
+      const userData = await api.getCurrentUser();
+      setUser(userData);
+      setError(null);
+    } catch (err) {
+      // Session not valid or expired
+      setUser(null);
+      if (err.status !== 401) {
+        console.error('Session check error:', err);
       }
+    } finally {
+      setLoading(false);
     }
   }, []);
-  // Persist credentials whenever they change
-  useEffect(() => {
-    if (user && token) {
-      localStorage.setItem('auth', JSON.stringify({ user, token }));
-    } else {
-      localStorage.removeItem('auth');
+
+  /**
+   * Log in with email and password
+   * @param {string} email
+   * @param {string} password
+   */
+  async function login(email, password) {
+    try {
+      setError(null);
+      const result = await api.login(email, password);
+      setUser(result.user);
+      navigate('/');
+      return result;
+    } catch (err) {
+      setError(err.message);
+      throw err;
     }
-  }, [user, token]);
-
-  /**
-   * Performs login by sending a Google id_token to the backend.  On
-   * success the backend returns a JWT and user profile which are
-   * stored in state and localStorage.  If login fails an error is
-   * thrown.
-   *
-   * @param {string} idToken
-   */
-  async function login(idToken) {
-    const { user: u, token: t } = await loginWithGoogleToken(idToken);
-    setUser(u);
-    setToken(t);
-    navigate('/');
   }
 
   /**
-   * Clears the current session and navigates to the login page.
+   * Register a new user
+   * @param {string} email
+   * @param {string} password
+   * @param {string} name
    */
-  function logout() {
-    setUser(null);
-    setToken(null);
-    navigate('/login');
+  async function register(email, password, name) {
+    try {
+      setError(null);
+      const result = await api.register(email, password, name);
+      setUser(result.user);
+      navigate('/');
+      return result;
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
   }
+
+  /**
+   * Log out and clear session
+   */
+  async function logout() {
+    try {
+      await api.logout();
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      setUser(null);
+      navigate('/login');
+    }
+  }
+
+  /**
+   * Change user password
+   * @param {string} currentPassword
+   * @param {string} newPassword
+   */
+  async function changePassword(currentPassword, newPassword) {
+    try {
+      setError(null);
+      await api.changePassword(currentPassword, newPassword);
+    } catch (err) {
+      setError(err.message);
+      throw err;
+    }
+  }
+
+  /**
+   * Check if user has admin role
+   */
+  const isAdmin = user?.role === 'ADMIN';
+
+  /**
+   * Check if user has staff role (staff or admin)
+   */
+  const isStaff = user?.role === 'ADMIN' || user?.role === 'STAFF';
+
+  const value = {
+    user,
+    loading,
+    error,
+    isAdmin,
+    isStaff,
+    login,
+    logout,
+    register,
+    changePassword,
+    checkSession,
+  };
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,36 +1,100 @@
 import React from 'react';
-import { Navigation } from '@shopify/polaris';
+import { Navigation, Text } from '@shopify/polaris';
 import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  HomeIcon,
+  OrderIcon,
+  ListBulletedIcon,
+  InventoryIcon,
+  ProductIcon,
+  ListIcon,
+  QuestionCircleIcon,
+  ArrowDownIcon,
+  ChartVerticalFilledIcon,
+  ExchangeIcon,
+  ClockIcon,
+  ExitIcon,
+} from '@shopify/polaris-icons';
+import { useAuth } from '../context/AuthContext.js';
 
 /**
- * Renders the persistent left‑hand navigation used throughout the Hub.
- * Items correspond to the top‑level pages defined in the binder.  The
- * active route is highlighted based on the current URL.
+ * Renders the persistent left-hand navigation used throughout the Hub.
+ * Items correspond to the top-level pages. The active route is highlighted
+ * based on the current URL.
  */
 export default function Nav() {
   const location = useLocation();
   const navigate = useNavigate();
-  const items = [
-    { label: 'Dashboard', url: '/' },
-    { label: 'Orders', url: '/orders' },
-    { label: 'Picklists', url: '/picklists' },
-    { label: 'Components', url: '/components' },
-    { label: 'Bundles', url: '/bundles' },
-    { label: 'Listings', url: '/listings' },
-    { label: 'Review', url: '/review' },
-    { label: 'Replenishment', url: '/replenishment' },
-    { label: 'Profit', url: '/profit' }
+  const { user, logout, isAdmin } = useAuth();
+
+  const operationsItems = [
+    { label: 'Dashboard', url: '/', icon: HomeIcon },
+    { label: 'Orders', url: '/orders', icon: OrderIcon },
+    { label: 'Pick Batches', url: '/picklists', icon: ListBulletedIcon },
+    { label: 'Review Queue', url: '/review', icon: QuestionCircleIcon },
   ];
+
+  const inventoryItems = [
+    { label: 'Components', url: '/components', icon: InventoryIcon },
+    { label: 'BOMs / Bundles', url: '/bundles', icon: ProductIcon },
+    { label: 'Listings', url: '/listings', icon: ListIcon },
+    { label: 'Returns', url: '/returns', icon: ExchangeIcon },
+  ];
+
+  const analyticsItems = [
+    { label: 'Replenishment', url: '/replenishment', icon: ArrowDownIcon },
+    { label: 'Profitability', url: '/profit', icon: ChartVerticalFilledIcon },
+    { label: 'Audit Log', url: '/audit', icon: ClockIcon },
+  ];
+
   return (
-    <Navigation location={location.pathname} onSelect={({ url }) => navigate(url)}>
-      {items.map((item) => (
-        <Navigation.Item
-          key={item.url}
-          label={item.label}
-          url={item.url}
-          selected={location.pathname === item.url}
-        />
-      ))}
+    <Navigation location={location.pathname}>
+      <Navigation.Section
+        title="Operations"
+        items={operationsItems.map(item => ({
+          ...item,
+          selected: location.pathname === item.url,
+          onClick: () => navigate(item.url),
+        }))}
+      />
+
+      <Navigation.Section
+        title="Inventory"
+        items={inventoryItems.map(item => ({
+          ...item,
+          selected: location.pathname === item.url,
+          onClick: () => navigate(item.url),
+        }))}
+        separator
+      />
+
+      <Navigation.Section
+        title="Analytics"
+        items={analyticsItems.map(item => ({
+          ...item,
+          selected: location.pathname === item.url,
+          onClick: () => navigate(item.url),
+        }))}
+        separator
+      />
+
+      <Navigation.Section
+        title="Account"
+        items={[
+          {
+            label: user?.name || user?.email || 'User',
+            icon: ExitIcon,
+            onClick: logout,
+            secondaryAction: {
+              icon: ExitIcon,
+              accessibilityLabel: 'Sign out',
+              onClick: logout,
+            },
+          },
+        ]}
+        separator
+        fill
+      />
     </Navigation>
   );
 }
