@@ -330,6 +330,11 @@ export async function adjustStock(componentId, location, delta, reason, note, id
   });
 }
 
+export async function getStockMovements(componentId, params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/stock/${componentId}/movements${query ? `?${query}` : ''}`);
+}
+
 // ============ Returns API ============
 
 export async function getReturns(params = {}) {
