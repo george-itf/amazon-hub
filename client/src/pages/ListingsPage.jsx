@@ -16,6 +16,8 @@ import {
   InlineStack,
   Modal,
   Divider,
+  ProgressBar,
+  Tabs,
 } from '@shopify/polaris';
 import { getListings, createListing, getBoms } from '../utils/api.jsx';
 
@@ -38,9 +40,14 @@ export default function ListingsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [bomFilter, setBomFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('created');
 
   // Detail modal
   const [selectedListing, setSelectedListing] = useState(null);
+
+  // Tabs
+  const [selectedTab, setSelectedTab] = useState(0);
 
   async function load() {
     setLoading(true);
@@ -61,9 +68,34 @@ export default function ListingsPage() {
     load();
   }, []);
 
+  // Calculate stats
+  const stats = useMemo(() => {
+    const total = listings.length;
+    const active = listings.filter((l) => l.is_active).length;
+    const withBom = listings.filter((l) => l.bom_id).length;
+    const withoutBom = listings.filter((l) => !l.bom_id).length;
+
+    const bySource = {};
+    listings.forEach((l) => {
+      const source = l.resolution_source || 'Unknown';
+      bySource[source] = (bySource[source] || 0) + 1;
+    });
+
+    const byBom = {};
+    listings.forEach((l) => {
+      if (l.bom_id) {
+        const bom = boms.find((b) => b.id === l.bom_id);
+        const bomName = bom?.bundle_sku || 'Unknown';
+        byBom[bomName] = (byBom[bomName] || 0) + 1;
+      }
+    });
+
+    return { total, active, withBom, withoutBom, bySource, byBom };
+  }, [listings, boms]);
+
   // Filter listings
   const filteredListings = useMemo(() => {
-    return listings.filter((listing) => {
+    let result = listings.filter((listing) => {
       // Status filter
       if (statusFilter === 'active' && !listing.is_active) return false;
       if (statusFilter === 'inactive' && listing.is_active) return false;
@@ -71,6 +103,9 @@ export default function ListingsPage() {
       // BOM filter
       if (bomFilter === 'with_bom' && !listing.bom_id) return false;
       if (bomFilter === 'without_bom' && listing.bom_id) return false;
+
+      // Source filter
+      if (sourceFilter !== 'all' && listing.resolution_source !== sourceFilter) return false;
 
       // Search filter
       if (searchQuery) {
@@ -85,15 +120,33 @@ export default function ListingsPage() {
 
       return true;
     });
-  }, [listings, statusFilter, bomFilter, searchQuery, boms]);
+
+    // Sort
+    result.sort((a, b) => {
+      if (sortBy === 'created') {
+        return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+      }
+      if (sortBy === 'asin') {
+        return (a.asin || '').localeCompare(b.asin || '');
+      }
+      if (sortBy === 'sku') {
+        return (a.sku || '').localeCompare(b.sku || '');
+      }
+      return 0;
+    });
+
+    return result;
+  }, [listings, statusFilter, bomFilter, sourceFilter, searchQuery, boms, sortBy]);
 
   const handleClearFilters = () => {
     setSearchQuery('');
     setStatusFilter('all');
     setBomFilter('all');
+    setSourceFilter('all');
+    setSortBy('created');
   };
 
-  const hasFilters = searchQuery || statusFilter !== 'all' || bomFilter !== 'all';
+  const hasFilters = searchQuery || statusFilter !== 'all' || bomFilter !== 'all' || sourceFilter !== 'all' || sortBy !== 'created';
 
   function handleChange(field) {
     return (value) => setForm((prev) => ({ ...prev, [field]: value }));
@@ -140,8 +193,33 @@ export default function ListingsPage() {
     return boms.find((b) => b.id === bomId);
   }
 
+  // Get source badge
+  function getSourceBadge(source) {
+    const sourceMap = {
+      MANUAL: { tone: 'info', label: 'Manual' },
+      REVIEW: { tone: 'success', label: 'Review' },
+      IMPORT: { tone: 'default', label: 'Import' },
+      API: { tone: 'attention', label: 'API' },
+    };
+    const config = sourceMap[source] || { tone: 'default', label: source || 'Unknown' };
+    return <Badge tone={config.tone}>{config.label}</Badge>;
+  }
+
+  // Get unique sources for filter
+  const uniqueSources = useMemo(() => {
+    const sources = new Set(listings.map((l) => l.resolution_source).filter(Boolean));
+    return Array.from(sources);
+  }, [listings]);
+
   const rows = filteredListings.map((l) => [
-    <Text variant="bodyMd" fontWeight="semibold" key={`asin-${l.id}`}>
+    <Text
+      variant="bodyMd"
+      fontWeight="semibold"
+      key={`asin-${l.id}`}
+      as="button"
+      onClick={() => setSelectedListing(l)}
+      style={{ cursor: 'pointer', textDecoration: 'underline' }}
+    >
       {l.asin || '-'}
     </Text>,
     l.sku || '-',
@@ -153,6 +231,7 @@ export default function ListingsPage() {
         : '-'}
     </Text>,
     getBomName(l.bom_id),
+    getSourceBadge(l.resolution_source),
     l.is_active ? (
       <Badge tone="success">Active</Badge>
     ) : (
@@ -165,84 +244,220 @@ export default function ListingsPage() {
     ...boms.map((b) => ({ label: `${b.bundle_sku} - ${b.description || 'No description'}`, value: b.id })),
   ];
 
-  // Count stats
-  const activeCount = listings.filter((l) => l.is_active).length;
-  const withBomCount = listings.filter((l) => l.bom_id).length;
+  const tabs = [
+    { id: 'listings', content: `Listings (${filteredListings.length})`, accessibilityLabel: 'Listing Rules' },
+    { id: 'stats', content: 'Statistics', accessibilityLabel: 'Statistics' },
+  ];
+
+  const statsContent = (
+    <BlockStack gap="400">
+      {/* Overview Cards */}
+      <Layout>
+        <Layout.Section variant="oneQuarter">
+          <Card>
+            <BlockStack gap="200">
+              <Text variant="bodySm" tone="subdued">Total Rules</Text>
+              <Text variant="headingLg" fontWeight="bold">{stats.total}</Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+        <Layout.Section variant="oneQuarter">
+          <Card>
+            <BlockStack gap="200">
+              <Text variant="bodySm" tone="subdued">Active</Text>
+              <Text variant="headingLg" fontWeight="bold" tone="success">{stats.active}</Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+        <Layout.Section variant="oneQuarter">
+          <Card>
+            <BlockStack gap="200">
+              <Text variant="bodySm" tone="subdued">With BOM</Text>
+              <Text variant="headingLg" fontWeight="bold">{stats.withBom}</Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+        <Layout.Section variant="oneQuarter">
+          <Card>
+            <BlockStack gap="200">
+              <Text variant="bodySm" tone="subdued">Missing BOM</Text>
+              <Text variant="headingLg" fontWeight="bold" tone={stats.withoutBom > 0 ? 'warning' : undefined}>
+                {stats.withoutBom}
+              </Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+      </Layout>
+
+      {/* Coverage */}
+      {stats.total > 0 && (
+        <Card>
+          <BlockStack gap="300">
+            <Text variant="headingMd">BOM Coverage</Text>
+            <ProgressBar
+              progress={Math.round((stats.withBom / stats.total) * 100)}
+              tone={stats.withoutBom > 0 ? 'warning' : 'success'}
+            />
+            <Text variant="bodySm" tone="subdued">
+              {Math.round((stats.withBom / stats.total) * 100)}% of listings have BOMs assigned
+            </Text>
+          </BlockStack>
+        </Card>
+      )}
+
+      {/* By Source */}
+      {Object.keys(stats.bySource).length > 0 && (
+        <Card>
+          <BlockStack gap="300">
+            <Text variant="headingMd">By Source</Text>
+            <InlineStack gap="400" wrap>
+              {Object.entries(stats.bySource)
+                .sort((a, b) => b[1] - a[1])
+                .map(([source, count]) => (
+                  <Card key={source}>
+                    <BlockStack gap="100">
+                      {getSourceBadge(source)}
+                      <Text variant="headingMd">{count}</Text>
+                    </BlockStack>
+                  </Card>
+                ))}
+            </InlineStack>
+          </BlockStack>
+        </Card>
+      )}
+
+      {/* Top BOMs */}
+      {Object.keys(stats.byBom).length > 0 && (
+        <Card>
+          <BlockStack gap="300">
+            <Text variant="headingMd">Top BOMs by Listings</Text>
+            <DataTable
+              columnContentTypes={['text', 'numeric']}
+              headings={['BOM', 'Listings']}
+              rows={Object.entries(stats.byBom)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 10)
+                .map(([bom, count]) => [
+                  <Text variant="bodyMd" fontWeight="semibold" key={bom}>{bom}</Text>,
+                  count,
+                ])}
+            />
+          </BlockStack>
+        </Card>
+      )}
+    </BlockStack>
+  );
 
   return (
     <Page
       title="Listings Memory"
-      subtitle={`${listings.length} rules · ${activeCount} active · ${withBomCount} with BOM`}
+      subtitle={`${stats.total} rules · ${stats.active} active · ${stats.withBom} with BOM`}
       secondaryActions={[{ content: 'Refresh', onAction: load }]}
     >
       <Layout>
         <Layout.Section variant="oneThird">
-          <Card>
-            <BlockStack gap="400">
-              <Text variant="headingMd">Create Listing Rule</Text>
+          <BlockStack gap="400">
+            {/* Quick Stats */}
+            <Card>
+              <BlockStack gap="300">
+                <Text variant="headingMd">Quick Stats</Text>
+                <InlineStack gap="400">
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Active</Text>
+                    <Text variant="headingMd" tone="success">{stats.active}</Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">With BOM</Text>
+                    <Text variant="headingMd">{stats.withBom}</Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">No BOM</Text>
+                    <Text variant="headingMd" tone={stats.withoutBom > 0 ? 'warning' : undefined}>
+                      {stats.withoutBom}
+                    </Text>
+                  </BlockStack>
+                </InlineStack>
+                {stats.total > 0 && (
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Coverage</Text>
+                    <ProgressBar
+                      progress={Math.round((stats.withBom / stats.total) * 100)}
+                      size="small"
+                      tone={stats.withoutBom > 0 ? 'warning' : 'success'}
+                    />
+                  </BlockStack>
+                )}
+              </BlockStack>
+            </Card>
 
-              {createError && (
-                <Banner tone="critical" onDismiss={() => setCreateError(null)}>
-                  <p>{createError}</p>
+            {/* Create Form */}
+            <Card>
+              <BlockStack gap="400">
+                <Text variant="headingMd">Create Listing Rule</Text>
+
+                {createError && (
+                  <Banner tone="critical" onDismiss={() => setCreateError(null)}>
+                    <p>{createError}</p>
+                  </Banner>
+                )}
+
+                {successMessage && (
+                  <Banner tone="success" onDismiss={() => setSuccessMessage(null)}>
+                    <p>{successMessage}</p>
+                  </Banner>
+                )}
+
+                <Banner tone="info">
+                  <p>
+                    Create a mapping from an ASIN, SKU, or title to a BOM. When orders come in with
+                    matching identifiers, they'll be automatically resolved.
+                  </p>
                 </Banner>
-              )}
 
-              {successMessage && (
-                <Banner tone="success" onDismiss={() => setSuccessMessage(null)}>
-                  <p>{successMessage}</p>
-                </Banner>
-              )}
-
-              <Banner tone="info">
-                <p>
-                  Create a mapping from an ASIN, SKU, or title to a BOM. When orders come in with
-                  matching identifiers, they'll be automatically resolved.
-                </p>
-              </Banner>
-
-              <FormLayout>
-                <TextField
-                  label="ASIN"
-                  value={form.asin}
-                  onChange={handleChange('asin')}
-                  placeholder="e.g., B08N5WRWNW"
-                  helpText="Amazon Standard Identification Number"
-                  autoComplete="off"
-                />
-                <TextField
-                  label="SKU"
-                  value={form.sku}
-                  onChange={handleChange('sku')}
-                  placeholder="e.g., INV-TOOL-001"
-                  helpText="Stock Keeping Unit"
-                  autoComplete="off"
-                />
-                <TextField
-                  label="Title"
-                  value={form.title}
-                  onChange={handleChange('title')}
-                  placeholder="Product title for fingerprinting"
-                  helpText="Used to create a fingerprint for fuzzy matching"
-                  multiline={2}
-                />
-                <Select
-                  label="BOM"
-                  options={bomOptions}
-                  value={form.bom_id}
-                  onChange={handleChange('bom_id')}
-                  helpText="The product/bundle this listing maps to"
-                />
-                <Button
-                  variant="primary"
-                  onClick={handleCreate}
-                  loading={creating}
-                  disabled={!form.bom_id}
-                >
-                  Create Listing Rule
-                </Button>
-              </FormLayout>
-            </BlockStack>
-          </Card>
+                <FormLayout>
+                  <TextField
+                    label="ASIN"
+                    value={form.asin}
+                    onChange={handleChange('asin')}
+                    placeholder="e.g., B08N5WRWNW"
+                    helpText="Amazon Standard Identification Number"
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="SKU"
+                    value={form.sku}
+                    onChange={handleChange('sku')}
+                    placeholder="e.g., INV-TOOL-001"
+                    helpText="Stock Keeping Unit"
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Title"
+                    value={form.title}
+                    onChange={handleChange('title')}
+                    placeholder="Product title for fingerprinting"
+                    helpText="Used to create a fingerprint for fuzzy matching"
+                    multiline={2}
+                  />
+                  <Select
+                    label="BOM"
+                    options={bomOptions}
+                    value={form.bom_id}
+                    onChange={handleChange('bom_id')}
+                    helpText="The product/bundle this listing maps to"
+                  />
+                  <Button
+                    variant="primary"
+                    onClick={handleCreate}
+                    loading={creating}
+                    disabled={!form.bom_id}
+                  >
+                    Create Listing Rule
+                  </Button>
+                </FormLayout>
+              </BlockStack>
+            </Card>
+          </BlockStack>
         </Layout.Section>
 
         <Layout.Section>
@@ -253,90 +468,117 @@ export default function ListingsPage() {
               </Banner>
             )}
 
-            {/* Search and Filter */}
-            <Card>
-              <BlockStack gap="300">
-                <InlineStack gap="400" wrap={false}>
-                  <div style={{ flex: 1 }}>
-                    <TextField
-                      label="Search"
-                      labelHidden
-                      placeholder="Search by ASIN, SKU, title, BOM..."
-                      value={searchQuery}
-                      onChange={setSearchQuery}
-                      clearButton
-                      onClearButtonClick={() => setSearchQuery('')}
-                      autoComplete="off"
-                    />
-                  </div>
-                  <Select
-                    label="Status"
-                    labelHidden
-                    options={[
-                      { label: 'All statuses', value: 'all' },
-                      { label: 'Active only', value: 'active' },
-                      { label: 'Inactive only', value: 'inactive' },
-                    ]}
-                    value={statusFilter}
-                    onChange={setStatusFilter}
-                  />
-                  <Select
-                    label="BOM"
-                    labelHidden
-                    options={[
-                      { label: 'All', value: 'all' },
-                      { label: 'With BOM', value: 'with_bom' },
-                      { label: 'Without BOM', value: 'without_bom' },
-                    ]}
-                    value={bomFilter}
-                    onChange={setBomFilter}
-                  />
-                  {hasFilters && (
-                    <Button onClick={handleClearFilters}>Clear</Button>
-                  )}
-                </InlineStack>
-                {hasFilters && (
-                  <Text variant="bodySm" tone="subdued">
-                    Showing {filteredListings.length} of {listings.length} rules
-                  </Text>
-                )}
-              </BlockStack>
-            </Card>
+            <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
+              {selectedTab === 0 ? (
+                <BlockStack gap="400">
+                  {/* Search and Filter */}
+                  <Card>
+                    <BlockStack gap="300">
+                      <InlineStack gap="400" wrap={false}>
+                        <div style={{ flex: 1 }}>
+                          <TextField
+                            label="Search"
+                            labelHidden
+                            placeholder="Search by ASIN, SKU, title, BOM..."
+                            value={searchQuery}
+                            onChange={setSearchQuery}
+                            clearButton
+                            onClearButtonClick={() => setSearchQuery('')}
+                            autoComplete="off"
+                          />
+                        </div>
+                        <Select
+                          label="Status"
+                          labelHidden
+                          options={[
+                            { label: 'All statuses', value: 'all' },
+                            { label: 'Active only', value: 'active' },
+                            { label: 'Inactive only', value: 'inactive' },
+                          ]}
+                          value={statusFilter}
+                          onChange={setStatusFilter}
+                        />
+                        <Select
+                          label="BOM"
+                          labelHidden
+                          options={[
+                            { label: 'All', value: 'all' },
+                            { label: 'With BOM', value: 'with_bom' },
+                            { label: 'Without BOM', value: 'without_bom' },
+                          ]}
+                          value={bomFilter}
+                          onChange={setBomFilter}
+                        />
+                        <Select
+                          label="Source"
+                          labelHidden
+                          options={[
+                            { label: 'All sources', value: 'all' },
+                            ...uniqueSources.map((s) => ({ label: s, value: s })),
+                          ]}
+                          value={sourceFilter}
+                          onChange={setSourceFilter}
+                        />
+                        <Select
+                          label="Sort"
+                          labelHidden
+                          options={[
+                            { label: 'Newest first', value: 'created' },
+                            { label: 'ASIN A-Z', value: 'asin' },
+                            { label: 'SKU A-Z', value: 'sku' },
+                          ]}
+                          value={sortBy}
+                          onChange={setSortBy}
+                        />
+                        {hasFilters && (
+                          <Button onClick={handleClearFilters}>Clear</Button>
+                        )}
+                      </InlineStack>
+                      {hasFilters && (
+                        <Text variant="bodySm" tone="subdued">
+                          Showing {filteredListings.length} of {listings.length} rules
+                        </Text>
+                      )}
+                    </BlockStack>
+                  </Card>
 
-            <Card>
-              {loading ? (
-                <div style={{ padding: '40px', textAlign: 'center' }}>
-                  <Spinner accessibilityLabel="Loading listings" size="large" />
-                </div>
-              ) : listings.length === 0 ? (
-                <div style={{ padding: '40px', textAlign: 'center' }}>
-                  <BlockStack gap="200" inlineAlign="center">
-                    <Text variant="headingMd">No listing rules yet</Text>
-                    <Text tone="subdued">
-                      Create listing rules to automatically map incoming orders to BOMs. Rules are
-                      also created when you resolve items in the Review Queue.
-                    </Text>
-                  </BlockStack>
-                </div>
-              ) : filteredListings.length === 0 ? (
-                <div style={{ padding: '40px', textAlign: 'center' }}>
-                  <BlockStack gap="200" inlineAlign="center">
-                    <Text variant="headingMd">No matching listings</Text>
-                    <Text tone="subdued">Try adjusting your search or filter criteria.</Text>
-                    <Button onClick={handleClearFilters}>Clear filters</Button>
-                  </BlockStack>
-                </div>
+                  <Card>
+                    {loading ? (
+                      <div style={{ padding: '40px', textAlign: 'center' }}>
+                        <Spinner accessibilityLabel="Loading listings" size="large" />
+                      </div>
+                    ) : listings.length === 0 ? (
+                      <div style={{ padding: '40px', textAlign: 'center' }}>
+                        <BlockStack gap="200" inlineAlign="center">
+                          <Text variant="headingMd">No listing rules yet</Text>
+                          <Text tone="subdued">
+                            Create listing rules to automatically map incoming orders to BOMs. Rules are
+                            also created when you resolve items in the Review Queue.
+                          </Text>
+                        </BlockStack>
+                      </div>
+                    ) : filteredListings.length === 0 ? (
+                      <div style={{ padding: '40px', textAlign: 'center' }}>
+                        <BlockStack gap="200" inlineAlign="center">
+                          <Text variant="headingMd">No matching listings</Text>
+                          <Text tone="subdued">Try adjusting your search or filter criteria.</Text>
+                          <Button onClick={handleClearFilters}>Clear filters</Button>
+                        </BlockStack>
+                      </div>
+                    ) : (
+                      <DataTable
+                        columnContentTypes={['text', 'text', 'text', 'text', 'text', 'text']}
+                        headings={['ASIN', 'SKU', 'Title Fingerprint', 'BOM', 'Source', 'Status']}
+                        rows={rows}
+                        footerContent={`${filteredListings.length} of ${listings.length} rule(s)`}
+                      />
+                    )}
+                  </Card>
+                </BlockStack>
               ) : (
-                <DataTable
-                  columnContentTypes={['text', 'text', 'text', 'text', 'text']}
-                  headings={['ASIN', 'SKU', 'Title Fingerprint', 'BOM', 'Status']}
-                  rows={rows}
-                  hoverable
-                  onRowClick={(row, index) => setSelectedListing(filteredListings[index])}
-                  footerContent={`${filteredListings.length} of ${listings.length} rule(s)`}
-                />
+                statsContent
               )}
-            </Card>
+            </Tabs>
           </BlockStack>
         </Layout.Section>
       </Layout>
@@ -347,6 +589,7 @@ export default function ListingsPage() {
           open={!!selectedListing}
           onClose={() => setSelectedListing(null)}
           title="Listing Rule Details"
+          large
         >
           <Modal.Section>
             <BlockStack gap="400">
@@ -361,7 +604,21 @@ export default function ListingsPage() {
                 </BlockStack>
                 <BlockStack gap="100">
                   <Text variant="bodySm" tone="subdued">Source</Text>
-                  <Badge>{selectedListing.resolution_source || 'Unknown'}</Badge>
+                  {getSourceBadge(selectedListing.resolution_source)}
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Created</Text>
+                  <Text variant="bodyMd">
+                    {selectedListing.created_at
+                      ? new Date(selectedListing.created_at).toLocaleDateString('en-GB', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                      : '-'}
+                  </Text>
                 </BlockStack>
               </InlineStack>
 
@@ -369,24 +626,28 @@ export default function ListingsPage() {
 
               <BlockStack gap="200">
                 <Text variant="headingSm">Identifiers</Text>
-                <InlineStack gap="400">
-                  <BlockStack gap="100">
-                    <Text variant="bodySm" tone="subdued">ASIN</Text>
-                    <Text variant="bodyMd" fontWeight="semibold">
-                      {selectedListing.asin || '-'}
-                    </Text>
-                  </BlockStack>
-                  <BlockStack gap="100">
-                    <Text variant="bodySm" tone="subdued">SKU</Text>
-                    <Text variant="bodyMd" fontWeight="semibold">
-                      {selectedListing.sku || '-'}
-                    </Text>
-                  </BlockStack>
-                </InlineStack>
+                <Card>
+                  <InlineStack gap="800">
+                    <BlockStack gap="100">
+                      <Text variant="bodySm" tone="subdued">ASIN</Text>
+                      <Text variant="bodyMd" fontWeight="semibold">
+                        {selectedListing.asin || '-'}
+                      </Text>
+                    </BlockStack>
+                    <BlockStack gap="100">
+                      <Text variant="bodySm" tone="subdued">SKU</Text>
+                      <Text variant="bodyMd" fontWeight="semibold">
+                        {selectedListing.sku || '-'}
+                      </Text>
+                    </BlockStack>
+                  </InlineStack>
+                </Card>
                 {selectedListing.title_fingerprint && (
                   <BlockStack gap="100">
                     <Text variant="bodySm" tone="subdued">Title Fingerprint</Text>
-                    <Text variant="bodyMd">{selectedListing.title_fingerprint}</Text>
+                    <Card>
+                      <Text variant="bodyMd">{selectedListing.title_fingerprint}</Text>
+                    </Card>
                   </BlockStack>
                 )}
               </BlockStack>
@@ -399,12 +660,38 @@ export default function ListingsPage() {
                   (() => {
                     const bom = getBom(selectedListing.bom_id);
                     return bom ? (
-                      <BlockStack gap="100">
-                        <Text variant="bodyMd" fontWeight="semibold">{bom.bundle_sku}</Text>
-                        <Text variant="bodySm" tone="subdued">{bom.description || 'No description'}</Text>
-                      </BlockStack>
+                      <Card>
+                        <BlockStack gap="200">
+                          <InlineStack gap="400">
+                            <BlockStack gap="100">
+                              <Text variant="bodySm" tone="subdued">Bundle SKU</Text>
+                              <Text variant="bodyMd" fontWeight="semibold">{bom.bundle_sku}</Text>
+                            </BlockStack>
+                            <BlockStack gap="100">
+                              <Text variant="bodySm" tone="subdued">Status</Text>
+                              {bom.is_active ? (
+                                <Badge tone="success">Active</Badge>
+                              ) : (
+                                <Badge tone="default">Inactive</Badge>
+                              )}
+                            </BlockStack>
+                            <BlockStack gap="100">
+                              <Text variant="bodySm" tone="subdued">Components</Text>
+                              <Text variant="bodyMd">{bom.bom_components?.length || 0}</Text>
+                            </BlockStack>
+                          </InlineStack>
+                          {bom.description && (
+                            <BlockStack gap="100">
+                              <Text variant="bodySm" tone="subdued">Description</Text>
+                              <Text variant="bodyMd">{bom.description}</Text>
+                            </BlockStack>
+                          )}
+                        </BlockStack>
+                      </Card>
                     ) : (
-                      <Text tone="subdued">BOM not found: {selectedListing.bom_id}</Text>
+                      <Banner tone="warning">
+                        <p>BOM not found: {selectedListing.bom_id}</p>
+                      </Banner>
                     );
                   })()
                 ) : (
@@ -414,21 +701,15 @@ export default function ListingsPage() {
                 )}
               </BlockStack>
 
-              <Divider />
-
-              <BlockStack gap="100">
-                <Text variant="bodySm" tone="subdued">Created</Text>
-                <Text variant="bodyMd">
-                  {selectedListing.created_at
-                    ? new Date(selectedListing.created_at).toLocaleString('en-GB')
-                    : '-'}
-                </Text>
-                {selectedListing.created_by_actor_display && (
-                  <Text variant="bodySm" tone="subdued">
-                    by {selectedListing.created_by_actor_display}
-                  </Text>
-                )}
-              </BlockStack>
+              {selectedListing.created_by_actor_display && (
+                <>
+                  <Divider />
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Created By</Text>
+                    <Text variant="bodyMd">{selectedListing.created_by_actor_display}</Text>
+                  </BlockStack>
+                </>
+              )}
             </BlockStack>
           </Modal.Section>
         </Modal>
