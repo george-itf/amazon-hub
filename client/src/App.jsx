@@ -20,6 +20,7 @@ import ProfitPage from './pages/ProfitPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ReturnsPage from './pages/ReturnsPage.jsx';
 import AuditPage from './pages/AuditPage.jsx';
+import AsinAnalyzerPage from './pages/AsinAnalyzerPage.jsx';
 
 /**
  * Layout wrapper that renders the navigation and page content.
@@ -79,6 +80,7 @@ export default function App() {
         <Route path="/profit" element={<ProfitPage />} />
         <Route path="/returns" element={<ReturnsPage />} />
         <Route path="/audit" element={<AuditPage />} />
+        <Route path="/analyzer" element={<AsinAnalyzerPage />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
       <KeyboardShortcutsHelp

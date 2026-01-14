@@ -561,3 +561,16 @@ export async function exportAnalytics(params = {}) {
     clearTimeout(timeoutId);
   }
 }
+
+// ============ Profit Analyzer API ============
+
+export async function analyzeProfitability({ asin, components, sizeTier = 'standard', targetMarginPercent = 10 }) {
+  return request('/profit/analyze', {
+    method: 'POST',
+    body: { asin, components, sizeTier, targetMarginPercent }
+  });
+}
+
+export async function quickProfitCheck(asin) {
+  return request(`/profit/quick/${asin}`);
+}

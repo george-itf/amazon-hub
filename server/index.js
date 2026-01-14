@@ -27,6 +27,7 @@ import auditRoutes from './routes/audit.js';
 import dashboardRoutes from './routes/dashboard.js';
 import brainRoutes from './routes/brain.js';
 import analyticsRoutes from './routes/analytics.js';
+import profitRoutes from './routes/profit.js';
 
 // Create the Express app
 const app = express();
@@ -179,6 +180,9 @@ app.use('/brain', brainRoutes);
 
 // Analytics routes (profitability, trends) - heavy operation rate limited
 app.use('/analytics', heavyOpLimiter, analyticsRoutes);
+
+// Profit analyzer
+app.use('/profit', profitRoutes);
 
 // 404 handler
 app.use((req, res) => {
