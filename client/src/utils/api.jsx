@@ -212,6 +212,13 @@ export async function importOrders() {
   return request('/orders/import', { method: 'POST' });
 }
 
+export async function importHistoricalOrders(options) {
+  return request('/orders/import-historical', {
+    method: 'POST',
+    body: options
+  });
+}
+
 export async function reEvaluateOrders(orderIds) {
   return request('/orders/re-evaluate', {
     method: 'POST',
@@ -470,4 +477,40 @@ export async function suggestBom(title) {
 
 export async function getBrainHealth() {
   return request('/brain/health');
+}
+
+// ============ Analytics API ============
+
+export async function getAnalyticsSummary(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/summary${query ? `?${query}` : ''}`);
+}
+
+export async function getAnalyticsProducts(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/products${query ? `?${query}` : ''}`);
+}
+
+export async function getAnalyticsTrends(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/trends${query ? `?${query}` : ''}`);
+}
+
+export async function getAnalyticsCustomers(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/customers${query ? `?${query}` : ''}`);
+}
+
+export async function exportAnalytics(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const token = getStoredToken();
+  const response = await fetch(`${API_BASE}/analytics/export${query ? `?${query}` : ''}`, {
+    headers: {
+      'Authorization': token ? `Bearer ${token}` : '',
+    },
+  });
+  if (!response.ok) {
+    throw new Error('Export failed');
+  }
+  return response.blob();
 }

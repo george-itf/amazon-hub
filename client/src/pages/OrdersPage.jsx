@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Page,
   Card,
@@ -16,8 +16,11 @@ import {
   Filters,
   ChoiceList,
   Button,
+  Checkbox,
+  ButtonGroup,
 } from '@shopify/polaris';
-import { importOrders, getOrders } from '../utils/api.jsx';
+import { importOrders, getOrders, createPickBatch, importHistoricalOrders } from '../utils/api.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 
 /**
  * Format price from pence to pounds
@@ -64,6 +67,7 @@ function getStatusBadge(status) {
  * OrdersPage - View and manage orders imported from Shopify
  */
 export default function OrdersPage() {
+  const { isAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -75,6 +79,22 @@ export default function OrdersPage() {
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState([]);
+
+  // Selection state for batch creation
+  const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
+  const [creatingBatch, setCreatingBatch] = useState(false);
+  const [batchSuccess, setBatchSuccess] = useState(null);
+
+  // Historical import state
+  const [historicalModal, setHistoricalModal] = useState(false);
+  const [historicalForm, setHistoricalForm] = useState({
+    created_at_min: '',
+    created_at_max: '',
+    status: 'any',
+    fulfillment_status: 'any',
+    maxTotal: '500',
+  });
+  const [historicalImporting, setHistoricalImporting] = useState(false);
 
   async function loadOrders() {
     setLoading(true);
@@ -111,7 +131,39 @@ export default function OrdersPage() {
     }
   }
 
-  // Filter and search orders
+  async function handleHistoricalImport() {
+    if (!historicalForm.created_at_min) {
+      setImportError('Start date is required for historical import');
+      return;
+    }
+
+    setHistoricalImporting(true);
+    setImportResult(null);
+    setImportError(null);
+    try {
+      const result = await importHistoricalOrders({
+        created_at_min: historicalForm.created_at_min,
+        created_at_max: historicalForm.created_at_max || undefined,
+        status: historicalForm.status,
+        fulfillment_status: historicalForm.fulfillment_status,
+        maxTotal: parseInt(historicalForm.maxTotal) || 500,
+      });
+      setImportResult(result);
+      setHistoricalModal(false);
+      await loadOrders();
+    } catch (err) {
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Historical import failed');
+      setImportError(errorMsg);
+    } finally {
+      setHistoricalImporting(false);
+    }
+  }
+
+  function handleHistoricalFormChange(field) {
+    return (value) => setHistoricalForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  // Filter and search orders (defined early for use in selection handlers)
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
       // Status filter
@@ -139,6 +191,57 @@ export default function OrdersPage() {
     });
   }, [orders, statusFilter, searchQuery]);
 
+  // Selection handlers
+  const toggleOrderSelection = useCallback((orderId) => {
+    setSelectedOrderIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(orderId)) {
+        newSet.delete(orderId);
+      } else {
+        newSet.add(orderId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const selectAllFiltered = useCallback(() => {
+    // Only select orders that are READY_TO_PICK
+    const readyOrders = filteredOrders.filter((o) => o.status === 'READY_TO_PICK');
+    setSelectedOrderIds(new Set(readyOrders.map((o) => o.id)));
+  }, [filteredOrders]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedOrderIds(new Set());
+  }, []);
+
+  // Get selected orders that are ready to pick (valid for batch)
+  const selectedReadyOrders = useMemo(() => {
+    return orders.filter((o) => selectedOrderIds.has(o.id) && o.status === 'READY_TO_PICK');
+  }, [orders, selectedOrderIds]);
+
+  // Create pick batch from selected orders
+  async function handleCreateBatch() {
+    if (selectedReadyOrders.length === 0) return;
+
+    setCreatingBatch(true);
+    setBatchSuccess(null);
+    try {
+      const orderIds = selectedReadyOrders.map((o) => o.id);
+      const result = await createPickBatch(orderIds);
+      setBatchSuccess({
+        batchId: result.id || result.batch?.id,
+        orderCount: selectedReadyOrders.length,
+      });
+      setSelectedOrderIds(new Set());
+      await loadOrders(); // Refresh to show updated statuses
+    } catch (err) {
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Failed to create batch');
+      setError(errorMsg);
+    } finally {
+      setCreatingBatch(false);
+    }
+  }
+
   const handleClearFilters = () => {
     setSearchQuery('');
     setStatusFilter([]);
@@ -147,6 +250,23 @@ export default function OrdersPage() {
   const hasFilters = searchQuery || statusFilter.length > 0;
 
   const rows = filteredOrders.map((order) => [
+    // Checkbox for selection (only show for READY_TO_PICK orders)
+    order.status === 'READY_TO_PICK' ? (
+      <div
+        key={`select-${order.id}`}
+        onClick={(e) => e.stopPropagation()}
+        style={{ display: 'flex', alignItems: 'center' }}
+      >
+        <Checkbox
+          label=""
+          labelHidden
+          checked={selectedOrderIds.has(order.id)}
+          onChange={() => toggleOrderSelection(order.id)}
+        />
+      </div>
+    ) : (
+      <span key={`select-${order.id}`} />
+    ),
     // Order Number (clickable)
     <Text variant="bodyMd" fontWeight="semibold" key={order.id}>
       #{order.external_order_id}
@@ -183,6 +303,9 @@ export default function OrdersPage() {
       }}
       secondaryActions={[
         { content: 'Refresh', onAction: loadOrders },
+        ...(isAdmin
+          ? [{ content: 'Import Historical', onAction: () => setHistoricalModal(true) }]
+          : []),
       ]}
     >
       <BlockStack gap="400">
@@ -207,6 +330,19 @@ export default function OrdersPage() {
           >
             <p>
               Imported: {importResult.imported} | Updated: {importResult.updated} | Skipped: {importResult.skipped}
+            </p>
+          </Banner>
+        )}
+
+        {batchSuccess && (
+          <Banner
+            title="Pick Batch Created"
+            tone="success"
+            onDismiss={() => setBatchSuccess(null)}
+          >
+            <p>
+              Created batch with {batchSuccess.orderCount} order(s).
+              Go to Picklists page to view and process.
             </p>
           </Banner>
         )}
@@ -249,6 +385,42 @@ export default function OrdersPage() {
           </BlockStack>
         </Card>
 
+        {/* Selection Toolbar */}
+        {(selectedOrderIds.size > 0 || filteredOrders.some((o) => o.status === 'READY_TO_PICK')) && (
+          <Card>
+            <InlineStack gap="400" align="space-between" blockAlign="center">
+              <InlineStack gap="400" blockAlign="center">
+                <ButtonGroup>
+                  <Button
+                    onClick={selectAllFiltered}
+                    disabled={filteredOrders.filter((o) => o.status === 'READY_TO_PICK').length === 0}
+                  >
+                    Select Ready ({filteredOrders.filter((o) => o.status === 'READY_TO_PICK').length})
+                  </Button>
+                  {selectedOrderIds.size > 0 && (
+                    <Button onClick={clearSelection}>
+                      Clear Selection
+                    </Button>
+                  )}
+                </ButtonGroup>
+                {selectedOrderIds.size > 0 && (
+                  <Text variant="bodySm">
+                    {selectedReadyOrders.length} order{selectedReadyOrders.length !== 1 ? 's' : ''} selected
+                  </Text>
+                )}
+              </InlineStack>
+              <Button
+                variant="primary"
+                onClick={handleCreateBatch}
+                loading={creatingBatch}
+                disabled={selectedReadyOrders.length === 0}
+              >
+                Create Pick Batch ({selectedReadyOrders.length})
+              </Button>
+            </InlineStack>
+          </Card>
+        )}
+
         <Card>
           {loading ? (
             <div style={{ padding: '40px', textAlign: 'center' }}>
@@ -271,8 +443,8 @@ export default function OrdersPage() {
             </div>
           ) : (
             <DataTable
-              columnContentTypes={['text', 'text', 'text', 'text', 'numeric', 'numeric']}
-              headings={['Order #', 'Customer', 'Date', 'Status', 'Items', 'Total']}
+              columnContentTypes={['text', 'text', 'text', 'text', 'text', 'numeric', 'numeric']}
+              headings={['', 'Order #', 'Customer', 'Date', 'Status', 'Items', 'Total']}
               rows={rows}
               hoverable
               onRowClick={(row, index) => setSelectedOrder(filteredOrders[index])}
@@ -369,6 +541,97 @@ export default function OrdersPage() {
           </Modal.Section>
         </Modal>
       )}
+
+      {/* Historical Import Modal */}
+      <Modal
+        open={historicalModal}
+        onClose={() => setHistoricalModal(false)}
+        title="Import Historical Orders"
+        primaryAction={{
+          content: 'Import Orders',
+          onAction: handleHistoricalImport,
+          loading: historicalImporting,
+          disabled: !historicalForm.created_at_min,
+        }}
+        secondaryActions={[
+          { content: 'Cancel', onAction: () => setHistoricalModal(false) },
+        ]}
+      >
+        <Modal.Section>
+          <BlockStack gap="400">
+            <Banner tone="warning">
+              <p>
+                <strong>Admin Only:</strong> This will import historical orders from Shopify based on the
+                date range you specify. Orders already in the system will be skipped. This operation may
+                take a while for large date ranges.
+              </p>
+            </Banner>
+
+            <BlockStack gap="300">
+              <InlineStack gap="400">
+                <div style={{ flex: 1 }}>
+                  <TextField
+                    label="Start Date (required)"
+                    type="date"
+                    value={historicalForm.created_at_min}
+                    onChange={handleHistoricalFormChange('created_at_min')}
+                    helpText="Only import orders created on or after this date"
+                    autoComplete="off"
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <TextField
+                    label="End Date (optional)"
+                    type="date"
+                    value={historicalForm.created_at_max}
+                    onChange={handleHistoricalFormChange('created_at_max')}
+                    helpText="Only import orders created before this date"
+                    autoComplete="off"
+                  />
+                </div>
+              </InlineStack>
+
+              <InlineStack gap="400">
+                <div style={{ flex: 1 }}>
+                  <Select
+                    label="Order Status"
+                    options={[
+                      { label: 'Any status', value: 'any' },
+                      { label: 'Open only', value: 'open' },
+                      { label: 'Closed only', value: 'closed' },
+                      { label: 'Cancelled only', value: 'cancelled' },
+                    ]}
+                    value={historicalForm.status}
+                    onChange={handleHistoricalFormChange('status')}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Select
+                    label="Fulfillment Status"
+                    options={[
+                      { label: 'Any status', value: 'any' },
+                      { label: 'Fulfilled', value: 'fulfilled' },
+                      { label: 'Unfulfilled', value: 'unfulfilled' },
+                      { label: 'Partially fulfilled', value: 'partial' },
+                    ]}
+                    value={historicalForm.fulfillment_status}
+                    onChange={handleHistoricalFormChange('fulfillment_status')}
+                  />
+                </div>
+              </InlineStack>
+
+              <TextField
+                label="Max Orders to Import"
+                type="number"
+                value={historicalForm.maxTotal}
+                onChange={handleHistoricalFormChange('maxTotal')}
+                helpText="Limit the number of orders imported (max 2000)"
+                autoComplete="off"
+              />
+            </BlockStack>
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
     </Page>
   );
 }

@@ -16,8 +16,17 @@ import {
   Select,
   Modal,
   Divider,
+  ProgressBar,
 } from '@shopify/polaris';
 import { getBoms, createBom, getComponents } from '../utils/api.jsx';
+
+/**
+ * Format price from pence to pounds
+ */
+function formatPrice(pence) {
+  if (pence === null || pence === undefined) return '-';
+  return `£${(pence / 100).toFixed(2)}`;
+}
 
 /**
  * BundlesPage lists all bundles/BOMs with their component lines and
@@ -37,7 +46,9 @@ export default function BundlesPage() {
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [availabilityFilter, setAvailabilityFilter] = useState('all');
   const [componentSearch, setComponentSearch] = useState('');
+  const [sortBy, setSortBy] = useState('sku');
 
   // Detail modal
   const [selectedBom, setSelectedBom] = useState(null);
@@ -61,12 +72,61 @@ export default function BundlesPage() {
     load();
   }, []);
 
+  // Calculate availability for a BOM
+  function calculateAvailability(bom) {
+    if (!bom.bom_components?.length) return { available: 0, limited: false, limitingComponent: null };
+
+    let minAvailable = Infinity;
+    let limitingComponent = null;
+
+    for (const bc of bom.bom_components) {
+      const comp = bc.components || components.find((c) => c.id === bc.component_id);
+      if (!comp) continue;
+
+      const available = comp.total_available || 0;
+      const canMake = Math.floor(available / bc.qty_required);
+
+      if (canMake < minAvailable) {
+        minAvailable = canMake;
+        limitingComponent = comp;
+      }
+    }
+
+    return {
+      available: minAvailable === Infinity ? 0 : minAvailable,
+      limited: minAvailable < 10,
+      limitingComponent,
+    };
+  }
+
+  // Calculate total cost for a BOM
+  function calculateCost(bom) {
+    if (!bom.bom_components?.length) return null;
+
+    let totalCost = 0;
+    for (const bc of bom.bom_components) {
+      const comp = bc.components || components.find((c) => c.id === bc.component_id);
+      if (!comp?.cost_ex_vat_pence) continue;
+      totalCost += comp.cost_ex_vat_pence * bc.qty_required;
+    }
+
+    return totalCost || null;
+  }
+
   // Filter BOMs
   const filteredBoms = useMemo(() => {
-    return boms.filter((bom) => {
+    let result = boms.filter((bom) => {
       // Status filter
       if (statusFilter === 'active' && !bom.is_active) return false;
       if (statusFilter === 'inactive' && bom.is_active) return false;
+
+      // Availability filter
+      if (availabilityFilter !== 'all') {
+        const { available } = calculateAvailability(bom);
+        if (availabilityFilter === 'in_stock' && available <= 0) return false;
+        if (availabilityFilter === 'low' && (available <= 0 || available >= 10)) return false;
+        if (availabilityFilter === 'out' && available > 0) return false;
+      }
 
       // Search filter
       if (searchQuery) {
@@ -82,7 +142,28 @@ export default function BundlesPage() {
 
       return true;
     });
-  }, [boms, statusFilter, searchQuery, components]);
+
+    // Sort
+    result.sort((a, b) => {
+      if (sortBy === 'sku') return (a.bundle_sku || '').localeCompare(b.bundle_sku || '');
+      if (sortBy === 'availability') {
+        const availA = calculateAvailability(a).available;
+        const availB = calculateAvailability(b).available;
+        return availA - availB;
+      }
+      if (sortBy === 'cost') {
+        const costA = calculateCost(a) || 0;
+        const costB = calculateCost(b) || 0;
+        return costB - costA;
+      }
+      if (sortBy === 'components') {
+        return (b.bom_components?.length || 0) - (a.bom_components?.length || 0);
+      }
+      return 0;
+    });
+
+    return result;
+  }, [boms, statusFilter, availabilityFilter, searchQuery, components, sortBy]);
 
   // Filter components for the create form
   const filteredComponents = useMemo(() => {
@@ -98,9 +179,11 @@ export default function BundlesPage() {
   const handleClearFilters = () => {
     setSearchQuery('');
     setStatusFilter('all');
+    setAvailabilityFilter('all');
+    setSortBy('sku');
   };
 
-  const hasFilters = searchQuery || statusFilter !== 'all';
+  const hasFilters = searchQuery || statusFilter !== 'all' || availabilityFilter !== 'all' || sortBy !== 'sku';
 
   function handleFormChange(field) {
     return (value) => setForm((prev) => ({ ...prev, [field]: value }));
@@ -155,6 +238,62 @@ export default function BundlesPage() {
     (qty) => parseInt(qty) > 0
   ).length;
 
+  // Calculate form cost preview
+  const formCostPreview = useMemo(() => {
+    let total = 0;
+    for (const [compId, qty] of Object.entries(form.componentQuantities)) {
+      const parsedQty = parseInt(qty);
+      if (isNaN(parsedQty) || parsedQty <= 0) continue;
+      const comp = components.find((c) => c.id === compId);
+      if (comp?.cost_ex_vat_pence) {
+        total += comp.cost_ex_vat_pence * parsedQty;
+      }
+    }
+    return total;
+  }, [form.componentQuantities, components]);
+
+  // Calculate stats
+  const stats = useMemo(() => {
+    let inStock = 0;
+    let lowStock = 0;
+    let outOfStock = 0;
+    let totalValue = 0;
+
+    boms.forEach((bom) => {
+      const { available } = calculateAvailability(bom);
+      const cost = calculateCost(bom) || 0;
+
+      if (available > 10) inStock++;
+      else if (available > 0) lowStock++;
+      else outOfStock++;
+
+      totalValue += available * cost;
+    });
+
+    return { total: boms.length, inStock, lowStock, outOfStock, totalValue };
+  }, [boms, components]);
+
+  function getAvailabilityBadge(bom) {
+    const { available, limitingComponent } = calculateAvailability(bom);
+    if (available <= 0) {
+      return (
+        <Badge tone="critical">
+          Out of stock
+          {limitingComponent && ` (${limitingComponent.internal_sku})`}
+        </Badge>
+      );
+    }
+    if (available < 10) {
+      return (
+        <Badge tone="warning">
+          {available} available
+          {limitingComponent && ` (limited by ${limitingComponent.internal_sku})`}
+        </Badge>
+      );
+    }
+    return <Badge tone="success">{available} available</Badge>;
+  }
+
   // Prepare rows for the BOM table
   const rows = filteredBoms.map((bom) => {
     const compCount = bom.bom_components?.length || 0;
@@ -162,9 +301,17 @@ export default function BundlesPage() {
       const comp = bc.components || components.find((c) => c.id === bc.component_id);
       return `${comp?.internal_sku || '?'} ×${bc.qty_required}`;
     }) || [];
+    const cost = calculateCost(bom);
 
     return [
-      <Text variant="bodyMd" fontWeight="semibold" key={bom.id}>
+      <Text
+        variant="bodyMd"
+        fontWeight="semibold"
+        key={bom.id}
+        as="button"
+        onClick={() => setSelectedBom(bom)}
+        style={{ cursor: 'pointer', textDecoration: 'underline' }}
+      >
         {bom.bundle_sku}
       </Text>,
       bom.description || '-',
@@ -181,6 +328,8 @@ export default function BundlesPage() {
         </InlineStack>
         {compCount === 0 && <Text tone="subdued">No components</Text>}
       </BlockStack>,
+      cost ? formatPrice(cost) : '-',
+      getAvailabilityBadge(bom),
       bom.is_active ? (
         <Badge tone="success">Active</Badge>
       ) : (
@@ -192,115 +341,168 @@ export default function BundlesPage() {
   return (
     <Page
       title="BOMs / Bundles"
-      subtitle={`${boms.length} bundles defined`}
+      subtitle={`${stats.total} bundles · ${stats.inStock} in stock · ${stats.outOfStock} unavailable`}
       secondaryActions={[{ content: 'Refresh', onAction: load }]}
     >
       <Layout>
         <Layout.Section variant="oneThird">
-          <Card>
-            <BlockStack gap="400">
-              <Text variant="headingMd">Create BOM</Text>
-
-              {createError && (
-                <Banner tone="critical" onDismiss={() => setCreateError(null)}>
-                  <p>{createError}</p>
-                </Banner>
-              )}
-
-              {successMessage && (
-                <Banner tone="success" onDismiss={() => setSuccessMessage(null)}>
-                  <p>{successMessage}</p>
-                </Banner>
-              )}
-
-              <FormLayout>
-                <TextField
-                  label="Bundle SKU"
-                  value={form.bundle_sku}
-                  onChange={handleFormChange('bundle_sku')}
-                  placeholder="e.g., BUNDLE-STARTER-KIT"
-                  helpText="Unique identifier for this bundle"
-                  autoComplete="off"
-                />
-                <TextField
-                  label="Description"
-                  value={form.description}
-                  onChange={handleFormChange('description')}
-                  placeholder="e.g., Starter Tool Kit"
-                />
-
-                <Divider />
-
-                <InlineStack align="space-between">
-                  <Text variant="headingSm">Components ({selectedCount} selected)</Text>
+          <BlockStack gap="400">
+            {/* Stats Card */}
+            <Card>
+              <BlockStack gap="300">
+                <Text variant="headingMd">Bundle Availability</Text>
+                <InlineStack gap="400">
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Available</Text>
+                    <Text variant="headingMd" tone="success">{stats.inStock}</Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Low Stock</Text>
+                    <Text variant="headingMd" tone="warning">{stats.lowStock}</Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Unavailable</Text>
+                    <Text variant="headingMd" tone="critical">{stats.outOfStock}</Text>
+                  </BlockStack>
                 </InlineStack>
-
-                {components.length === 0 ? (
-                  <Banner tone="warning">
-                    <p>No components available. Create components first.</p>
-                  </Banner>
-                ) : (
-                  <>
-                    <TextField
-                      label="Search components"
-                      labelHidden
-                      placeholder="Search components..."
-                      value={componentSearch}
-                      onChange={setComponentSearch}
-                      clearButton
-                      onClearButtonClick={() => setComponentSearch('')}
-                      autoComplete="off"
+                {stats.total > 0 && (
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Availability Health</Text>
+                    <ProgressBar
+                      progress={Math.round((stats.inStock / stats.total) * 100)}
+                      tone={stats.outOfStock > 0 ? 'critical' : stats.lowStock > 0 ? 'warning' : 'success'}
                     />
-                    <BlockStack gap="200">
-                      {filteredComponents.length === 0 ? (
-                        <Text tone="subdued">No components match "{componentSearch}"</Text>
-                      ) : (
-                        filteredComponents.slice(0, 10).map((c) => (
-                          <InlineStack key={c.id} gap="200" blockAlign="center" wrap={false}>
-                            <div style={{ flex: 1 }}>
-                              <Text variant="bodySm" fontWeight="semibold">{c.internal_sku}</Text>
-                              <Text variant="bodySm" tone="subdued">{c.description || 'No description'}</Text>
-                              {c.total_available !== null && (
-                                <Text variant="bodySm" tone={c.total_available <= 0 ? 'critical' : 'subdued'}>
-                                  Stock: {c.total_available}
-                                </Text>
-                              )}
-                            </div>
-                            <div style={{ width: '80px' }}>
-                              <TextField
-                                label={`Qty for ${c.internal_sku}`}
-                                labelHidden
-                                type="number"
-                                min="0"
-                                value={form.componentQuantities[c.id] || ''}
-                                onChange={handleQuantityChange(c.id)}
-                                placeholder="0"
-                                autoComplete="off"
-                              />
-                            </div>
-                          </InlineStack>
-                        ))
-                      )}
-                      {filteredComponents.length > 10 && (
-                        <Text tone="subdued">
-                          Showing 10 of {filteredComponents.length} components. Use search to find more.
-                        </Text>
-                      )}
-                    </BlockStack>
-                  </>
+                  </BlockStack>
+                )}
+                {stats.totalValue > 0 && (
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Potential Stock Value</Text>
+                    <Text variant="headingMd" fontWeight="bold">{formatPrice(stats.totalValue)}</Text>
+                  </BlockStack>
+                )}
+              </BlockStack>
+            </Card>
+
+            {/* Create BOM Form */}
+            <Card>
+              <BlockStack gap="400">
+                <Text variant="headingMd">Create BOM</Text>
+
+                {createError && (
+                  <Banner tone="critical" onDismiss={() => setCreateError(null)}>
+                    <p>{createError}</p>
+                  </Banner>
                 )}
 
-                <Button
-                  variant="primary"
-                  onClick={handleCreate}
-                  loading={creating}
-                  disabled={!form.bundle_sku || components.length === 0}
-                >
-                  Create BOM
-                </Button>
-              </FormLayout>
-            </BlockStack>
-          </Card>
+                {successMessage && (
+                  <Banner tone="success" onDismiss={() => setSuccessMessage(null)}>
+                    <p>{successMessage}</p>
+                  </Banner>
+                )}
+
+                <FormLayout>
+                  <TextField
+                    label="Bundle SKU"
+                    value={form.bundle_sku}
+                    onChange={handleFormChange('bundle_sku')}
+                    placeholder="e.g., BUNDLE-STARTER-KIT"
+                    helpText="Unique identifier for this bundle"
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Description"
+                    value={form.description}
+                    onChange={handleFormChange('description')}
+                    placeholder="e.g., Starter Tool Kit"
+                  />
+
+                  <Divider />
+
+                  <InlineStack align="space-between">
+                    <Text variant="headingSm">Components ({selectedCount} selected)</Text>
+                    {formCostPreview > 0 && (
+                      <Text variant="bodySm" tone="subdued">
+                        Est. cost: {formatPrice(formCostPreview)}
+                      </Text>
+                    )}
+                  </InlineStack>
+
+                  {components.length === 0 ? (
+                    <Banner tone="warning">
+                      <p>No components available. Create components first.</p>
+                    </Banner>
+                  ) : (
+                    <>
+                      <TextField
+                        label="Search components"
+                        labelHidden
+                        placeholder="Search components..."
+                        value={componentSearch}
+                        onChange={setComponentSearch}
+                        clearButton
+                        onClearButtonClick={() => setComponentSearch('')}
+                        autoComplete="off"
+                      />
+                      <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                        <BlockStack gap="200">
+                          {filteredComponents.length === 0 ? (
+                            <Text tone="subdued">No components match "{componentSearch}"</Text>
+                          ) : (
+                            filteredComponents.slice(0, 15).map((c) => (
+                              <InlineStack key={c.id} gap="200" blockAlign="center" wrap={false}>
+                                <div style={{ flex: 1 }}>
+                                  <Text variant="bodySm" fontWeight="semibold">{c.internal_sku}</Text>
+                                  <Text variant="bodySm" tone="subdued">{c.description || 'No description'}</Text>
+                                  <InlineStack gap="200">
+                                    {c.total_available !== null && (
+                                      <Text variant="bodySm" tone={c.total_available <= 0 ? 'critical' : 'subdued'}>
+                                        Stock: {c.total_available}
+                                      </Text>
+                                    )}
+                                    {c.cost_ex_vat_pence && (
+                                      <Text variant="bodySm" tone="subdued">
+                                        {formatPrice(c.cost_ex_vat_pence)}
+                                      </Text>
+                                    )}
+                                  </InlineStack>
+                                </div>
+                                <div style={{ width: '80px' }}>
+                                  <TextField
+                                    label={`Qty for ${c.internal_sku}`}
+                                    labelHidden
+                                    type="number"
+                                    min="0"
+                                    value={form.componentQuantities[c.id] || ''}
+                                    onChange={handleQuantityChange(c.id)}
+                                    placeholder="0"
+                                    autoComplete="off"
+                                  />
+                                </div>
+                              </InlineStack>
+                            ))
+                          )}
+                          {filteredComponents.length > 15 && (
+                            <Text tone="subdued">
+                              Showing 15 of {filteredComponents.length} components. Use search to find more.
+                            </Text>
+                          )}
+                        </BlockStack>
+                      </div>
+                    </>
+                  )}
+
+                  <Button
+                    variant="primary"
+                    onClick={handleCreate}
+                    loading={creating}
+                    disabled={!form.bundle_sku || components.length === 0}
+                  >
+                    Create BOM
+                  </Button>
+                </FormLayout>
+              </BlockStack>
+            </Card>
+          </BlockStack>
         </Layout.Section>
 
         <Layout.Section>
@@ -313,34 +515,65 @@ export default function BundlesPage() {
 
             {/* Search and Filter */}
             <Card>
-              <InlineStack gap="400" wrap={false}>
-                <div style={{ flex: 1 }}>
-                  <TextField
-                    label="Search BOMs"
+              <BlockStack gap="300">
+                <InlineStack gap="400" wrap={false}>
+                  <div style={{ flex: 1 }}>
+                    <TextField
+                      label="Search BOMs"
+                      labelHidden
+                      placeholder="Search by SKU, description, component..."
+                      value={searchQuery}
+                      onChange={setSearchQuery}
+                      clearButton
+                      onClearButtonClick={() => setSearchQuery('')}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <Select
+                    label="Status"
                     labelHidden
-                    placeholder="Search by SKU, description, component..."
-                    value={searchQuery}
-                    onChange={setSearchQuery}
-                    clearButton
-                    onClearButtonClick={() => setSearchQuery('')}
-                    autoComplete="off"
+                    options={[
+                      { label: 'All statuses', value: 'all' },
+                      { label: 'Active only', value: 'active' },
+                      { label: 'Inactive only', value: 'inactive' },
+                    ]}
+                    value={statusFilter}
+                    onChange={setStatusFilter}
                   />
-                </div>
-                <Select
-                  label="Status"
-                  labelHidden
-                  options={[
-                    { label: 'All', value: 'all' },
-                    { label: 'Active only', value: 'active' },
-                    { label: 'Inactive only', value: 'inactive' },
-                  ]}
-                  value={statusFilter}
-                  onChange={setStatusFilter}
-                />
+                  <Select
+                    label="Availability"
+                    labelHidden
+                    options={[
+                      { label: 'All availability', value: 'all' },
+                      { label: 'In stock', value: 'in_stock' },
+                      { label: 'Low stock', value: 'low' },
+                      { label: 'Out of stock', value: 'out' },
+                    ]}
+                    value={availabilityFilter}
+                    onChange={setAvailabilityFilter}
+                  />
+                  <Select
+                    label="Sort"
+                    labelHidden
+                    options={[
+                      { label: 'Sort by SKU', value: 'sku' },
+                      { label: 'Availability: Low to High', value: 'availability' },
+                      { label: 'Cost: High to Low', value: 'cost' },
+                      { label: 'Components: Most', value: 'components' },
+                    ]}
+                    value={sortBy}
+                    onChange={setSortBy}
+                  />
+                  {hasFilters && (
+                    <Button onClick={handleClearFilters}>Clear</Button>
+                  )}
+                </InlineStack>
                 {hasFilters && (
-                  <Button onClick={handleClearFilters}>Clear</Button>
+                  <Text variant="bodySm" tone="subdued">
+                    Showing {filteredBoms.length} of {boms.length} BOMs
+                  </Text>
                 )}
-              </InlineStack>
+              </BlockStack>
             </Card>
 
             <Card>
@@ -368,11 +601,9 @@ export default function BundlesPage() {
                 </div>
               ) : (
                 <DataTable
-                  columnContentTypes={['text', 'text', 'text', 'text']}
-                  headings={['Bundle SKU', 'Description', 'Components', 'Status']}
+                  columnContentTypes={['text', 'text', 'text', 'numeric', 'text', 'text']}
+                  headings={['Bundle SKU', 'Description', 'Components', 'Cost', 'Availability', 'Status']}
                   rows={rows}
-                  hoverable
-                  onRowClick={(row, index) => setSelectedBom(filteredBoms[index])}
                   footerContent={`${filteredBoms.length} of ${boms.length} BOM(s)`}
                 />
               )}
@@ -391,6 +622,7 @@ export default function BundlesPage() {
         >
           <Modal.Section>
             <BlockStack gap="400">
+              {/* BOM Info */}
               <InlineStack gap="800">
                 <BlockStack gap="100">
                   <Text variant="bodySm" tone="subdued">Bundle SKU</Text>
@@ -404,6 +636,16 @@ export default function BundlesPage() {
                     <Badge tone="default">Inactive</Badge>
                   )}
                 </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Total Cost</Text>
+                  <Text variant="bodyMd" fontWeight="semibold">
+                    {formatPrice(calculateCost(selectedBom))}
+                  </Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Availability</Text>
+                  {getAvailabilityBadge(selectedBom)}
+                </BlockStack>
               </InlineStack>
 
               {selectedBom.description && (
@@ -413,27 +655,78 @@ export default function BundlesPage() {
                 </BlockStack>
               )}
 
+              {/* Availability Breakdown */}
+              {(() => {
+                const { available, limitingComponent } = calculateAvailability(selectedBom);
+                const cost = calculateCost(selectedBom);
+                return (
+                  <Card>
+                    <InlineStack gap="800">
+                      <BlockStack gap="100">
+                        <Text variant="bodySm" tone="subdued">Can Build</Text>
+                        <Text variant="headingLg" fontWeight="bold" tone={available > 0 ? 'success' : 'critical'}>
+                          {available}
+                        </Text>
+                      </BlockStack>
+                      {cost && (
+                        <>
+                          <BlockStack gap="100">
+                            <Text variant="bodySm" tone="subdued">Unit Cost</Text>
+                            <Text variant="headingLg">{formatPrice(cost)}</Text>
+                          </BlockStack>
+                          <BlockStack gap="100">
+                            <Text variant="bodySm" tone="subdued">Total Value</Text>
+                            <Text variant="headingLg" fontWeight="bold">
+                              {formatPrice(available * cost)}
+                            </Text>
+                          </BlockStack>
+                        </>
+                      )}
+                      {limitingComponent && available < 50 && (
+                        <BlockStack gap="100">
+                          <Text variant="bodySm" tone="subdued">Limiting Factor</Text>
+                          <Badge tone="warning">{limitingComponent.internal_sku}</Badge>
+                        </BlockStack>
+                      )}
+                    </InlineStack>
+                  </Card>
+                );
+              })()}
+
               <Divider />
 
               <BlockStack gap="200">
                 <Text variant="headingSm">Components ({selectedBom.bom_components?.length || 0})</Text>
                 {selectedBom.bom_components?.length > 0 ? (
                   <DataTable
-                    columnContentTypes={['text', 'text', 'numeric', 'numeric']}
-                    headings={['SKU', 'Description', 'Qty Required', 'Stock']}
+                    columnContentTypes={['text', 'text', 'numeric', 'numeric', 'numeric', 'text']}
+                    headings={['SKU', 'Description', 'Qty Required', 'Stock', 'Can Make', 'Line Cost']}
                     rows={selectedBom.bom_components.map((bc) => {
                       const comp = bc.components || components.find((c) => c.id === bc.component_id);
+                      const stock = comp?.total_available || 0;
+                      const canMake = Math.floor(stock / bc.qty_required);
+                      const lineCost = comp?.cost_ex_vat_pence ? comp.cost_ex_vat_pence * bc.qty_required : null;
+
                       return [
                         <Text variant="bodyMd" fontWeight="semibold" key={bc.id}>
                           {comp?.internal_sku || 'Unknown'}
                         </Text>,
                         comp?.description || '-',
                         bc.qty_required,
-                        comp?.total_available !== null ? (
-                          <Badge tone={comp.total_available <= 0 ? 'critical' : comp.total_available < bc.qty_required ? 'warning' : 'success'}>
-                            {comp.total_available}
-                          </Badge>
-                        ) : '-',
+                        <Badge
+                          key={`stock-${bc.id}`}
+                          tone={stock <= 0 ? 'critical' : stock < bc.qty_required * 10 ? 'warning' : 'success'}
+                        >
+                          {stock}
+                        </Badge>,
+                        <Text
+                          key={`canmake-${bc.id}`}
+                          tone={canMake <= 0 ? 'critical' : canMake < 10 ? 'warning' : undefined}
+                          fontWeight={canMake <= 0 ? 'bold' : undefined}
+                        >
+                          {canMake}
+                        </Text>,
+                        lineCost ? formatPrice(lineCost) : '-',
                       ];
                     })}
                   />

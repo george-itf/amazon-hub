@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Page,
   Layout,
@@ -15,8 +15,11 @@ import {
   Modal,
   Select,
   InlineStack,
+  Divider,
+  Tabs,
+  ProgressBar,
 } from '@shopify/polaris';
-import { getComponents, createComponent, adjustStock } from '../utils/api.jsx';
+import { getComponents, createComponent, adjustStock, getStockMovements } from '../utils/api.jsx';
 
 /**
  * Format price from pence to pounds
@@ -42,6 +45,12 @@ export default function ComponentsPage() {
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('sku');
+
+  // Detail modal state
+  const [selectedComponent, setSelectedComponent] = useState(null);
+  const [componentHistory, setComponentHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Stock adjustment modal state
   const [adjustModal, setAdjustModal] = useState({ open: false, component: null });
@@ -67,9 +76,27 @@ export default function ComponentsPage() {
     load();
   }, []);
 
+  // Load component history when detail modal opens
+  useEffect(() => {
+    async function loadHistory() {
+      if (!selectedComponent) return;
+      setHistoryLoading(true);
+      try {
+        const data = await getStockMovements({ component_id: selectedComponent.id, limit: 20 });
+        setComponentHistory(data.movements || []);
+      } catch (err) {
+        console.error('Failed to load component history:', err);
+        setComponentHistory([]);
+      } finally {
+        setHistoryLoading(false);
+      }
+    }
+    loadHistory();
+  }, [selectedComponent]);
+
   // Filter and search
   const filteredComponents = useMemo(() => {
-    return components.filter((c) => {
+    let result = components.filter((c) => {
       // Stock filter
       if (stockFilter === 'low' && (c.total_available === null || c.total_available >= 10)) return false;
       if (stockFilter === 'out' && (c.total_available === null || c.total_available > 0)) return false;
@@ -87,14 +114,26 @@ export default function ComponentsPage() {
 
       return true;
     });
-  }, [components, searchQuery, stockFilter]);
+
+    // Sort
+    result.sort((a, b) => {
+      if (sortBy === 'sku') return (a.internal_sku || '').localeCompare(b.internal_sku || '');
+      if (sortBy === 'stock_asc') return (a.total_available || 0) - (b.total_available || 0);
+      if (sortBy === 'stock_desc') return (b.total_available || 0) - (a.total_available || 0);
+      if (sortBy === 'cost') return (b.cost_ex_vat_pence || 0) - (a.cost_ex_vat_pence || 0);
+      return 0;
+    });
+
+    return result;
+  }, [components, searchQuery, stockFilter, sortBy]);
 
   const handleClearFilters = () => {
     setSearchQuery('');
     setStockFilter('all');
+    setSortBy('sku');
   };
 
-  const hasFilters = searchQuery || stockFilter !== 'all';
+  const hasFilters = searchQuery || stockFilter !== 'all' || sortBy !== 'sku';
 
   function handleChange(field) {
     return (value) => setForm((prev) => ({ ...prev, [field]: value }));
@@ -165,21 +204,42 @@ export default function ComponentsPage() {
     }
   }
 
-  function getStockBadge(available) {
+  function getStockBadge(available, reorderPoint = 10) {
     if (available === undefined || available === null) {
       return <Badge tone="default">No stock data</Badge>;
     }
     if (available <= 0) {
       return <Badge tone="critical">Out of stock</Badge>;
     }
-    if (available < 10) {
+    if (available < reorderPoint) {
       return <Badge tone="warning">Low: {available}</Badge>;
     }
     return <Badge tone="success">{available} available</Badge>;
   }
 
+  // Calculate stats
+  const stats = useMemo(() => {
+    const total = components.length;
+    const inStock = components.filter((c) => c.total_available !== null && c.total_available > 10).length;
+    const lowStock = components.filter((c) => c.total_available !== null && c.total_available > 0 && c.total_available <= 10).length;
+    const outOfStock = components.filter((c) => c.total_available !== null && c.total_available <= 0).length;
+    const totalValue = components.reduce((sum, c) => {
+      const qty = c.total_available || 0;
+      const cost = c.cost_ex_vat_pence || 0;
+      return sum + qty * cost;
+    }, 0);
+    return { total, inStock, lowStock, outOfStock, totalValue };
+  }, [components]);
+
   const rows = filteredComponents.map((c) => [
-    <Text variant="bodyMd" fontWeight="semibold" key={c.id}>
+    <Text
+      variant="bodyMd"
+      fontWeight="semibold"
+      key={c.id}
+      as="button"
+      onClick={() => setSelectedComponent(c)}
+      style={{ cursor: 'pointer', textDecoration: 'underline' }}
+    >
       {c.internal_sku}
     </Text>,
     c.description || '-',
@@ -191,69 +251,101 @@ export default function ComponentsPage() {
     </InlineStack>,
   ]);
 
-  // Calculate stats
-  const lowStockCount = components.filter((c) => c.total_available !== null && c.total_available > 0 && c.total_available < 10).length;
-  const outOfStockCount = components.filter((c) => c.total_available !== null && c.total_available <= 0).length;
-
   return (
     <Page
       title="Components"
-      subtitle={`${components.length} components${lowStockCount > 0 ? ` · ${lowStockCount} low stock` : ''}${outOfStockCount > 0 ? ` · ${outOfStockCount} out of stock` : ''}`}
+      subtitle={`${stats.total} components · £${(stats.totalValue / 100).toFixed(2)} total value`}
       secondaryActions={[{ content: 'Refresh', onAction: load }]}
     >
       <Layout>
         <Layout.Section variant="oneThird">
-          <Card>
-            <BlockStack gap="400">
-              <Text variant="headingMd">Add Component</Text>
+          <BlockStack gap="400">
+            {/* Stats Cards */}
+            <Card>
+              <BlockStack gap="300">
+                <Text variant="headingMd">Inventory Status</Text>
+                <InlineStack gap="400">
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">In Stock</Text>
+                    <Text variant="headingMd" tone="success">{stats.inStock}</Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Low Stock</Text>
+                    <Text variant="headingMd" tone="warning">{stats.lowStock}</Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Out</Text>
+                    <Text variant="headingMd" tone="critical">{stats.outOfStock}</Text>
+                  </BlockStack>
+                </InlineStack>
+                {stats.total > 0 && (
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Stock Health</Text>
+                    <ProgressBar
+                      progress={Math.round((stats.inStock / stats.total) * 100)}
+                      tone={stats.outOfStock > 0 ? 'critical' : stats.lowStock > 0 ? 'warning' : 'success'}
+                    />
+                    <Text variant="bodySm" tone="subdued">
+                      {Math.round((stats.inStock / stats.total) * 100)}% healthy
+                    </Text>
+                  </BlockStack>
+                )}
+              </BlockStack>
+            </Card>
 
-              {createError && (
-                <Banner tone="critical" onDismiss={() => setCreateError(null)}>
-                  <p>{createError}</p>
-                </Banner>
-              )}
+            {/* Add Component Form */}
+            <Card>
+              <BlockStack gap="400">
+                <Text variant="headingMd">Add Component</Text>
 
-              <FormLayout>
-                <TextField
-                  label="Internal SKU"
-                  value={form.internal_sku}
-                  onChange={handleChange('internal_sku')}
-                  placeholder="e.g., INV-SCRW-001"
-                  helpText="Unique identifier for this component"
-                  autoComplete="off"
-                />
-                <TextField
-                  label="Description"
-                  value={form.description}
-                  onChange={handleChange('description')}
-                  placeholder="e.g., M6 x 20mm Hex Bolt"
-                />
-                <TextField
-                  label="Brand"
-                  value={form.brand}
-                  onChange={handleChange('brand')}
-                  placeholder="e.g., Invicta"
-                />
-                <TextField
-                  label="Cost ex VAT (£)"
-                  value={form.cost_ex_vat_pence}
-                  type="number"
-                  onChange={handleChange('cost_ex_vat_pence')}
-                  placeholder="0.00"
-                  prefix="£"
-                  step="0.01"
-                />
-                <Button
-                  variant="primary"
-                  onClick={handleSubmit}
-                  loading={creating}
-                  disabled={!form.internal_sku}
-                >
-                  Create Component
-                </Button>
-              </FormLayout>
-            </BlockStack>
-          </Card>
+                {createError && (
+                  <Banner tone="critical" onDismiss={() => setCreateError(null)}>
+                    <p>{createError}</p>
+                  </Banner>
+                )}
+
+                <FormLayout>
+                  <TextField
+                    label="Internal SKU"
+                    value={form.internal_sku}
+                    onChange={handleChange('internal_sku')}
+                    placeholder="e.g., INV-SCRW-001"
+                    helpText="Unique identifier for this component"
+                    autoComplete="off"
+                  />
+                  <TextField
+                    label="Description"
+                    value={form.description}
+                    onChange={handleChange('description')}
+                    placeholder="e.g., M6 x 20mm Hex Bolt"
+                  />
+                  <TextField
+                    label="Brand"
+                    value={form.brand}
+                    onChange={handleChange('brand')}
+                    placeholder="e.g., Invicta"
+                  />
+                  <TextField
+                    label="Cost ex VAT (£)"
+                    value={form.cost_ex_vat_pence}
+                    type="number"
+                    onChange={handleChange('cost_ex_vat_pence')}
+                    placeholder="0.00"
+                    prefix="£"
+                    step="0.01"
+                  />
+                  <Button
+                    variant="primary"
+                    onClick={handleSubmit}
+                    loading={creating}
+                    disabled={!form.internal_sku}
+                  >
+                    Create Component
+                  </Button>
+                </FormLayout>
+              </BlockStack>
+            </Card>
+          </BlockStack>
         </Layout.Section>
 
         <Layout.Section>
@@ -273,35 +365,54 @@ export default function ComponentsPage() {
 
             {/* Search and Filter */}
             <Card>
-              <InlineStack gap="400" wrap={false}>
-                <div style={{ flex: 1 }}>
-                  <TextField
-                    label="Search"
+              <BlockStack gap="300">
+                <InlineStack gap="400" wrap={false}>
+                  <div style={{ flex: 1 }}>
+                    <TextField
+                      label="Search"
+                      labelHidden
+                      placeholder="Search by SKU, description, brand..."
+                      value={searchQuery}
+                      onChange={setSearchQuery}
+                      clearButton
+                      onClearButtonClick={() => setSearchQuery('')}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <Select
+                    label="Stock"
                     labelHidden
-                    placeholder="Search by SKU, description, brand..."
-                    value={searchQuery}
-                    onChange={setSearchQuery}
-                    clearButton
-                    onClearButtonClick={() => setSearchQuery('')}
-                    autoComplete="off"
+                    options={[
+                      { label: 'All stock levels', value: 'all' },
+                      { label: 'In stock', value: 'in' },
+                      { label: 'Low stock', value: 'low' },
+                      { label: 'Out of stock', value: 'out' },
+                    ]}
+                    value={stockFilter}
+                    onChange={setStockFilter}
                   />
-                </div>
-                <Select
-                  label="Stock"
-                  labelHidden
-                  options={[
-                    { label: 'All stock levels', value: 'all' },
-                    { label: 'In stock', value: 'in' },
-                    { label: 'Low stock', value: 'low' },
-                    { label: 'Out of stock', value: 'out' },
-                  ]}
-                  value={stockFilter}
-                  onChange={setStockFilter}
-                />
+                  <Select
+                    label="Sort"
+                    labelHidden
+                    options={[
+                      { label: 'Sort by SKU', value: 'sku' },
+                      { label: 'Stock: Low to High', value: 'stock_asc' },
+                      { label: 'Stock: High to Low', value: 'stock_desc' },
+                      { label: 'Cost: High to Low', value: 'cost' },
+                    ]}
+                    value={sortBy}
+                    onChange={setSortBy}
+                  />
+                  {hasFilters && (
+                    <Button onClick={handleClearFilters}>Clear</Button>
+                  )}
+                </InlineStack>
                 {hasFilters && (
-                  <Button onClick={handleClearFilters}>Clear</Button>
+                  <Text variant="bodySm" tone="subdued">
+                    Showing {filteredComponents.length} of {components.length} components
+                  </Text>
                 )}
-              </InlineStack>
+              </BlockStack>
             </Card>
 
             <Card>
@@ -341,6 +452,113 @@ export default function ComponentsPage() {
         </Layout.Section>
       </Layout>
 
+      {/* Component Detail Modal */}
+      {selectedComponent && (
+        <Modal
+          open={!!selectedComponent}
+          onClose={() => setSelectedComponent(null)}
+          title={selectedComponent.internal_sku}
+          large
+          primaryAction={{
+            content: 'Adjust Stock',
+            onAction: () => {
+              setSelectedComponent(null);
+              openAdjustModal(selectedComponent);
+            },
+          }}
+          secondaryActions={[{ content: 'Close', onAction: () => setSelectedComponent(null) }]}
+        >
+          <Modal.Section>
+            <BlockStack gap="400">
+              {/* Component Info */}
+              <InlineStack gap="800">
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">SKU</Text>
+                  <Text variant="bodyMd" fontWeight="semibold">{selectedComponent.internal_sku}</Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Brand</Text>
+                  <Text variant="bodyMd">{selectedComponent.brand || '-'}</Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Cost</Text>
+                  <Text variant="bodyMd" fontWeight="semibold">{formatPrice(selectedComponent.cost_ex_vat_pence)}</Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Stock</Text>
+                  {getStockBadge(selectedComponent.total_available)}
+                </BlockStack>
+              </InlineStack>
+
+              {selectedComponent.description && (
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Description</Text>
+                  <Text variant="bodyMd">{selectedComponent.description}</Text>
+                </BlockStack>
+              )}
+
+              {/* Stock Value */}
+              {selectedComponent.total_available > 0 && selectedComponent.cost_ex_vat_pence && (
+                <Card>
+                  <InlineStack gap="800">
+                    <BlockStack gap="100">
+                      <Text variant="bodySm" tone="subdued">Stock Quantity</Text>
+                      <Text variant="headingMd">{selectedComponent.total_available}</Text>
+                    </BlockStack>
+                    <BlockStack gap="100">
+                      <Text variant="bodySm" tone="subdued">Unit Cost</Text>
+                      <Text variant="headingMd">{formatPrice(selectedComponent.cost_ex_vat_pence)}</Text>
+                    </BlockStack>
+                    <BlockStack gap="100">
+                      <Text variant="bodySm" tone="subdued">Total Value</Text>
+                      <Text variant="headingMd" fontWeight="bold">
+                        {formatPrice(selectedComponent.total_available * selectedComponent.cost_ex_vat_pence)}
+                      </Text>
+                    </BlockStack>
+                  </InlineStack>
+                </Card>
+              )}
+
+              <Divider />
+
+              {/* Stock Movement History */}
+              <BlockStack gap="200">
+                <Text variant="headingSm">Recent Stock Movements</Text>
+                {historyLoading ? (
+                  <div style={{ padding: '20px', textAlign: 'center' }}>
+                    <Spinner size="small" />
+                  </div>
+                ) : componentHistory.length === 0 ? (
+                  <Text tone="subdued">No stock movements recorded yet.</Text>
+                ) : (
+                  <DataTable
+                    columnContentTypes={['text', 'numeric', 'text', 'text']}
+                    headings={['Date', 'Change', 'Reason', 'Note']}
+                    rows={componentHistory.map((m) => [
+                      new Date(m.created_at).toLocaleDateString('en-GB', {
+                        day: '2-digit',
+                        month: 'short',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                      }),
+                      <Text
+                        key={m.id}
+                        tone={m.delta > 0 ? 'success' : m.delta < 0 ? 'critical' : undefined}
+                        fontWeight="semibold"
+                      >
+                        {m.delta > 0 ? '+' : ''}{m.delta}
+                      </Text>,
+                      <Badge key={`reason-${m.id}`}>{m.reason || 'Unknown'}</Badge>,
+                      m.note || '-',
+                    ])}
+                  />
+                )}
+              </BlockStack>
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
+      )}
+
       {/* Stock Adjustment Modal */}
       {adjustModal.open && (
         <Modal
@@ -365,9 +583,36 @@ export default function ComponentsPage() {
                 </Banner>
               )}
 
-              <Text>
-                Current stock: <strong>{adjustModal.component?.total_available ?? 'Unknown'}</strong>
-              </Text>
+              <Card>
+                <InlineStack gap="400">
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Current Stock</Text>
+                    <Text variant="headingMd" fontWeight="bold">
+                      {adjustModal.component?.total_available ?? 'Unknown'}
+                    </Text>
+                  </BlockStack>
+                  {adjustForm.quantity && !isNaN(parseInt(adjustForm.quantity)) && (
+                    <>
+                      <BlockStack gap="100">
+                        <Text variant="bodySm" tone="subdued">Change</Text>
+                        <Text
+                          variant="headingMd"
+                          fontWeight="bold"
+                          tone={parseInt(adjustForm.quantity) > 0 ? 'success' : 'critical'}
+                        >
+                          {parseInt(adjustForm.quantity) > 0 ? '+' : ''}{adjustForm.quantity}
+                        </Text>
+                      </BlockStack>
+                      <BlockStack gap="100">
+                        <Text variant="bodySm" tone="subdued">New Stock</Text>
+                        <Text variant="headingMd" fontWeight="bold">
+                          {(adjustModal.component?.total_available || 0) + parseInt(adjustForm.quantity)}
+                        </Text>
+                      </BlockStack>
+                    </>
+                  )}
+                </InlineStack>
+              </Card>
 
               <FormLayout>
                 <TextField
