@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Page,
   Card,
@@ -16,8 +16,10 @@ import {
   Filters,
   ChoiceList,
   Button,
+  Checkbox,
+  ButtonGroup,
 } from '@shopify/polaris';
-import { importOrders, getOrders } from '../utils/api.jsx';
+import { importOrders, getOrders, createPickBatch } from '../utils/api.jsx';
 
 /**
  * Format price from pence to pounds
@@ -76,6 +78,11 @@ export default function OrdersPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState([]);
 
+  // Selection state for batch creation
+  const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
+  const [creatingBatch, setCreatingBatch] = useState(false);
+  const [batchSuccess, setBatchSuccess] = useState(null);
+
   async function loadOrders() {
     setLoading(true);
     setError(null);
@@ -111,7 +118,7 @@ export default function OrdersPage() {
     }
   }
 
-  // Filter and search orders
+  // Filter and search orders (defined early for use in selection handlers)
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
       // Status filter
@@ -139,6 +146,57 @@ export default function OrdersPage() {
     });
   }, [orders, statusFilter, searchQuery]);
 
+  // Selection handlers
+  const toggleOrderSelection = useCallback((orderId) => {
+    setSelectedOrderIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(orderId)) {
+        newSet.delete(orderId);
+      } else {
+        newSet.add(orderId);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const selectAllFiltered = useCallback(() => {
+    // Only select orders that are READY_TO_PICK
+    const readyOrders = filteredOrders.filter((o) => o.status === 'READY_TO_PICK');
+    setSelectedOrderIds(new Set(readyOrders.map((o) => o.id)));
+  }, [filteredOrders]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedOrderIds(new Set());
+  }, []);
+
+  // Get selected orders that are ready to pick (valid for batch)
+  const selectedReadyOrders = useMemo(() => {
+    return orders.filter((o) => selectedOrderIds.has(o.id) && o.status === 'READY_TO_PICK');
+  }, [orders, selectedOrderIds]);
+
+  // Create pick batch from selected orders
+  async function handleCreateBatch() {
+    if (selectedReadyOrders.length === 0) return;
+
+    setCreatingBatch(true);
+    setBatchSuccess(null);
+    try {
+      const orderIds = selectedReadyOrders.map((o) => o.id);
+      const result = await createPickBatch(orderIds);
+      setBatchSuccess({
+        batchId: result.id || result.batch?.id,
+        orderCount: selectedReadyOrders.length,
+      });
+      setSelectedOrderIds(new Set());
+      await loadOrders(); // Refresh to show updated statuses
+    } catch (err) {
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Failed to create batch');
+      setError(errorMsg);
+    } finally {
+      setCreatingBatch(false);
+    }
+  }
+
   const handleClearFilters = () => {
     setSearchQuery('');
     setStatusFilter([]);
@@ -147,6 +205,23 @@ export default function OrdersPage() {
   const hasFilters = searchQuery || statusFilter.length > 0;
 
   const rows = filteredOrders.map((order) => [
+    // Checkbox for selection (only show for READY_TO_PICK orders)
+    order.status === 'READY_TO_PICK' ? (
+      <div
+        key={`select-${order.id}`}
+        onClick={(e) => e.stopPropagation()}
+        style={{ display: 'flex', alignItems: 'center' }}
+      >
+        <Checkbox
+          label=""
+          labelHidden
+          checked={selectedOrderIds.has(order.id)}
+          onChange={() => toggleOrderSelection(order.id)}
+        />
+      </div>
+    ) : (
+      <span key={`select-${order.id}`} />
+    ),
     // Order Number (clickable)
     <Text variant="bodyMd" fontWeight="semibold" key={order.id}>
       #{order.external_order_id}
@@ -211,6 +286,19 @@ export default function OrdersPage() {
           </Banner>
         )}
 
+        {batchSuccess && (
+          <Banner
+            title="Pick Batch Created"
+            tone="success"
+            onDismiss={() => setBatchSuccess(null)}
+          >
+            <p>
+              Created batch with {batchSuccess.orderCount} order(s).
+              Go to Picklists page to view and process.
+            </p>
+          </Banner>
+        )}
+
         {/* Search and Filter */}
         <Card>
           <BlockStack gap="300">
@@ -249,6 +337,42 @@ export default function OrdersPage() {
           </BlockStack>
         </Card>
 
+        {/* Selection Toolbar */}
+        {(selectedOrderIds.size > 0 || filteredOrders.some((o) => o.status === 'READY_TO_PICK')) && (
+          <Card>
+            <InlineStack gap="400" align="space-between" blockAlign="center">
+              <InlineStack gap="400" blockAlign="center">
+                <ButtonGroup>
+                  <Button
+                    onClick={selectAllFiltered}
+                    disabled={filteredOrders.filter((o) => o.status === 'READY_TO_PICK').length === 0}
+                  >
+                    Select Ready ({filteredOrders.filter((o) => o.status === 'READY_TO_PICK').length})
+                  </Button>
+                  {selectedOrderIds.size > 0 && (
+                    <Button onClick={clearSelection}>
+                      Clear Selection
+                    </Button>
+                  )}
+                </ButtonGroup>
+                {selectedOrderIds.size > 0 && (
+                  <Text variant="bodySm">
+                    {selectedReadyOrders.length} order{selectedReadyOrders.length !== 1 ? 's' : ''} selected
+                  </Text>
+                )}
+              </InlineStack>
+              <Button
+                variant="primary"
+                onClick={handleCreateBatch}
+                loading={creatingBatch}
+                disabled={selectedReadyOrders.length === 0}
+              >
+                Create Pick Batch ({selectedReadyOrders.length})
+              </Button>
+            </InlineStack>
+          </Card>
+        )}
+
         <Card>
           {loading ? (
             <div style={{ padding: '40px', textAlign: 'center' }}>
@@ -271,8 +395,8 @@ export default function OrdersPage() {
             </div>
           ) : (
             <DataTable
-              columnContentTypes={['text', 'text', 'text', 'text', 'numeric', 'numeric']}
-              headings={['Order #', 'Customer', 'Date', 'Status', 'Items', 'Total']}
+              columnContentTypes={['text', 'text', 'text', 'text', 'text', 'numeric', 'numeric']}
+              headings={['', 'Order #', 'Customer', 'Date', 'Status', 'Items', 'Total']}
               rows={rows}
               hoverable
               onRowClick={(row, index) => setSelectedOrder(filteredOrders[index])}
