@@ -18,7 +18,7 @@ import {
   Divider,
   ProgressBar,
 } from '@shopify/polaris';
-import { getBoms, createBom, getComponents } from '../utils/api.jsx';
+import { getBoms, createBom, updateBom, getComponents } from '../utils/api.jsx';
 
 /**
  * Format price from pence to pounds
@@ -53,11 +53,18 @@ export default function BundlesPage() {
   // Detail modal
   const [selectedBom, setSelectedBom] = useState(null);
 
+  // Edit modal state
+  const [editingBom, setEditingBom] = useState(null);
+  const [editForm, setEditForm] = useState({ description: '', componentQuantities: {} });
+  const [editComponentSearch, setEditComponentSearch] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const [bomData, compData] = await Promise.all([getBoms(), getComponents()]);
+      const [bomData, compData] = await Promise.all([getBoms({ limit: 99999 }), getComponents({ limit: 99999 })]);
       setBoms(bomData.boms || []);
       setComponents(compData.components || []);
     } catch (err) {
@@ -252,6 +259,89 @@ export default function BundlesPage() {
       setCreating(false);
     }
   }
+
+  // Open edit modal with BOM data pre-populated
+  function handleEditBom(bom) {
+    // Build componentQuantities from existing bom_components
+    const componentQuantities = {};
+    (bom.bom_components || []).forEach((bc) => {
+      componentQuantities[bc.component_id] = String(bc.qty_required);
+    });
+
+    setEditForm({
+      description: bom.description || '',
+      componentQuantities,
+    });
+    setEditComponentSearch('');
+    setSaveError(null);
+    setEditingBom(bom);
+    setSelectedBom(null); // Close detail modal if open
+  }
+
+  // Save BOM edits
+  async function handleSaveEdit() {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const componentsList = Object.entries(editForm.componentQuantities)
+        .filter(([, qty]) => {
+          const parsed = parseInt(qty);
+          return !isNaN(parsed) && parsed > 0;
+        })
+        .map(([component_id, qty_required]) => ({
+          component_id,
+          qty_required: parseInt(qty_required),
+        }));
+
+      if (componentsList.length === 0) {
+        setSaveError('BOM must have at least one component with quantity > 0');
+        setSaving(false);
+        return;
+      }
+
+      await updateBom(editingBom.id, {
+        description: editForm.description,
+        components: componentsList,
+      });
+
+      setSuccessMessage(`BOM "${editingBom.bundle_sku}" updated successfully`);
+      setEditingBom(null);
+      await load();
+    } catch (err) {
+      setSaveError(err.message || 'Failed to update BOM');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Edit form handlers
+  const handleEditFormChange = useCallback((field) => {
+    return (value) => setEditForm((prev) => ({ ...prev, [field]: value }));
+  }, []);
+
+  const handleEditQuantityChange = useCallback((componentId) => {
+    return (value) =>
+      setEditForm((prev) => ({
+        ...prev,
+        componentQuantities: { ...prev.componentQuantities, [componentId]: value },
+      }));
+  }, []);
+
+  // Filter components for edit form
+  const editFilteredComponents = useMemo(() => {
+    if (!editComponentSearch) return components;
+    const query = editComponentSearch.toLowerCase();
+    return components.filter(
+      (c) =>
+        c.internal_sku?.toLowerCase().includes(query) ||
+        c.description?.toLowerCase().includes(query)
+    );
+  }, [components, editComponentSearch]);
+
+  // Count selected components in edit form
+  const editSelectedCount = Object.values(editForm.componentQuantities).filter(
+    (qty) => parseInt(qty) > 0
+  ).length;
 
   // Count selected components
   const selectedCount = Object.values(form.componentQuantities).filter(
@@ -642,6 +732,13 @@ export default function BundlesPage() {
           onClose={() => setSelectedBom(null)}
           title={selectedBom.bundle_sku}
           large
+          primaryAction={{
+            content: 'Edit BOM',
+            onAction: () => handleEditBom(selectedBom),
+          }}
+          secondaryActions={[
+            { content: 'Close', onAction: () => setSelectedBom(null) },
+          ]}
         >
           <Modal.Section>
             <BlockStack gap="400">
@@ -757,6 +854,132 @@ export default function BundlesPage() {
                   <Text tone="subdued">No components defined for this BOM.</Text>
                 )}
               </BlockStack>
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
+      )}
+
+      {/* Edit BOM Modal */}
+      {editingBom && (
+        <Modal
+          open={!!editingBom}
+          onClose={() => setEditingBom(null)}
+          title={`Edit BOM: ${editingBom.bundle_sku}`}
+          large
+          primaryAction={{
+            content: 'Save Changes',
+            onAction: handleSaveEdit,
+            loading: saving,
+            disabled: editSelectedCount === 0,
+          }}
+          secondaryActions={[
+            { content: 'Cancel', onAction: () => setEditingBom(null) },
+          ]}
+        >
+          <Modal.Section>
+            <BlockStack gap="400">
+              {saveError && (
+                <Banner tone="critical" onDismiss={() => setSaveError(null)}>
+                  <p>{saveError}</p>
+                </Banner>
+              )}
+
+              <TextField
+                label="Description"
+                value={editForm.description}
+                onChange={handleEditFormChange('description')}
+                placeholder="e.g., Starter Tool Kit"
+              />
+
+              <Divider />
+
+              <InlineStack align="space-between">
+                <Text variant="headingSm">Components ({editSelectedCount} selected)</Text>
+              </InlineStack>
+
+              <TextField
+                label="Search components"
+                labelHidden
+                placeholder="Search components..."
+                value={editComponentSearch}
+                onChange={setEditComponentSearch}
+                clearButton
+                onClearButtonClick={() => setEditComponentSearch('')}
+                autoComplete="off"
+              />
+
+              <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+                <BlockStack gap="200">
+                  {editFilteredComponents.length === 0 ? (
+                    <Text tone="subdued">No components match "{editComponentSearch}"</Text>
+                  ) : (
+                    editFilteredComponents.map((c) => {
+                      const currentQty = editForm.componentQuantities[c.id] || '';
+                      const hasQty = parseInt(currentQty) > 0;
+                      return (
+                        <div
+                          key={c.id}
+                          style={{
+                            padding: '8px',
+                            borderRadius: '4px',
+                            backgroundColor: hasQty ? 'var(--p-color-bg-surface-success)' : 'transparent',
+                          }}
+                        >
+                          <InlineStack gap="200" blockAlign="center" wrap={false}>
+                            <div style={{ flex: 1 }}>
+                              <Text variant="bodySm" fontWeight="semibold">{c.internal_sku}</Text>
+                              <Text variant="bodySm" tone="subdued">{c.description || 'No description'}</Text>
+                              <InlineStack gap="200">
+                                {c.total_available !== null && (
+                                  <Text variant="bodySm" tone={c.total_available <= 0 ? 'critical' : 'subdued'}>
+                                    Stock: {c.total_available}
+                                  </Text>
+                                )}
+                                {c.cost_ex_vat_pence && (
+                                  <Text variant="bodySm" tone="subdued">
+                                    {formatPrice(c.cost_ex_vat_pence)}
+                                  </Text>
+                                )}
+                              </InlineStack>
+                            </div>
+                            <div style={{ width: '80px' }}>
+                              <TextField
+                                label={`Qty for ${c.internal_sku}`}
+                                labelHidden
+                                type="number"
+                                min="0"
+                                value={currentQty}
+                                onChange={handleEditQuantityChange(c.id)}
+                                placeholder="0"
+                                autoComplete="off"
+                              />
+                            </div>
+                          </InlineStack>
+                        </div>
+                      );
+                    })
+                  )}
+                </BlockStack>
+              </div>
+
+              {editSelectedCount > 0 && (
+                <>
+                  <Divider />
+                  <Text variant="headingSm">Selected Components:</Text>
+                  <InlineStack gap="200" wrap>
+                    {Object.entries(editForm.componentQuantities)
+                      .filter(([, qty]) => parseInt(qty) > 0)
+                      .map(([compId, qty]) => {
+                        const comp = components.find((c) => c.id === compId);
+                        return (
+                          <Badge key={compId} tone="success">
+                            {comp?.internal_sku || compId} ×{qty}
+                          </Badge>
+                        );
+                      })}
+                  </InlineStack>
+                </>
+              )}
             </BlockStack>
           </Modal.Section>
         </Modal>
