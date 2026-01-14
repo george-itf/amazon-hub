@@ -1,0 +1,77 @@
+{
+  "project": "Amazon Hub Brain",
+  "description": "Operational console for Invicta Tools (UK) - inventory, orders, BOMs, and profitability tracking",
+  "tech_stack": {
+    "frontend": "React + Vite + Shopify Polaris UI",
+    "backend": "Express.js",
+    "database": "Supabase (PostgreSQL)"
+  },
+  "branch": "claude/amazon-hub-brain-app-dwfhj",
+  "last_commit": "0b32f57 - Comprehensively enhance all operational pages with advanced features",
+
+  "completed_work": [
+    {
+      "feature": "Historical Order Import",
+      "files": ["server/routes/shopify.js"],
+      "description": "Import historical orders from Shopify API"
+    },
+    {
+      "feature": "Profitability Analytics",
+      "files": ["server/routes/analytics.js", "client/src/pages/ProfitPage.jsx", "client/src/utils/api.jsx"],
+      "description": "Comprehensive profit tracking with margins, fees, trends"
+    },
+    {
+      "feature": "Enhanced AuditPage",
+      "files": ["client/src/pages/AuditPage.jsx"],
+      "description": "Date range filters with presets, event detail modal with before/after diff viewer, statistics sidebar, entity history"
+    },
+    {
+      "feature": "Enhanced Dashboard",
+      "files": ["client/src/pages/Dashboard.jsx"],
+      "description": "Performance tab with analytics, mini sparkline charts, critical state banners, today's performance sidebar"
+    },
+    {
+      "feature": "Enhanced ReviewPage",
+      "files": ["client/src/pages/ReviewPage.jsx"],
+      "description": "Keyboard shortcuts (j/k/g/G/Enter/r/s/?), stats cards by reason, searchable BOM selection, filter by reason, tabbed shortcuts help"
+    },
+    {
+      "feature": "Enhanced ComponentsPage",
+      "files": ["client/src/pages/ComponentsPage.jsx"],
+      "description": "Detail modal with stock movement history, inventory stats with health progress bar, sorting options, stock value calculations"
+    },
+    {
+      "feature": "Enhanced BundlesPage",
+      "files": ["client/src/pages/BundlesPage.jsx"],
+      "description": "Availability calculations (limiting component detection), cost calculations, availability filtering, progress bar, detailed modal with can-build quantities"
+    },
+    {
+      "feature": "Enhanced ListingsPage",
+      "files": ["client/src/pages/ListingsPage.jsx"],
+      "description": "Statistics tab with coverage metrics, source breakdown, top BOMs table, source filtering, sorting, enhanced detail modal"
+    }
+  ],
+
+  "key_patterns": {
+    "price_format": "Prices stored in pence, displayed as £X.XX using formatPrice(pence)",
+    "filtering": "All pages use useMemo for filtered data with search, status, and type filters",
+    "modals": "Detail modals use selectedItem state pattern with Modal component",
+    "api": "API functions in client/src/utils/api.jsx, routes in server/routes/"
+  },
+
+  "key_files": {
+    "frontend_pages": "client/src/pages/*.jsx",
+    "api_client": "client/src/utils/api.jsx",
+    "backend_routes": "server/routes/*.js",
+    "backend_services": "server/services/*.js",
+    "main_server": "server/index.js"
+  },
+
+  "database_tables": [
+    "components", "boms", "bom_components", "inventory",
+    "orders", "order_items", "review_queue", "listing_memory",
+    "stock_movements", "system_events", "audit_log"
+  ],
+
+  "status": "All pages comprehensively enhanced. Ready for further development."
+}
