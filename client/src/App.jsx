@@ -1,26 +1,43 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, Suspense, lazy } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { Frame } from '@shopify/polaris';
+import { Frame, Spinner } from '@shopify/polaris';
 import Nav from './components/Nav.jsx';
 import { useAuth } from './context/AuthContext.jsx';
 import { InvictaLoading } from './components/ui/index.jsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.jsx';
 import KeyboardShortcutsHelp from './components/KeyboardShortcutsHelp.jsx';
 
-// Import pages
-import Dashboard from './pages/Dashboard.jsx';
-import OrdersPage from './pages/OrdersPage.jsx';
-import PicklistsPage from './pages/PicklistsPage.jsx';
-import ComponentsPage from './pages/ComponentsPage.jsx';
-import BundlesPage from './pages/BundlesPage.jsx';
-import ListingsPage from './pages/ListingsPage.jsx';
-import ReviewPage from './pages/ReviewPage.jsx';
-import ReplenishmentPage from './pages/ReplenishmentPage.jsx';
-import ProfitPage from './pages/ProfitPage.jsx';
-import LoginPage from './pages/LoginPage.jsx';
-import ReturnsPage from './pages/ReturnsPage.jsx';
-import AuditPage from './pages/AuditPage.jsx';
-import AsinAnalyzerPage from './pages/AsinAnalyzerPage.jsx';
+// Lazy load pages for code splitting
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
+const OrdersPage = lazy(() => import('./pages/OrdersPage.jsx'));
+const PicklistsPage = lazy(() => import('./pages/PicklistsPage.jsx'));
+const ComponentsPage = lazy(() => import('./pages/ComponentsPage.jsx'));
+const BundlesPage = lazy(() => import('./pages/BundlesPage.jsx'));
+const ListingsPage = lazy(() => import('./pages/ListingsPage.jsx'));
+const ReviewPage = lazy(() => import('./pages/ReviewPage.jsx'));
+const ReplenishmentPage = lazy(() => import('./pages/ReplenishmentPage.jsx'));
+const ProfitPage = lazy(() => import('./pages/ProfitPage.jsx'));
+const LoginPage = lazy(() => import('./pages/LoginPage.jsx'));
+const ReturnsPage = lazy(() => import('./pages/ReturnsPage.jsx'));
+const AuditPage = lazy(() => import('./pages/AuditPage.jsx'));
+const AsinAnalyzerPage = lazy(() => import('./pages/AsinAnalyzerPage.jsx'));
+
+/**
+ * Loading fallback for lazy-loaded pages
+ */
+function PageLoader() {
+  return (
+    <div style={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      minHeight: '200px',
+      padding: '40px',
+    }}>
+      <Spinner accessibilityLabel="Loading page" size="large" />
+    </div>
+  );
+}
 
 /**
  * Layout wrapper that renders the navigation and page content.
@@ -59,30 +76,34 @@ export default function App() {
   // Render login page separately to avoid the full Frame layout
   if (!user) {
     return (
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="*" element={<Navigate to="/login" />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="*" element={<Navigate to="/login" />} />
+        </Routes>
+      </Suspense>
     );
   }
 
   return (
     <Frame navigation={<Nav />}>
-      <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/orders" element={<OrdersPage />} />
-        <Route path="/picklists" element={<PicklistsPage />} />
-        <Route path="/components" element={<ComponentsPage />} />
-        <Route path="/bundles" element={<BundlesPage />} />
-        <Route path="/listings" element={<ListingsPage />} />
-        <Route path="/review" element={<ReviewPage />} />
-        <Route path="/replenishment" element={<ReplenishmentPage />} />
-        <Route path="/profit" element={<ProfitPage />} />
-        <Route path="/returns" element={<ReturnsPage />} />
-        <Route path="/audit" element={<AuditPage />} />
-        <Route path="/analyzer" element={<AsinAnalyzerPage />} />
-        <Route path="*" element={<Navigate to="/" />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/orders" element={<OrdersPage />} />
+          <Route path="/picklists" element={<PicklistsPage />} />
+          <Route path="/components" element={<ComponentsPage />} />
+          <Route path="/bundles" element={<BundlesPage />} />
+          <Route path="/listings" element={<ListingsPage />} />
+          <Route path="/review" element={<ReviewPage />} />
+          <Route path="/replenishment" element={<ReplenishmentPage />} />
+          <Route path="/profit" element={<ProfitPage />} />
+          <Route path="/returns" element={<ReturnsPage />} />
+          <Route path="/audit" element={<AuditPage />} />
+          <Route path="/analyzer" element={<AsinAnalyzerPage />} />
+          <Route path="*" element={<Navigate to="/" />} />
+        </Routes>
+      </Suspense>
       <KeyboardShortcutsHelp
         open={showShortcuts}
         onClose={() => setShowShortcuts(false)}

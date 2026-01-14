@@ -1,13 +1,26 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Vite configuration for the Amazon Hub Brain frontend.  The
-// development server runs on port 3000 and the React plugin is
-// enabled.  No special proxy is configured; API requests should
-// include the appropriate host and port (e.g. http://localhost:3001).
+// Vite configuration for the Amazon Hub Brain frontend.
 export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000
-  }
+  },
+  build: {
+    // Increase chunk size warning limit slightly (default is 500)
+    chunkSizeWarningLimit: 600,
+    rollupOptions: {
+      output: {
+        // Manual chunk splitting for better caching and smaller initial load
+        manualChunks: {
+          // Vendor chunks - split large dependencies
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-polaris': ['@shopify/polaris', '@shopify/polaris-icons'],
+          // Group utility libraries
+          'vendor-utils': ['date-fns'],
+        },
+      },
+    },
+  },
 });
