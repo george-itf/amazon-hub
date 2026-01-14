@@ -454,6 +454,7 @@ router.get('/', async (req, res) => {
           )
         )
       `, { count: 'exact' })
+      .order('order_date', { ascending: false })
       .order('created_at', { ascending: false });
 
     if (status) {
