@@ -16,16 +16,10 @@ router.get('/', async (req, res) => {
   const { status = 'PENDING', limit = 50, offset = 0 } = req.query;
 
   try {
+    // First try with FK hint, fall back to simple query if FK doesn't exist
     let query = supabase
       .from('review_queue')
-      .select(`
-        *,
-        orders!order_id (
-          id,
-          external_order_id,
-          customer_name
-        )
-      `, { count: 'exact' })
+      .select('*', { count: 'exact' })
       .order('created_at', { ascending: false });
 
     if (status !== 'ALL') {
@@ -42,8 +36,29 @@ router.get('/', async (req, res) => {
       return errors.internal(res, 'Failed to fetch review queue');
     }
 
+    // Fetch orders separately if there are order_ids
+    const orderIds = [...new Set(data?.filter(d => d.order_id).map(d => d.order_id) || [])];
+    let ordersMap = {};
+
+    if (orderIds.length > 0) {
+      const { data: orders } = await supabase
+        .from('orders')
+        .select('id, external_order_id, customer_name')
+        .in('id', orderIds);
+
+      if (orders) {
+        ordersMap = Object.fromEntries(orders.map(o => [o.id, o]));
+      }
+    }
+
+    // Merge orders data into items
+    const items = data?.map(item => ({
+      ...item,
+      orders: item.order_id ? ordersMap[item.order_id] || null : null
+    })) || [];
+
     sendSuccess(res, {
-      items: data,
+      items,
       total: count,
       limit: parseInt(limit),
       offset: parseInt(offset)
@@ -100,15 +115,7 @@ router.get('/:id', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('review_queue')
-      .select(`
-        *,
-        orders!order_id (
-          id,
-          external_order_id,
-          customer_name,
-          customer_email
-        )
-      `)
+      .select('*')
       .eq('id', id)
       .single();
 
@@ -119,6 +126,18 @@ router.get('/:id', async (req, res) => {
       console.error('Review item fetch error:', error);
       return errors.internal(res, 'Failed to fetch review item');
     }
+
+    // Fetch order separately if order_id exists
+    let orderData = null;
+    if (data.order_id) {
+      const { data: order } = await supabase
+        .from('orders')
+        .select('id, external_order_id, customer_name, customer_email')
+        .eq('id', data.order_id)
+        .single();
+      orderData = order;
+    }
+    data.orders = orderData;
 
     // Get suggested BOMs based on parse_intent if available
     let suggestedBoms = [];
