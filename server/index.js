@@ -25,6 +25,7 @@ import intelligenceRoutes from './routes/intelligence.js';
 import auditRoutes from './routes/audit.js';
 import dashboardRoutes from './routes/dashboard.js';
 import brainRoutes from './routes/brain.js';
+import analyticsRoutes from './routes/analytics.js';
 
 // Create the Express app
 const app = express();
@@ -155,6 +156,9 @@ app.use('/audit', auditRoutes);
 
 // Brain routes (resolution, parsing)
 app.use('/brain', brainRoutes);
+
+// Analytics routes (profitability, trends)
+app.use('/analytics', analyticsRoutes);
 
 // 404 handler
 app.use((req, res) => {
