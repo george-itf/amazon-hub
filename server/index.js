@@ -9,6 +9,7 @@ dotenv.config();
 import { correlationIdMiddleware, sendSuccess, errors } from './middleware/correlationId.js';
 import { authMiddleware, requireAdmin, requireStaff } from './middleware/auth.js';
 import { idempotencyMiddleware } from './middleware/idempotency.js';
+import { standardLimiter, heavyOpLimiter, authLimiter } from './middleware/rateLimit.js';
 
 // Route imports
 import authRoutes from './routes/auth.js';
@@ -58,15 +59,32 @@ app.use(cors({
   credentials: true
 }));
 
-// Security headers for production
-if (process.env.NODE_ENV === 'production') {
-  app.use((req, res, next) => {
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('X-Frame-Options', 'DENY');
-    res.setHeader('X-XSS-Protection', '1; mode=block');
-    next();
-  });
-}
+// Security headers (apply in all environments for consistency)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '0'); // Deprecated, disable in favor of CSP
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+
+  // Content Security Policy
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "frame-ancestors 'none'"
+  ].join('; '));
+
+  // HSTS only in production (requires HTTPS)
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+
+  next();
+});
 
 // Parse JSON request bodies (5MB limit for production safety)
 app.use(express.json({ limit: '5mb' }));
@@ -109,8 +127,8 @@ app.get('/', (req, res) => {
   });
 });
 
-// Auth routes (no auth middleware)
-app.use('/auth', authRoutes);
+// Auth routes (no auth middleware, rate limited)
+app.use('/auth', authLimiter, authRoutes);
 
 // Apply authentication middleware to all subsequent routes
 app.use(authMiddleware);
@@ -157,23 +175,28 @@ app.use('/audit', auditRoutes);
 // Brain routes (resolution, parsing)
 app.use('/brain', brainRoutes);
 
-// Analytics routes (profitability, trends)
-app.use('/analytics', analyticsRoutes);
+// Analytics routes (profitability, trends) - heavy operation rate limited
+app.use('/analytics', heavyOpLimiter, analyticsRoutes);
 
 // 404 handler
 app.use((req, res) => {
   errors.notFound(res, 'Endpoint');
 });
 
-// Error handler
+// Error handler - always return generic message to prevent information leakage
 app.use((err, req, res, next) => {
-  console.error(`[${req.correlationId}] Error:`, err);
+  // Log full error details server-side with correlation ID
+  console.error(`[${req.correlationId || 'NO_CORRELATION_ID'}] ${req.method} ${req.path} Error:`, err.message);
+  if (process.env.NODE_ENV !== 'production') {
+    console.error(err.stack);
+  }
 
   if (err.message === 'Not allowed by CORS') {
     return errors.forbidden(res, 'CORS policy does not allow this origin');
   }
 
-  errors.internal(res, process.env.NODE_ENV === 'production' ? 'Internal server error' : err.message);
+  // Always return generic message - never expose internal error details
+  return errors.internal(res, 'Internal server error');
 });
 
 // Start listening for incoming requests
@@ -184,13 +207,34 @@ const server = app.listen(port, host, () => {
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
+// Server timeout configuration to prevent idle connection DoS
+server.headersTimeout = 30000;  // 30s to receive HTTP headers
+server.requestTimeout = 60000; // 60s total request timeout
+server.keepAliveTimeout = 5000; // 5s keep-alive before closing idle connections
+
+// Graceful shutdown with timeout
+const SHUTDOWN_TIMEOUT = 30000; // 30 seconds
+
+function gracefulShutdown(signal) {
+  console.log(`${signal} received, shutting down gracefully...`);
+
+  // Set hard timeout to force exit if graceful shutdown hangs
+  const shutdownTimer = setTimeout(() => {
+    console.error('Forced shutdown due to timeout');
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT);
+
+  // Prevent the timeout from keeping the process alive
+  shutdownTimer.unref();
+
   server.close(() => {
-    console.log('Server closed');
+    console.log('All connections closed, server shutdown complete');
+    clearTimeout(shutdownTimer);
     process.exit(0);
   });
-});
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
 export default app;

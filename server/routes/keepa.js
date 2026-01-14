@@ -246,11 +246,14 @@ router.post('/refresh', requireAdmin, async (req, res) => {
 
     const expiresAt = new Date(Date.now() + settings.min_refresh_minutes * 60 * 1000);
     const results = [];
+    const cacheUpserts = [];
+    const validProducts = [];
 
+    // Prepare batch data
     for (const product of (data.products || [])) {
       if (!product || !product.asin) continue;
 
-      await supabase.from('keepa_products_cache').upsert({
+      cacheUpserts.push({
         asin: product.asin,
         domain_id: settings.domain_id,
         payload_json: product,
@@ -258,7 +261,7 @@ router.post('/refresh', requireAdmin, async (req, res) => {
         expires_at: expiresAt.toISOString()
       });
 
-      await storeKeepaMetrics(product.asin, product);
+      validProducts.push(product);
 
       results.push({
         asin: product.asin,
@@ -266,6 +269,17 @@ router.post('/refresh', requireAdmin, async (req, res) => {
         success: true
       });
     }
+
+    // Batch upsert all cache entries at once
+    if (cacheUpserts.length > 0) {
+      const { error: cacheError } = await supabase.from('keepa_products_cache').upsert(cacheUpserts);
+      if (cacheError) {
+        console.error('Batch cache upsert error:', cacheError);
+      }
+    }
+
+    // Store metrics in parallel for all valid products
+    await Promise.all(validProducts.map(product => storeKeepaMetrics(product.asin, product)));
 
     await recordSystemEvent({
       eventType: 'KEEPA_REFRESH',
@@ -399,8 +413,13 @@ router.put('/settings', requireAdmin, async (req, res) => {
       updates.push({ setting_key: 'domain_id', setting_value: domain_id.toString() });
     }
 
-    for (const update of updates) {
-      await supabase.from('keepa_settings').upsert(update);
+    // Batch upsert all settings at once instead of sequential upserts
+    if (updates.length > 0) {
+      const { error: updateError } = await supabase.from('keepa_settings').upsert(updates);
+      if (updateError) {
+        console.error('Settings batch upsert error:', updateError);
+        return errors.internal(res, 'Failed to update some settings');
+      }
     }
 
     const newSettings = await getKeepaSettings();

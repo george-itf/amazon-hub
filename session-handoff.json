@@ -7,7 +7,7 @@
     "database": "Supabase (PostgreSQL)"
   },
   "branch": "claude/session-handoff-tracking-p9O7Q",
-  "last_commit": "0b32f57 - Comprehensively enhance all operational pages with advanced features",
+  "last_commit": "Pending - 2026 architectural hardening",
 
   "completed_work": [
     {
@@ -49,6 +49,32 @@
       "feature": "Enhanced ListingsPage",
       "files": ["client/src/pages/ListingsPage.jsx"],
       "description": "Statistics tab with coverage metrics, source breakdown, top BOMs table, source filtering, sorting, enhanced detail modal"
+    },
+    {
+      "feature": "Comprehensive Code Audit & Security Fixes",
+      "files": [
+        "server/index.js",
+        "server/routes/analytics.js",
+        "server/routes/audit.js",
+        "server/routes/keepa.js",
+        "server/services/audit.js",
+        "server/services/shopify.js",
+        "server/services/googleAuth.js",
+        "client/src/utils/api.jsx",
+        "client/src/pages/BundlesPage.jsx"
+      ],
+      "description": "Full codebase audit with 171 issues identified. Fixed: missing return statements, added auth to audit routes, security headers (CSP/HSTS), error handler hardening, graceful shutdown with timeout, request timeouts, N+1 query batching, input validation, frontend performance optimizations"
+    },
+    {
+      "feature": "2026 Architectural Hardening",
+      "files": [
+        "server/index.js",
+        "server/package.json",
+        "server/routes/audit.js",
+        "server/middleware/rateLimit.js",
+        "server/types/validation.js"
+      ],
+      "description": "Added Node >=22 engine constraints, permission model script, server timeouts (headers/request/keepAlive), rate limiting middleware (standard/heavy/auth), unified Zod validation schemas with middleware factory"
     }
   ],
 
@@ -56,7 +82,8 @@
     "price_format": "Prices stored in pence, displayed as £X.XX using formatPrice(pence)",
     "filtering": "All pages use useMemo for filtered data with search, status, and type filters",
     "modals": "Detail modals use selectedItem state pattern with Modal component",
-    "api": "API functions in client/src/utils/api.jsx, routes in server/routes/"
+    "api": "API functions in client/src/utils/api.jsx, routes in server/routes/",
+    "validation": "Zod schemas in server/types/validation.js with validate() middleware"
   },
 
   "key_files": {
@@ -64,7 +91,9 @@
     "api_client": "client/src/utils/api.jsx",
     "backend_routes": "server/routes/*.js",
     "backend_services": "server/services/*.js",
-    "main_server": "server/index.js"
+    "main_server": "server/index.js",
+    "validation_schemas": "server/types/validation.js",
+    "rate_limiting": "server/middleware/rateLimit.js"
   },
 
   "database_tables": [
@@ -73,5 +102,39 @@
     "stock_movements", "system_events", "audit_log"
   ],
 
-  "status": "All pages comprehensively enhanced. Ready for further development."
+  "recent_audit": {
+    "date": "2026-01-14",
+    "issues_found": 171,
+    "critical_fixed": 5,
+    "high_fixed": 10,
+    "categories": [
+      "Security headers (CSP, HSTS, Referrer-Policy)",
+      "Authentication on audit routes",
+      "Error handler hardening",
+      "Request timeouts (30s default)",
+      "Graceful shutdown with timeout",
+      "Input validation for services",
+      "N+1 query optimizations",
+      "Frontend performance (useMemo/useCallback)"
+    ]
+  },
+
+  "hardening_2026": {
+    "date": "2026-01-14",
+    "changes": [
+      "Node.js engine constraint >=22.0.0",
+      "Secure start script with permission model",
+      "Server timeouts (headersTimeout: 30s, requestTimeout: 60s, keepAliveTimeout: 5s)",
+      "Rate limiting: standardLimiter (100/15min), heavyOpLimiter (10/hour), authLimiter (5/15min)",
+      "Unified Zod validation schemas for all API payloads",
+      "validate() middleware factory for request validation",
+      "Return statements in all audit route catch blocks"
+    ],
+    "new_dependencies": [
+      "express-rate-limit ^7.0.0",
+      "zod ^3.22.0"
+    ]
+  },
+
+  "status": "2026 architectural hardening complete. Rate limiting, validation, and server timeouts implemented."
 }

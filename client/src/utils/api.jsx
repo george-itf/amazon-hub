@@ -19,6 +19,9 @@ export function clearStoredToken() {
   localStorage.removeItem(TOKEN_KEY);
 }
 
+// Default request timeout (30 seconds)
+const DEFAULT_TIMEOUT = 30000;
+
 /**
  * Helper to make an authenticated HTTP request.
  * Sends the stored token via Authorization header.
@@ -44,11 +47,30 @@ async function request(url, options = {}) {
     headers['Idempotency-Key'] = options.idempotencyKey;
   }
 
-  const resp = await fetch(`${API_BASE}${url}`, {
-    ...options,
-    headers,
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
+  // Set up request timeout with AbortController
+  const timeout = options.timeout || DEFAULT_TIMEOUT;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  let resp;
+  try {
+    resp = await fetch(`${API_BASE}${url}`, {
+      ...options,
+      headers,
+      signal: controller.signal,
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      const error = new Error(`Request timeout after ${timeout}ms`);
+      error.code = 'TIMEOUT';
+      throw error;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   // Handle non-JSON responses
   const contentType = resp.headers.get('content-type');
@@ -504,13 +526,28 @@ export async function getAnalyticsCustomers(params = {}) {
 export async function exportAnalytics(params = {}) {
   const query = new URLSearchParams(params).toString();
   const token = getStoredToken();
-  const response = await fetch(`${API_BASE}/analytics/export${query ? `?${query}` : ''}`, {
-    headers: {
-      'Authorization': token ? `Bearer ${token}` : '',
-    },
-  });
-  if (!response.ok) {
-    throw new Error('Export failed');
+
+  // Set up request timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s for exports
+
+  try {
+    const response = await fetch(`${API_BASE}/analytics/export${query ? `?${query}` : ''}`, {
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error('Export failed');
+    }
+    return response.blob();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Export request timeout');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return response.blob();
 }

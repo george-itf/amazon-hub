@@ -4,8 +4,12 @@
   "private": true,
   "type": "module",
   "main": "index.js",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "scripts": {
     "start": "node index.js",
+    "start:secure": "node --permission --allow-fs-read=./ --allow-fs-write=./logs/ --allow-net index.js",
     "dev": "node --watch index.js",
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "seed": "node db/seeds/seed.js"
@@ -17,9 +21,11 @@
     "crypto": "^1.0.1",
     "dotenv": "^16.0.3",
     "express": "^4.18.2",
+    "express-rate-limit": "^7.0.0",
     "jsonwebtoken": "^9.0.1",
     "node-fetch": "^3.3.2",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "zod": "^3.22.0"
   },
   "devDependencies": {
     "jest": "^29.7.0"
