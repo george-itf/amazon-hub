@@ -20,7 +20,7 @@ router.get('/', async (req, res) => {
       .from('review_queue')
       .select(`
         *,
-        orders (
+        orders!order_id (
           id,
           external_order_id,
           customer_name
@@ -102,7 +102,7 @@ router.get('/:id', async (req, res) => {
       .from('review_queue')
       .select(`
         *,
-        orders (
+        orders!order_id (
           id,
           external_order_id,
           customer_name,

@@ -9,6 +9,8 @@ export const standardLimiter = rateLimit({
   max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  // Acknowledge that we're using 'trust proxy: 1' in index.js
+  validate: { trustProxy: false },
   message: {
     success: false,
     error: {
@@ -28,6 +30,8 @@ export const heavyOpLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  // Acknowledge that we're using 'trust proxy: 1' in index.js
+  validate: { trustProxy: false },
   message: {
     success: false,
     error: {
@@ -47,6 +51,8 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true, // Don't count successful logins
+  // Acknowledge that we're using 'trust proxy: 1' in index.js
+  validate: { trustProxy: false },
   message: {
     success: false,
     error: {
