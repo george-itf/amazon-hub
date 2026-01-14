@@ -32,7 +32,8 @@ import analyticsRoutes from './routes/analytics.js';
 const app = express();
 
 // Trust proxy for correct IP detection behind load balancers
-app.set('trust proxy', true);
+// Use '1' to trust only one proxy hop (Railway/Vercel load balancer)
+app.set('trust proxy', 1);
 
 // First-line request debug logging (before any middleware)
 app.use((req, res, next) => {

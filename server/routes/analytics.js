@@ -54,7 +54,7 @@ router.get('/summary', requireStaff, async (req, res) => {
               components (
                 id,
                 internal_sku,
-                unit_cost_pence
+                cost_ex_vat_pence
               )
             )
           )
@@ -117,7 +117,7 @@ router.get('/products', requireStaff, async (req, res) => {
               components (
                 id,
                 internal_sku,
-                unit_cost_pence
+                cost_ex_vat_pence
               )
             )
           )
@@ -169,7 +169,7 @@ router.get('/products', requireStaff, async (req, res) => {
         let lineCogs = 0;
         if (line.boms?.bom_components) {
           for (const bc of line.boms.bom_components) {
-            const componentCost = bc.components?.unit_cost_pence || 0;
+            const componentCost = bc.components?.cost_ex_vat_pence || 0;
             lineCogs += (componentCost * bc.qty_required * qty);
           }
         }
@@ -247,7 +247,7 @@ router.get('/trends', requireStaff, async (req, res) => {
             bom_components (
               qty_required,
               components (
-                unit_cost_pence
+                cost_ex_vat_pence
               )
             )
           )
@@ -312,7 +312,7 @@ router.get('/trends', requireStaff, async (req, res) => {
 
         if (line.boms?.bom_components) {
           for (const bc of line.boms.bom_components) {
-            const componentCost = bc.components?.unit_cost_pence || 0;
+            const componentCost = bc.components?.cost_ex_vat_pence || 0;
             orderCogs += (componentCost * bc.qty_required * qty);
           }
         }
@@ -569,7 +569,7 @@ function calculateMetrics(orders) {
       // Calculate COGS from BOM
       if (line.boms?.bom_components) {
         for (const bc of line.boms.bom_components) {
-          const componentCost = bc.components?.unit_cost_pence || 0;
+          const componentCost = bc.components?.cost_ex_vat_pence || 0;
           orderCogs += (componentCost * bc.qty_required * qty);
         }
       }

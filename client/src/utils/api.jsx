@@ -84,11 +84,16 @@ async function request(url, options = {}) {
   const json = await resp.json();
 
   if (!resp.ok) {
-    const error = new Error(json.message || json.error || `Request failed: ${resp.status}`);
+    // Handle server error envelope: { ok: false, error: { code, message } }
+    const errorMessage = json.message
+      || json.error?.message
+      || (typeof json.error === 'string' ? json.error : null)
+      || `Request failed: ${resp.status}`;
+    const error = new Error(errorMessage);
     error.status = resp.status;
-    error.code = json.code;
-    error.correlationId = json.correlationId;
-    error.details = json.details;
+    error.code = json.code || json.error?.code;
+    error.correlationId = json.correlationId || json.correlation_id;
+    error.details = json.details || json.error?.details;
     throw error;
   }
 
