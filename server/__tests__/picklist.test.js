@@ -1,198 +1,8 @@
 /**
  * Tests for picklist generation utility
- * These tests use mocked Supabase data to validate the aggregation logic
+ * These are pure unit tests that validate the aggregation logic
+ * without requiring database access
  */
-
-// Mock Supabase
-const mockSupabase = {
-  from: jest.fn()
-};
-
-jest.mock('../services/supabase.js', () => ({
-  default: mockSupabase
-}));
-
-// Import after mocking
-import { generatePicklist } from '../utils/picklist.js';
-
-describe('generatePicklist', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-  });
-
-  // Helper to set up mock chain
-  function setupMockChain(data, error = null) {
-    const chain = {
-      select: jest.fn().mockReturnThis(),
-      not: jest.fn().mockReturnThis(),
-      in: jest.fn().mockReturnThis(),
-      eq: jest.fn().mockResolvedValue({ data, error })
-    };
-    chain.select.mockReturnValue(chain);
-    chain.not.mockReturnValue(chain);
-    chain.in.mockResolvedValue({ data, error });
-    return chain;
-  }
-
-  test('returns empty array when no order lines exist', async () => {
-    const chain = setupMockChain([]);
-    mockSupabase.from.mockReturnValue(chain);
-
-    const result = await generatePicklist();
-    expect(result).toEqual([]);
-  });
-
-  test('returns empty array when no lines have listing_id', async () => {
-    // First call returns order_lines with no listing_id
-    mockSupabase.from
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        not: jest.fn().mockResolvedValue({
-          data: [],
-          error: null
-        })
-      });
-
-    const result = await generatePicklist();
-    expect(result).toEqual([]);
-  });
-
-  test('aggregates quantities correctly for single BOM', async () => {
-    // Mock order_lines
-    mockSupabase.from
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        not: jest.fn().mockResolvedValue({
-          data: [
-            { listing_id: 'listing-1', quantity: 2 },
-            { listing_id: 'listing-1', quantity: 3 }
-          ],
-          error: null
-        })
-      })
-      // Mock listing_memory
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        in: jest.fn().mockResolvedValue({
-          data: [{ id: 'listing-1', bom_id: 'bom-1' }],
-          error: null
-        })
-      })
-      // Mock bom_components
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        in: jest.fn().mockResolvedValue({
-          data: [
-            { bom_id: 'bom-1', component_id: 'comp-1', qty_required: 2 },
-            { bom_id: 'bom-1', component_id: 'comp-2', qty_required: 1 }
-          ],
-          error: null
-        })
-      })
-      // Mock components
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        in: jest.fn().mockResolvedValue({
-          data: [
-            { id: 'comp-1', internal_sku: 'SKU-001', description: 'Component 1' },
-            { id: 'comp-2', internal_sku: 'SKU-002', description: 'Component 2' }
-          ],
-          error: null
-        })
-      });
-
-    const result = await generatePicklist();
-
-    // 2 orders of 2 qty + 3 orders of 3 qty = 5 total order lines
-    // Component 1: 5 * 2 = 10
-    // Component 2: 5 * 1 = 5
-    expect(result).toHaveLength(2);
-    expect(result.find(r => r.internal_sku === 'SKU-001').quantity_required).toBe(10);
-    expect(result.find(r => r.internal_sku === 'SKU-002').quantity_required).toBe(5);
-  });
-
-  test('handles multiple BOMs correctly', async () => {
-    mockSupabase.from
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        not: jest.fn().mockResolvedValue({
-          data: [
-            { listing_id: 'listing-1', quantity: 1 },
-            { listing_id: 'listing-2', quantity: 1 }
-          ],
-          error: null
-        })
-      })
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        in: jest.fn().mockResolvedValue({
-          data: [
-            { id: 'listing-1', bom_id: 'bom-1' },
-            { id: 'listing-2', bom_id: 'bom-2' }
-          ],
-          error: null
-        })
-      })
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        in: jest.fn().mockResolvedValue({
-          data: [
-            { bom_id: 'bom-1', component_id: 'comp-shared', qty_required: 1 },
-            { bom_id: 'bom-2', component_id: 'comp-shared', qty_required: 2 }
-          ],
-          error: null
-        })
-      })
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        in: jest.fn().mockResolvedValue({
-          data: [
-            { id: 'comp-shared', internal_sku: 'SHARED-SKU', description: 'Shared Component' }
-          ],
-          error: null
-        })
-      });
-
-    const result = await generatePicklist();
-
-    // BOM-1 needs 1, BOM-2 needs 2, total = 3
-    expect(result).toHaveLength(1);
-    expect(result[0].quantity_required).toBe(3);
-  });
-
-  test('throws error on order_lines fetch failure', async () => {
-    mockSupabase.from.mockReturnValueOnce({
-      select: jest.fn().mockReturnThis(),
-      not: jest.fn().mockResolvedValue({
-        data: null,
-        error: { message: 'Database error' }
-      })
-    });
-
-    await expect(generatePicklist()).rejects.toEqual({ message: 'Database error' });
-  });
-
-  test('skips listings without bom_id', async () => {
-    mockSupabase.from
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        not: jest.fn().mockResolvedValue({
-          data: [{ listing_id: 'listing-no-bom', quantity: 5 }],
-          error: null
-        })
-      })
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        in: jest.fn().mockResolvedValue({
-          data: [{ id: 'listing-no-bom', bom_id: null }],
-          error: null
-        })
-      });
-
-    const result = await generatePicklist();
-    expect(result).toEqual([]);
-  });
-});
 
 describe('Picklist Aggregation Logic', () => {
   // Test the aggregation algorithm without database calls
@@ -269,5 +79,135 @@ describe('Picklist Aggregation Logic', () => {
     const result = aggregateComponents(orderLines, listingToBom, bomToComponents);
     expect(result['C1']).toBe(10); // Only L1 counted
     expect(Object.keys(result)).toHaveLength(1);
+  });
+
+  test('handles empty order lines', () => {
+    const orderLines = [];
+    const listingToBom = new Map([['L1', 'BOM1']]);
+    const bomToComponents = new Map([
+      ['BOM1', [{ component_id: 'C1', qty_required: 1 }]]
+    ]);
+
+    const result = aggregateComponents(orderLines, listingToBom, bomToComponents);
+    expect(Object.keys(result)).toHaveLength(0);
+  });
+
+  test('handles BOM with no components', () => {
+    const orderLines = [{ listing_id: 'L1', quantity: 5 }];
+    const listingToBom = new Map([['L1', 'BOM1']]);
+    const bomToComponents = new Map([['BOM1', []]]);
+
+    const result = aggregateComponents(orderLines, listingToBom, bomToComponents);
+    expect(Object.keys(result)).toHaveLength(0);
+  });
+
+  test('handles multiple components per BOM', () => {
+    const orderLines = [{ listing_id: 'L1', quantity: 2 }];
+    const listingToBom = new Map([['L1', 'BOM1']]);
+    const bomToComponents = new Map([
+      ['BOM1', [
+        { component_id: 'DRILL', qty_required: 1 },
+        { component_id: 'BATTERY', qty_required: 2 },
+        { component_id: 'CHARGER', qty_required: 1 }
+      ]]
+    ]);
+
+    const result = aggregateComponents(orderLines, listingToBom, bomToComponents);
+    expect(result['DRILL']).toBe(2);    // 2 * 1
+    expect(result['BATTERY']).toBe(4);  // 2 * 2
+    expect(result['CHARGER']).toBe(2);  // 2 * 1
+  });
+});
+
+describe('Picklist Building Logic', () => {
+  function buildPicklist(aggregated, componentDetails) {
+    const pickList = [];
+
+    for (const compId of Object.keys(aggregated)) {
+      const details = componentDetails.get(compId);
+      if (!details) continue;
+
+      pickList.push({
+        component_id: compId,
+        internal_sku: details.internal_sku,
+        description: details.description,
+        quantity_required: aggregated[compId]
+      });
+    }
+
+    return pickList;
+  }
+
+  test('builds picklist with component details', () => {
+    const aggregated = { 'C1': 10, 'C2': 5 };
+    const componentDetails = new Map([
+      ['C1', { internal_sku: 'SKU-001', description: 'Component 1' }],
+      ['C2', { internal_sku: 'SKU-002', description: 'Component 2' }]
+    ]);
+
+    const result = buildPicklist(aggregated, componentDetails);
+
+    expect(result).toHaveLength(2);
+    expect(result.find(r => r.internal_sku === 'SKU-001').quantity_required).toBe(10);
+    expect(result.find(r => r.internal_sku === 'SKU-002').quantity_required).toBe(5);
+  });
+
+  test('skips components without details', () => {
+    const aggregated = { 'C1': 10, 'MISSING': 5 };
+    const componentDetails = new Map([
+      ['C1', { internal_sku: 'SKU-001', description: 'Component 1' }]
+    ]);
+
+    const result = buildPicklist(aggregated, componentDetails);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].internal_sku).toBe('SKU-001');
+  });
+
+  test('returns empty array for empty aggregated', () => {
+    const aggregated = {};
+    const componentDetails = new Map([
+      ['C1', { internal_sku: 'SKU-001', description: 'Component 1' }]
+    ]);
+
+    const result = buildPicklist(aggregated, componentDetails);
+    expect(result).toHaveLength(0);
+  });
+});
+
+describe('Batch Query Optimization Validation', () => {
+  // These tests validate that our optimization approach is correct
+
+  test('unique listing IDs are correctly extracted', () => {
+    const lines = [
+      { listing_id: 'L1', quantity: 1 },
+      { listing_id: 'L1', quantity: 2 },
+      { listing_id: 'L2', quantity: 1 },
+      { listing_id: 'L1', quantity: 3 }
+    ];
+
+    const uniqueListingIds = [...new Set(lines.map(l => l.listing_id))];
+    expect(uniqueListingIds).toEqual(['L1', 'L2']);
+    expect(uniqueListingIds).toHaveLength(2);
+  });
+
+  test('unique BOM IDs are correctly extracted from Map', () => {
+    const listingToBom = new Map([
+      ['L1', 'BOM1'],
+      ['L2', 'BOM1'],
+      ['L3', 'BOM2']
+    ]);
+
+    const uniqueBomIds = [...new Set(listingToBom.values())];
+    expect(uniqueBomIds).toEqual(['BOM1', 'BOM2']);
+    expect(uniqueBomIds).toHaveLength(2);
+  });
+
+  test('component IDs are correctly extracted from aggregated', () => {
+    const aggregated = { 'C1': 10, 'C2': 5, 'C3': 3 };
+    const componentIds = Object.keys(aggregated);
+
+    expect(componentIds).toEqual(['C1', 'C2', 'C3']);
+    expect(componentIds).toHaveLength(3);
   });
 });

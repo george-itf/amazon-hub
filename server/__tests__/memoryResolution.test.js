@@ -1,16 +1,8 @@
 /**
  * Tests for memory resolution utilities
  * These tests verify the resolution strategy and priority order
+ * Note: These are pure unit tests that don't require database access
  */
-
-// Mock Supabase
-const mockSupabase = {
-  from: jest.fn()
-};
-
-jest.mock('../services/supabase.js', () => ({
-  default: mockSupabase
-}));
 
 // Test the resolution priority algorithm without database
 describe('Memory Resolution Priority', () => {
