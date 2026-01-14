@@ -9,6 +9,7 @@ dotenv.config();
 import { correlationIdMiddleware, sendSuccess, errors } from './middleware/correlationId.js';
 import { authMiddleware, requireAdmin, requireStaff } from './middleware/auth.js';
 import { idempotencyMiddleware } from './middleware/idempotency.js';
+import { standardLimiter, heavyOpLimiter, authLimiter } from './middleware/rateLimit.js';
 
 // Route imports
 import authRoutes from './routes/auth.js';
@@ -126,8 +127,8 @@ app.get('/', (req, res) => {
   });
 });
 
-// Auth routes (no auth middleware)
-app.use('/auth', authRoutes);
+// Auth routes (no auth middleware, rate limited)
+app.use('/auth', authLimiter, authRoutes);
 
 // Apply authentication middleware to all subsequent routes
 app.use(authMiddleware);
@@ -174,8 +175,8 @@ app.use('/audit', auditRoutes);
 // Brain routes (resolution, parsing)
 app.use('/brain', brainRoutes);
 
-// Analytics routes (profitability, trends)
-app.use('/analytics', analyticsRoutes);
+// Analytics routes (profitability, trends) - heavy operation rate limited
+app.use('/analytics', heavyOpLimiter, analyticsRoutes);
 
 // 404 handler
 app.use((req, res) => {
@@ -205,6 +206,11 @@ const server = app.listen(port, host, () => {
   console.log(`Amazon Hub Brain API listening on ${host}:${port}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
+
+// Server timeout configuration to prevent idle connection DoS
+server.headersTimeout = 30000;  // 30s to receive HTTP headers
+server.requestTimeout = 60000; // 60s total request timeout
+server.keepAliveTimeout = 5000; // 5s keep-alive before closing idle connections
 
 // Graceful shutdown with timeout
 const SHUTDOWN_TIMEOUT = 30000; // 30 seconds

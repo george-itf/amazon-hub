@@ -169,7 +169,7 @@ router.get('/timeline', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Timeline error:', err);
-    errors.internal(res, 'Failed to fetch timeline');
+    return errors.internal(res, 'Failed to fetch timeline');
   }
 });
 
@@ -261,7 +261,7 @@ router.get('/timeline/market-context', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Market context error:', err);
-    errors.internal(res, 'Failed to fetch market context');
+    return errors.internal(res, 'Failed to fetch market context');
   }
 });
 
@@ -294,7 +294,7 @@ router.get('/entity/:type/:id', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Entity audit error:', err);
-    errors.internal(res, 'Failed to fetch entity audit history');
+    return errors.internal(res, 'Failed to fetch entity audit history');
   }
 });
 
@@ -326,7 +326,7 @@ router.get('/activity', requireStaff, async (req, res) => {
     sendSuccess(res, data || []);
   } catch (err) {
     console.error('Activity error:', err);
-    errors.internal(res, 'Failed to fetch activity');
+    return errors.internal(res, 'Failed to fetch activity');
   }
 });
 
