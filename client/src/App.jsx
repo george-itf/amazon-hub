@@ -1,9 +1,11 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { Frame } from '@shopify/polaris';
 import Nav from './components/Nav.jsx';
 import { useAuth } from './context/AuthContext.jsx';
 import { InvictaLoading } from './components/ui/index.jsx';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.jsx';
+import KeyboardShortcutsHelp from './components/KeyboardShortcutsHelp.jsx';
 
 // Import pages
 import Dashboard from './pages/Dashboard.jsx';
@@ -27,6 +29,16 @@ import AuditPage from './pages/AuditPage.jsx';
  */
 export default function App() {
   const { user, loading } = useAuth();
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  const handleShowHelp = useCallback(() => {
+    setShowShortcuts(true);
+  }, []);
+
+  // Enable keyboard shortcuts when user is logged in
+  useKeyboardShortcuts({
+    onShowHelp: user ? handleShowHelp : undefined,
+  });
 
   // Show loading state while checking auth
   if (loading) {
@@ -69,6 +81,10 @@ export default function App() {
         <Route path="/audit" element={<AuditPage />} />
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
+      <KeyboardShortcutsHelp
+        open={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
     </Frame>
   );
 }

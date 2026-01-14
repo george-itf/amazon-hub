@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigation, Text } from '@shopify/polaris';
+import { Navigation, Text, InlineStack } from '@shopify/polaris';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   HomeIcon,
@@ -14,6 +14,7 @@ import {
   ExchangeIcon,
   ClockIcon,
   ExitIcon,
+  KeyboardIcon,
 } from '@shopify/polaris-icons';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -81,6 +82,15 @@ export default function Nav() {
       <Navigation.Section
         title="Account"
         items={[
+          {
+            label: 'Keyboard Shortcuts',
+            icon: KeyboardIcon,
+            onClick: () => {
+              // Trigger keyboard shortcut help via key event
+              window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', shiftKey: true }));
+            },
+            badge: '?',
+          },
           {
             label: user?.name || user?.email || 'User',
             icon: ExitIcon,
