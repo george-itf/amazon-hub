@@ -43,6 +43,8 @@ export default function ReturnsPage() {
   const [selectedReturn, setSelectedReturn] = useState(null);
   const [processModal, setProcessModal] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [processError, setProcessError] = useState(null);
+  const [successMessage, setSuccessMessage] = useState(null);
   const tableState = useTableState(25);
 
   const loadReturns = useCallback(async () => {
@@ -72,12 +74,15 @@ export default function ReturnsPage() {
 
     try {
       setProcessing(true);
+      setProcessError(null);
       await api.processReturn(selectedReturn.id, idempotencyKey);
       setProcessModal(false);
       setSelectedReturn(null);
+      setSuccessMessage(`Return ${selectedReturn.rma_number} processed successfully`);
       await loadReturns();
     } catch (err) {
-      alert('Process failed: ' + err.message);
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Processing failed');
+      setProcessError(errorMsg);
     } finally {
       setProcessing(false);
     }
@@ -143,12 +148,25 @@ export default function ReturnsPage() {
   return (
     <Page
       title="Returns Management"
-      primaryAction={isAdmin ? {
-        content: 'Create Return',
-        onAction: () => alert('Create return modal - implement based on needs'),
-      } : undefined}
+      subtitle="Process customer returns and manage quarantine"
+      secondaryActions={[{ content: 'Refresh', onAction: loadReturns }]}
     >
       <BlockStack gap="400">
+        {/* Success message */}
+        {successMessage && (
+          <Banner tone="success" onDismiss={() => setSuccessMessage(null)}>
+            <p>{successMessage}</p>
+          </Banner>
+        )}
+
+        {/* Process error */}
+        {processError && (
+          <Banner title="Processing Failed" tone="critical" onDismiss={() => setProcessError(null)}>
+            <p>{processError}</p>
+          </Banner>
+        )}
+
+        {/* Load error */}
         {error && (
           <Banner tone="critical" onDismiss={() => setError(null)}>
             <p>{error}</p>

@@ -48,7 +48,8 @@ export default function ReviewPage() {
       setBoms(bomData.boms || []);
     } catch (err) {
       console.error(err);
-      setError(err.message || 'Failed to load review queue');
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Failed to load review queue');
+      setError(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -106,7 +107,8 @@ export default function ReviewPage() {
       closeResolve();
       await load();
     } catch (err) {
-      setResolveState((prev) => ({ ...prev, resolving: false, error: err.message }));
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Failed to resolve');
+      setResolveState((prev) => ({ ...prev, resolving: false, error: errorMsg }));
     }
   }
 
@@ -115,7 +117,8 @@ export default function ReviewPage() {
       await skipReview(item.id, 'Skipped by user');
       await load();
     } catch (err) {
-      setError(`Failed to skip: ${err.message}`);
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Unknown error');
+      setError(`Failed to skip: ${errorMsg}`);
     }
   }
 
