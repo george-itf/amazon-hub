@@ -1,5 +1,5 @@
 -- BOM Components Import
--- Generated: 2026-01-14T11:07:50.257912
+-- Generated: 2026-01-14T11:33:00.985143
 
 -- This requires BOMs and components to exist first
 INSERT INTO bom_components (bom_id, component_id, qty_required)
