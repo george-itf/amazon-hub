@@ -21,6 +21,7 @@ const LoginPage = lazy(() => import('./pages/LoginPage.jsx'));
 const ReturnsPage = lazy(() => import('./pages/ReturnsPage.jsx'));
 const AuditPage = lazy(() => import('./pages/AuditPage.jsx'));
 const AsinAnalyzerPage = lazy(() => import('./pages/AsinAnalyzerPage.jsx'));
+const BomReviewPage = lazy(() => import('./pages/BomReviewPage.jsx'));
 
 /**
  * Loading fallback for lazy-loaded pages
@@ -94,6 +95,7 @@ export default function App() {
           <Route path="/picklists" element={<PicklistsPage />} />
           <Route path="/components" element={<ComponentsPage />} />
           <Route path="/bundles" element={<BundlesPage />} />
+          <Route path="/bom-review" element={<BomReviewPage />} />
           <Route path="/listings" element={<ListingsPage />} />
           <Route path="/review" element={<ReviewPage />} />
           <Route path="/replenishment" element={<ReplenishmentPage />} />

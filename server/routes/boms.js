@@ -7,6 +7,91 @@ import { auditLog, getAuditContext } from '../services/audit.js';
 const router = express.Router();
 
 /**
+ * GET /boms/review
+ * Returns BOMs that need review (auto-created ones)
+ * Must be defined BEFORE /:id route
+ */
+router.get('/review', async (req, res) => {
+  const { status = 'PENDING_REVIEW', limit = 50, offset = 0 } = req.query;
+
+  try {
+    let query = supabase
+      .from('boms')
+      .select(`
+        *,
+        bom_components (
+          id,
+          component_id,
+          qty_required,
+          components (
+            id,
+            internal_sku,
+            description,
+            brand,
+            cost_ex_vat_pence,
+            total_available
+          )
+        ),
+        listing_memory (
+          id,
+          asin,
+          sku,
+          title_fingerprint,
+          is_active
+        )
+      `, { count: 'exact' })
+      .order('created_at', { ascending: false });
+
+    if (status !== 'ALL') {
+      query = query.eq('review_status', status);
+    }
+
+    const { data, error, count } = await query.range(
+      parseInt(offset),
+      parseInt(offset) + parseInt(limit) - 1
+    );
+
+    if (error) {
+      console.error('BOM review fetch error:', error);
+      return errors.internal(res, 'Failed to fetch BOM review queue');
+    }
+
+    sendSuccess(res, {
+      boms: data || [],
+      total: count || 0,
+      limit: parseInt(limit),
+      offset: parseInt(offset)
+    });
+  } catch (err) {
+    console.error('BOM review fetch error:', err);
+    errors.internal(res, 'Failed to fetch BOM review queue');
+  }
+});
+
+/**
+ * GET /boms/review/stats
+ * Get BOM review queue statistics
+ */
+router.get('/review/stats', async (req, res) => {
+  try {
+    const [pending, approved, rejected] = await Promise.all([
+      supabase.from('boms').select('*', { count: 'exact', head: true }).eq('review_status', 'PENDING_REVIEW'),
+      supabase.from('boms').select('*', { count: 'exact', head: true }).eq('review_status', 'APPROVED'),
+      supabase.from('boms').select('*', { count: 'exact', head: true }).eq('review_status', 'REJECTED')
+    ]);
+
+    sendSuccess(res, {
+      pending: pending.count || 0,
+      approved: approved.count || 0,
+      rejected: rejected.count || 0
+    });
+  } catch (err) {
+    console.error('BOM review stats error:', err);
+    errors.internal(res, 'Failed to fetch BOM review statistics');
+  }
+});
+
+/**
  * GET /boms
  * Returns all BOMs with their component requirements
  */
@@ -321,6 +406,175 @@ router.put('/:id', requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('BOM update error:', err);
     errors.internal(res, 'Failed to update BOM');
+  }
+});
+
+/**
+ * POST /boms/:id/approve
+ * Approve a BOM from the review queue
+ * ADMIN only
+ */
+router.post('/:id/approve', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { components, description } = req.body;
+
+  try {
+    // Get current BOM
+    const { data: current, error: fetchError } = await supabase
+      .from('boms')
+      .select(`
+        *,
+        bom_components (
+          id,
+          component_id,
+          qty_required
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return errors.notFound(res, 'BOM');
+      }
+      throw fetchError;
+    }
+
+    // Update components if provided (user edited them)
+    if (components && Array.isArray(components)) {
+      // Delete existing components
+      await supabase.from('bom_components').delete().eq('bom_id', id);
+
+      // Insert new components
+      if (components.length > 0) {
+        const { error: linesError } = await supabase
+          .from('bom_components')
+          .insert(components.map(c => ({
+            bom_id: id,
+            component_id: c.component_id,
+            qty_required: c.qty_required
+          })));
+
+        if (linesError) {
+          console.error('BOM components update error:', linesError);
+          return errors.internal(res, 'Failed to update BOM components');
+        }
+      }
+    }
+
+    // Update BOM status to APPROVED
+    const updates = {
+      review_status: 'APPROVED',
+      reviewed_at: new Date().toISOString()
+    };
+    if (description !== undefined) {
+      updates.description = description;
+    }
+
+    const { error: updateError } = await supabase
+      .from('boms')
+      .update(updates)
+      .eq('id', id);
+
+    if (updateError) {
+      console.error('BOM approve error:', updateError);
+      return errors.internal(res, 'Failed to approve BOM');
+    }
+
+    // Fetch updated BOM
+    const { data: updated } = await supabase
+      .from('boms')
+      .select(`
+        *,
+        bom_components (
+          id,
+          component_id,
+          qty_required,
+          components (
+            internal_sku,
+            description
+          )
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    await auditLog({
+      entityType: 'BOM',
+      entityId: id,
+      action: 'APPROVE',
+      beforeJson: current,
+      afterJson: updated,
+      changesSummary: `Approved BOM ${updated?.bundle_sku || id}`,
+      ...getAuditContext(req)
+    });
+
+    sendSuccess(res, { approved: true, bom: updated });
+  } catch (err) {
+    console.error('BOM approve error:', err);
+    errors.internal(res, 'Failed to approve BOM');
+  }
+});
+
+/**
+ * POST /boms/:id/reject
+ * Reject a BOM from the review queue
+ * ADMIN only
+ */
+router.post('/:id/reject', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { reason } = req.body;
+
+  try {
+    // Get current BOM
+    const { data: current, error: fetchError } = await supabase
+      .from('boms')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return errors.notFound(res, 'BOM');
+      }
+      throw fetchError;
+    }
+
+    // Update BOM status to REJECTED and deactivate
+    const { error: updateError } = await supabase
+      .from('boms')
+      .update({
+        review_status: 'REJECTED',
+        reviewed_at: new Date().toISOString(),
+        is_active: false,
+        rejection_reason: reason
+      })
+      .eq('id', id);
+
+    if (updateError) {
+      console.error('BOM reject error:', updateError);
+      return errors.internal(res, 'Failed to reject BOM');
+    }
+
+    // Also deactivate any listing_memory entries pointing to this BOM
+    await supabase
+      .from('listing_memory')
+      .update({ is_active: false })
+      .eq('bom_id', id);
+
+    await auditLog({
+      entityType: 'BOM',
+      entityId: id,
+      action: 'REJECT',
+      beforeJson: current,
+      changesSummary: `Rejected BOM ${current?.bundle_sku || id}: ${reason || 'No reason given'}`,
+      ...getAuditContext(req)
+    });
+
+    sendSuccess(res, { rejected: true });
+  } catch (err) {
+    console.error('BOM reject error:', err);
+    errors.internal(res, 'Failed to reject BOM');
   }
 });
 

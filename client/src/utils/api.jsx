@@ -197,6 +197,31 @@ export async function getBomAvailability(id, location) {
   return request(`/boms/${id}/availability${query}`);
 }
 
+// ============ BOM Review API ============
+
+export async function getBomReviewQueue(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/boms/review${query ? `?${query}` : ''}`);
+}
+
+export async function getBomReviewStats() {
+  return request('/boms/review/stats');
+}
+
+export async function approveBom(id, updates = {}) {
+  return request(`/boms/${id}/approve`, {
+    method: 'POST',
+    body: updates
+  });
+}
+
+export async function rejectBom(id, reason) {
+  return request(`/boms/${id}/reject`, {
+    method: 'POST',
+    body: { reason }
+  });
+}
+
 // ============ Listings API ============
 
 export async function getListings(params = {}) {
