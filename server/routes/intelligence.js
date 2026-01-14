@@ -56,10 +56,18 @@ router.get('/constraints/:componentId', async (req, res) => {
   const { componentId } = req.params;
 
   try {
-    // Get component info
+    // OPTIMIZED: Get component info with stock in a single query
     const { data: component, error: componentError } = await supabase
       .from('components')
-      .select('*')
+      .select(`
+        *,
+        component_stock (
+          id,
+          location,
+          on_hand,
+          reserved
+        )
+      `)
       .eq('id', componentId)
       .single();
 
@@ -70,16 +78,11 @@ router.get('/constraints/:componentId', async (req, res) => {
       throw componentError;
     }
 
-    // Get stock levels
-    const { data: stock, error: stockError } = await supabase
-      .from('component_stock')
-      .select('*')
-      .eq('component_id', componentId);
+    // Extract stock from nested result
+    const stock = component.component_stock || [];
 
-    if (stockError) throw stockError;
-
-    const totalOnHand = (stock || []).reduce((sum, s) => sum + s.on_hand, 0);
-    const totalReserved = (stock || []).reduce((sum, s) => sum + s.reserved, 0);
+    const totalOnHand = stock.reduce((sum, s) => sum + s.on_hand, 0);
+    const totalReserved = stock.reduce((sum, s) => sum + s.reserved, 0);
     const totalAvailable = totalOnHand - totalReserved;
 
     // Get affected BOMs
@@ -146,10 +149,11 @@ router.get('/constraints/:componentId', async (req, res) => {
       return totalAvailable < needed && ol.orders?.status !== 'PICKED';
     });
 
-    // Get Keepa price estimate for blocked value
+    // OPTIMIZED: Get Keepa price estimate with batched queries
     let blockedPoundsEstimate = null;
 
-    if (affectedBomIds.length > 0) {
+    if (affectedBomIds.length > 0 && ordersBlockedByThis.length > 0) {
+      // Batch fetch listings with their keepa cache data
       const { data: listings } = await supabase
         .from('listing_memory')
         .select('asin, bom_id')
@@ -157,19 +161,23 @@ router.get('/constraints/:componentId', async (req, res) => {
         .not('asin', 'is', null);
 
       if (listings && listings.length > 0) {
-        const asins = listings.map(l => l.asin);
+        const asins = [...new Set(listings.map(l => l.asin))];
         const { data: keepaData } = await supabase
           .from('keepa_products_cache')
           .select('asin, payload_json')
           .in('asin', asins);
 
         if (keepaData) {
+          // Create a map for faster lookups
+          const keepaMap = new Map(keepaData.map(k => [k.asin, k]));
+          const listingMap = new Map(listings.map(l => [l.bom_id, l]));
+
           // Sum up blocked value based on buy box prices
           blockedPoundsEstimate = 0;
           for (const ol of ordersBlockedByThis) {
-            const listing = listings.find(l => l.bom_id === ol.bom_id);
+            const listing = listingMap.get(ol.bom_id);
             if (listing) {
-              const keepa = keepaData.find(k => k.asin === listing.asin);
+              const keepa = keepaMap.get(listing.asin);
               if (keepa?.payload_json?.csv?.[0]) {
                 const prices = keepa.payload_json.csv[0];
                 const latestPrice = prices[prices.length - 1];

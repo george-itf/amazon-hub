@@ -2,6 +2,12 @@
 """
 Amazon Hub Brain - Data Import Script
 Imports components, creates BOMs, and sets up listing memory from supplier files.
+
+Usage:
+    python importAllData.py [--base-dir /path/to/project]
+
+Environment Variables:
+    AMAZON_HUB_BASE_DIR - Override the base directory path
 """
 
 import pandas as pd
@@ -9,10 +15,32 @@ import json
 import re
 import hashlib
 import os
+import argparse
 from datetime import datetime
 
+def get_base_dir():
+    """
+    Determine the base directory from:
+    1. Command-line argument (--base-dir)
+    2. Environment variable (AMAZON_HUB_BASE_DIR)
+    3. Default fallback
+    """
+    # Try environment variable first
+    env_base = os.environ.get('AMAZON_HUB_BASE_DIR')
+    if env_base:
+        return env_base
+
+    # Fall back to script location (parent of scripts directory)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.dirname(os.path.dirname(script_dir))
+
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description='Amazon Hub Brain - Data Import Script')
+parser.add_argument('--base-dir', '-d', type=str, help='Base directory path for the project')
+args, _ = parser.parse_known_args()
+
 # Configuration
-BASE_DIR = '/home/user/amazon-hub'
+BASE_DIR = args.base_dir if args.base_dir else get_base_dir()
 COST_FILES = {
     'MAK': f'{BASE_DIR}/MAK-STOCK-COST.xlsx',
     'DEW': f'{BASE_DIR}/DEW-STOCK-COST.xlsx',
