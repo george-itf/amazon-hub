@@ -62,7 +62,7 @@ export default function ComponentsPage() {
     setLoading(true);
     setError(null);
     try {
-      const data = await getComponents();
+      const data = await getComponents({ limit: 99999 });
       setComponents(data.components || []);
     } catch (err) {
       console.error(err);
