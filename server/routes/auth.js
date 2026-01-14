@@ -12,6 +12,106 @@ const PASSWORD_MIN_LENGTH = 8;
 const SALT_ROUNDS = 12;
 const SESSION_DURATION_HOURS = 12;
 
+// Account lockout settings
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_DURATION_MINUTES = 15;
+
+// In-memory store for failed login attempts (key: email, value: { attempts, lockedUntil })
+// In production, consider using Redis for distributed environments
+const failedAttempts = new Map();
+
+/**
+ * Check if an account is currently locked out
+ * @param {string} email - The email to check
+ * @returns {Object} - { locked: boolean, remainingMinutes: number }
+ */
+function checkAccountLockout(email) {
+  const normalizedEmail = email.toLowerCase().trim();
+  const record = failedAttempts.get(normalizedEmail);
+
+  if (!record || !record.lockedUntil) {
+    return { locked: false, remainingMinutes: 0 };
+  }
+
+  const now = Date.now();
+  if (now < record.lockedUntil) {
+    const remainingMinutes = Math.ceil((record.lockedUntil - now) / (60 * 1000));
+    return { locked: true, remainingMinutes };
+  }
+
+  // Lockout expired, reset attempts
+  failedAttempts.delete(normalizedEmail);
+  return { locked: false, remainingMinutes: 0 };
+}
+
+/**
+ * Record a failed login attempt
+ * @param {string} email - The email that failed login
+ * @returns {Object} - { locked: boolean, attemptsRemaining: number }
+ */
+function recordFailedAttempt(email) {
+  const normalizedEmail = email.toLowerCase().trim();
+  let record = failedAttempts.get(normalizedEmail);
+
+  if (!record) {
+    record = { attempts: 0, lockedUntil: null };
+  }
+
+  record.attempts += 1;
+
+  if (record.attempts >= MAX_FAILED_ATTEMPTS) {
+    record.lockedUntil = Date.now() + (LOCKOUT_DURATION_MINUTES * 60 * 1000);
+    failedAttempts.set(normalizedEmail, record);
+    return { locked: true, attemptsRemaining: 0 };
+  }
+
+  failedAttempts.set(normalizedEmail, record);
+  return { locked: false, attemptsRemaining: MAX_FAILED_ATTEMPTS - record.attempts };
+}
+
+/**
+ * Clear failed login attempts after successful login
+ * @param {string} email - The email to clear
+ */
+function clearFailedAttempts(email) {
+  const normalizedEmail = email.toLowerCase().trim();
+  failedAttempts.delete(normalizedEmail);
+}
+
+/**
+ * Validates password complexity requirements
+ * @param {string} password - The password to validate
+ * @returns {Object} - { valid: boolean, errors: string[] }
+ */
+function validatePasswordComplexity(password) {
+  const errors = [];
+
+  if (!password || password.length < PASSWORD_MIN_LENGTH) {
+    errors.push(`Password must be at least ${PASSWORD_MIN_LENGTH} characters`);
+  }
+
+  if (!/[A-Z]/.test(password)) {
+    errors.push('Password must contain at least one uppercase letter');
+  }
+
+  if (!/[a-z]/.test(password)) {
+    errors.push('Password must contain at least one lowercase letter');
+  }
+
+  if (!/[0-9]/.test(password)) {
+    errors.push('Password must contain at least one number');
+  }
+
+  if (!/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+    errors.push('Password must contain at least one special character');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
 /**
  * POST /auth/login
  * Authenticate with email and password
@@ -22,6 +122,12 @@ router.post('/login', async (req, res) => {
 
   if (!email || !password) {
     return errors.badRequest(res, 'Email and password are required');
+  }
+
+  // Check if account is locked out
+  const lockoutStatus = checkAccountLockout(email);
+  if (lockoutStatus.locked) {
+    return errors.forbidden(res, `Account is temporarily locked. Try again in ${lockoutStatus.remainingMinutes} minutes.`);
   }
 
   try {
@@ -49,8 +155,15 @@ router.post('/login', async (req, res) => {
     // Verify password
     const passwordValid = await bcrypt.compare(password, user.password_hash);
     if (!passwordValid) {
-      return errors.unauthorized(res, 'Invalid email or password');
+      const failureResult = recordFailedAttempt(email);
+      if (failureResult.locked) {
+        return errors.forbidden(res, `Account is now locked for ${LOCKOUT_DURATION_MINUTES} minutes due to too many failed attempts.`);
+      }
+      return errors.unauthorized(res, `Invalid email or password. ${failureResult.attemptsRemaining} attempts remaining.`);
     }
+
+    // Clear failed attempts on successful login
+    clearFailedAttempts(email);
 
     // Generate session token
     const token = crypto.randomBytes(32).toString('hex');
@@ -138,8 +251,10 @@ router.post('/register', async (req, res) => {
     return errors.badRequest(res, 'Email and password are required');
   }
 
-  if (password.length < PASSWORD_MIN_LENGTH) {
-    return errors.badRequest(res, `Password must be at least ${PASSWORD_MIN_LENGTH} characters`);
+  // Validate password complexity
+  const passwordValidation = validatePasswordComplexity(password);
+  if (!passwordValidation.valid) {
+    return errors.badRequest(res, passwordValidation.errors.join('. '));
   }
 
   if (!['ADMIN', 'STAFF'].includes(role)) {
@@ -158,6 +273,7 @@ router.post('/register', async (req, res) => {
     }
 
     const isFirstUser = count === 0;
+    let adminUser = null; // Track the admin who creates the user
 
     // If not first user, require authentication and ADMIN role
     if (!isFirstUser) {
@@ -185,6 +301,9 @@ router.post('/register', async (req, res) => {
       if (sessionError || !session || !session.users || session.users.role !== 'ADMIN') {
         return errors.forbidden(res, 'Only administrators can create new accounts');
       }
+
+      // Store the admin user info for audit logging
+      adminUser = session.users;
     }
 
     // Hash password
@@ -210,15 +329,15 @@ router.post('/register', async (req, res) => {
       return errors.internal(res, 'Failed to create user');
     }
 
-    // Log the creation
+    // Log the creation - use admin's info as the actor, not the new user's
     await auditLog({
       entityType: 'USER',
       entityId: newUser.id,
       action: 'CREATE',
       afterJson: { email: newUser.email, name: newUser.name, role: newUser.role },
       actorType: isFirstUser ? 'SYSTEM' : 'USER',
-      actorId: isFirstUser ? null : newUser.id,
-      actorDisplay: isFirstUser ? 'Initial Setup' : newUser.email,
+      actorId: isFirstUser ? null : adminUser.id,
+      actorDisplay: isFirstUser ? 'Initial Setup' : adminUser.email,
       correlationId: req.correlationId
     });
 
@@ -298,8 +417,10 @@ router.post('/change-password', async (req, res) => {
     return errors.badRequest(res, 'Current password and new password are required');
   }
 
-  if (new_password.length < PASSWORD_MIN_LENGTH) {
-    return errors.badRequest(res, `New password must be at least ${PASSWORD_MIN_LENGTH} characters`);
+  // Validate new password complexity
+  const passwordValidation = validatePasswordComplexity(new_password);
+  if (!passwordValidation.valid) {
+    return errors.badRequest(res, passwordValidation.errors.join('. '));
   }
 
   const parts = header.split(' ');

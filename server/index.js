@@ -68,11 +68,12 @@ app.use((req, res, next) => {
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
 
-  // Content Security Policy
+  // Content Security Policy - no unsafe-inline for better XSS protection
+  // React/Vite bundles all scripts externally, so inline scripts are not needed
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
-    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self'",
+    "style-src 'self'",
     "img-src 'self' data: https:",
     "font-src 'self'",
     "connect-src 'self'",
