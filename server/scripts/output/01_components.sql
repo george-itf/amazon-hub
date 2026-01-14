@@ -1,5 +1,5 @@
 -- Components Import
--- Generated: 2026-01-14T11:33:00.971416
+-- Generated: 2026-01-14T11:42:50.454332
 
 INSERT INTO components (internal_sku, description, brand, cost_ex_vat_pence, is_active)
 VALUES

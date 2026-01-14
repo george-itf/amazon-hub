@@ -349,12 +349,20 @@ def create_bom_components_sql(bom_components):
         "FROM (VALUES"
     ]
 
-    values = []
+    # Aggregate duplicates: sum quantities for same (bom_sku, component_sku) pair
+    aggregated = {}
     for bc in bom_components:
-        bom_sku = bc['bom_sku'].replace("'", "''")
-        comp_sku = bc['component_sku'].replace("'", "''")
-        qty = bc['qty_required']
-        values.append(f"  ('{bom_sku}', '{comp_sku}', {qty})")
+        key = (bc['bom_sku'], bc['component_sku'])
+        if key in aggregated:
+            aggregated[key] += bc['qty_required']
+        else:
+            aggregated[key] = bc['qty_required']
+
+    values = []
+    for (bom_sku, comp_sku), qty in aggregated.items():
+        bom_sku_escaped = bom_sku.replace("'", "''")
+        comp_sku_escaped = comp_sku.replace("'", "''")
+        values.append(f"  ('{bom_sku_escaped}', '{comp_sku_escaped}', {qty})")
 
     sql_lines.append(',\n'.join(values))
     sql_lines.append(") AS v(bom_sku, component_sku, qty_required)")
