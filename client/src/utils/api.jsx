@@ -212,6 +212,13 @@ export async function importOrders() {
   return request('/orders/import', { method: 'POST' });
 }
 
+export async function importHistoricalOrders(options) {
+  return request('/orders/import-historical', {
+    method: 'POST',
+    body: options
+  });
+}
+
 export async function reEvaluateOrders(orderIds) {
   return request('/orders/re-evaluate', {
     method: 'POST',

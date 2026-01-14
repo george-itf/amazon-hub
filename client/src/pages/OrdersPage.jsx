@@ -19,7 +19,8 @@ import {
   Checkbox,
   ButtonGroup,
 } from '@shopify/polaris';
-import { importOrders, getOrders, createPickBatch } from '../utils/api.jsx';
+import { importOrders, getOrders, createPickBatch, importHistoricalOrders } from '../utils/api.jsx';
+import { useAuth } from '../context/AuthContext.jsx';
 
 /**
  * Format price from pence to pounds
@@ -66,6 +67,7 @@ function getStatusBadge(status) {
  * OrdersPage - View and manage orders imported from Shopify
  */
 export default function OrdersPage() {
+  const { isAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [orders, setOrders] = useState([]);
@@ -82,6 +84,17 @@ export default function OrdersPage() {
   const [selectedOrderIds, setSelectedOrderIds] = useState(new Set());
   const [creatingBatch, setCreatingBatch] = useState(false);
   const [batchSuccess, setBatchSuccess] = useState(null);
+
+  // Historical import state
+  const [historicalModal, setHistoricalModal] = useState(false);
+  const [historicalForm, setHistoricalForm] = useState({
+    created_at_min: '',
+    created_at_max: '',
+    status: 'any',
+    fulfillment_status: 'any',
+    maxTotal: '500',
+  });
+  const [historicalImporting, setHistoricalImporting] = useState(false);
 
   async function loadOrders() {
     setLoading(true);
@@ -116,6 +129,38 @@ export default function OrdersPage() {
     } finally {
       setImporting(false);
     }
+  }
+
+  async function handleHistoricalImport() {
+    if (!historicalForm.created_at_min) {
+      setImportError('Start date is required for historical import');
+      return;
+    }
+
+    setHistoricalImporting(true);
+    setImportResult(null);
+    setImportError(null);
+    try {
+      const result = await importHistoricalOrders({
+        created_at_min: historicalForm.created_at_min,
+        created_at_max: historicalForm.created_at_max || undefined,
+        status: historicalForm.status,
+        fulfillment_status: historicalForm.fulfillment_status,
+        maxTotal: parseInt(historicalForm.maxTotal) || 500,
+      });
+      setImportResult(result);
+      setHistoricalModal(false);
+      await loadOrders();
+    } catch (err) {
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Historical import failed');
+      setImportError(errorMsg);
+    } finally {
+      setHistoricalImporting(false);
+    }
+  }
+
+  function handleHistoricalFormChange(field) {
+    return (value) => setHistoricalForm((prev) => ({ ...prev, [field]: value }));
   }
 
   // Filter and search orders (defined early for use in selection handlers)
@@ -258,6 +303,9 @@ export default function OrdersPage() {
       }}
       secondaryActions={[
         { content: 'Refresh', onAction: loadOrders },
+        ...(isAdmin
+          ? [{ content: 'Import Historical', onAction: () => setHistoricalModal(true) }]
+          : []),
       ]}
     >
       <BlockStack gap="400">
@@ -493,6 +541,97 @@ export default function OrdersPage() {
           </Modal.Section>
         </Modal>
       )}
+
+      {/* Historical Import Modal */}
+      <Modal
+        open={historicalModal}
+        onClose={() => setHistoricalModal(false)}
+        title="Import Historical Orders"
+        primaryAction={{
+          content: 'Import Orders',
+          onAction: handleHistoricalImport,
+          loading: historicalImporting,
+          disabled: !historicalForm.created_at_min,
+        }}
+        secondaryActions={[
+          { content: 'Cancel', onAction: () => setHistoricalModal(false) },
+        ]}
+      >
+        <Modal.Section>
+          <BlockStack gap="400">
+            <Banner tone="warning">
+              <p>
+                <strong>Admin Only:</strong> This will import historical orders from Shopify based on the
+                date range you specify. Orders already in the system will be skipped. This operation may
+                take a while for large date ranges.
+              </p>
+            </Banner>
+
+            <BlockStack gap="300">
+              <InlineStack gap="400">
+                <div style={{ flex: 1 }}>
+                  <TextField
+                    label="Start Date (required)"
+                    type="date"
+                    value={historicalForm.created_at_min}
+                    onChange={handleHistoricalFormChange('created_at_min')}
+                    helpText="Only import orders created on or after this date"
+                    autoComplete="off"
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <TextField
+                    label="End Date (optional)"
+                    type="date"
+                    value={historicalForm.created_at_max}
+                    onChange={handleHistoricalFormChange('created_at_max')}
+                    helpText="Only import orders created before this date"
+                    autoComplete="off"
+                  />
+                </div>
+              </InlineStack>
+
+              <InlineStack gap="400">
+                <div style={{ flex: 1 }}>
+                  <Select
+                    label="Order Status"
+                    options={[
+                      { label: 'Any status', value: 'any' },
+                      { label: 'Open only', value: 'open' },
+                      { label: 'Closed only', value: 'closed' },
+                      { label: 'Cancelled only', value: 'cancelled' },
+                    ]}
+                    value={historicalForm.status}
+                    onChange={handleHistoricalFormChange('status')}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <Select
+                    label="Fulfillment Status"
+                    options={[
+                      { label: 'Any status', value: 'any' },
+                      { label: 'Fulfilled', value: 'fulfilled' },
+                      { label: 'Unfulfilled', value: 'unfulfilled' },
+                      { label: 'Partially fulfilled', value: 'partial' },
+                    ]}
+                    value={historicalForm.fulfillment_status}
+                    onChange={handleHistoricalFormChange('fulfillment_status')}
+                  />
+                </div>
+              </InlineStack>
+
+              <TextField
+                label="Max Orders to Import"
+                type="number"
+                value={historicalForm.maxTotal}
+                onChange={handleHistoricalFormChange('maxTotal')}
+                helpText="Limit the number of orders imported (max 2000)"
+                autoComplete="off"
+              />
+            </BlockStack>
+          </BlockStack>
+        </Modal.Section>
+      </Modal>
     </Page>
   );
 }
