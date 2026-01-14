@@ -1,5 +1,5 @@
 -- BOMs Import
--- Generated: 2026-01-14T11:33:00.984490
+-- Generated: 2026-01-14T11:42:50.468386
 
 INSERT INTO boms (bundle_sku, description, is_active)
 VALUES

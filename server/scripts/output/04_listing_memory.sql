@@ -1,5 +1,5 @@
 -- Listing Memory Import
--- Generated: 2026-01-14T11:33:00.985590
+-- Generated: 2026-01-14T11:42:50.469552
 
 -- Link listings to BOMs by bundle_sku
 INSERT INTO listing_memory (asin, sku, title_fingerprint, title_fingerprint_hash, bom_id, resolution_source, is_active)
