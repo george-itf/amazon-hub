@@ -250,39 +250,57 @@ export default function OrdersPage() {
 
   const hasFilters = searchQuery || statusFilter.length > 0;
 
-  const rows = filteredOrders.map((order) => [
-    // Checkbox for selection (only show for READY_TO_PICK orders)
-    order.status === 'READY_TO_PICK' ? (
-      <div
-        key={`select-${order.id}`}
-        onClick={(e) => e.stopPropagation()}
-        style={{ display: 'flex', alignItems: 'center' }}
-      >
-        <Checkbox
-          label=""
-          labelHidden
-          checked={selectedOrderIds.has(order.id)}
-          onChange={() => toggleOrderSelection(order.id)}
-        />
-      </div>
-    ) : (
-      <span key={`select-${order.id}`} />
-    ),
-    // Order Number (clickable)
-    <Text variant="bodyMd" fontWeight="semibold" key={order.id}>
-      {order.order_number || `#${order.external_order_id}`}
-    </Text>,
-    // Customer
-    order.customer_name || order.customer_email || '-',
-    // Date
-    formatDate(order.order_date),
-    // Status
-    getStatusBadge(order.status),
-    // Items
-    order.order_lines?.length || 0,
-    // Total
-    formatPrice(order.total_price_pence, order.currency),
-  ]);
+  const rows = filteredOrders.map((order) => {
+    // Grey out dispatched/cancelled orders
+    const isCompleted = order.status === 'DISPATCHED' || order.status === 'CANCELLED';
+    const rowStyle = isCompleted ? { opacity: 0.5 } : {};
+
+    return [
+      // Checkbox for selection (only show for READY_TO_PICK orders)
+      order.status === 'READY_TO_PICK' ? (
+        <div
+          key={`select-${order.id}`}
+          onClick={(e) => e.stopPropagation()}
+          style={{ display: 'flex', alignItems: 'center' }}
+        >
+          <Checkbox
+            label=""
+            labelHidden
+            checked={selectedOrderIds.has(order.id)}
+            onChange={() => toggleOrderSelection(order.id)}
+          />
+        </div>
+      ) : (
+        <span key={`select-${order.id}`} />
+      ),
+      // Order Number (clickable)
+      <span key={order.id} style={rowStyle}>
+        <Text variant="bodyMd" fontWeight="semibold">
+          {order.order_number || `#${order.external_order_id}`}
+        </Text>
+      </span>,
+      // Customer
+      <span key={`cust-${order.id}`} style={rowStyle}>
+        {order.customer_name || order.customer_email || '-'}
+      </span>,
+      // Date
+      <span key={`date-${order.id}`} style={rowStyle}>
+        {formatDate(order.order_date)}
+      </span>,
+      // Status
+      <span key={`status-${order.id}`} style={rowStyle}>
+        {getStatusBadge(order.status)}
+      </span>,
+      // Items
+      <span key={`items-${order.id}`} style={rowStyle}>
+        {order.order_lines?.length || 0}
+      </span>,
+      // Total
+      <span key={`total-${order.id}`} style={rowStyle}>
+        {formatPrice(order.total_price_pence, order.currency)}
+      </span>,
+    ];
+  });
 
   const statusOptions = [
     { label: 'Imported', value: 'IMPORTED' },
