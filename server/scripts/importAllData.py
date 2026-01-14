@@ -180,8 +180,17 @@ def create_component_sql(components):
         "VALUES"
     ]
 
-    values = []
+    # Deduplicate components by internal_sku (keep first occurrence)
+    seen_skus = set()
+    unique_components = []
     for comp in components:
+        sku_upper = comp['internal_sku'].upper()
+        if sku_upper not in seen_skus:
+            seen_skus.add(sku_upper)
+            unique_components.append(comp)
+
+    values = []
+    for comp in unique_components:
         sku = comp['internal_sku'].replace("'", "''")
         desc = comp['description'].replace("'", "''")[:500]  # Limit description length
         brand = comp['brand'].replace("'", "''")
@@ -196,7 +205,8 @@ def create_component_sql(components):
     sql_lines.append("  cost_ex_vat_pence = EXCLUDED.cost_ex_vat_pence,")
     sql_lines.append("  updated_at = now();")
 
-    return '\n'.join(sql_lines)
+    # Return SQL and unique count for logging
+    return '\n'.join(sql_lines), len(unique_components)
 
 def match_component_to_import(component_pattern, all_components):
     """Try to match a component pattern to an imported component."""
@@ -416,10 +426,10 @@ def main():
     print("\n[Step 4] Generating SQL files...")
 
     # Components SQL
-    components_sql = create_component_sql(all_components)
+    components_sql, unique_count = create_component_sql(all_components)
     with open(f'{OUTPUT_DIR}/01_components.sql', 'w') as f:
         f.write(components_sql)
-    print(f"  - 01_components.sql ({len(all_components)} components)")
+    print(f"  - 01_components.sql ({unique_count} unique components, {len(all_components) - unique_count} duplicates removed)")
 
     # BOMs SQL
     boms_sql = create_bom_sql(boms)
@@ -450,7 +460,7 @@ def main():
     print("\n" + "=" * 60)
     print("IMPORT SUMMARY")
     print("=" * 60)
-    print(f"Components:        {len(all_components)}")
+    print(f"Components:        {unique_count} (unique)")
     print(f"BOMs:              {len(boms)}")
     print(f"BOM Components:    {len(bom_components)}")
     print(f"Listing Memory:    {len(listing_memory)}")
