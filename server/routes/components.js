@@ -11,7 +11,7 @@ const router = express.Router();
  * Returns all components with optional filters
  */
 router.get('/', async (req, res) => {
-  const { active_only = 'true', limit = 100, offset = 0 } = req.query;
+  const { active_only = 'true', limit = 1000, offset = 0 } = req.query;
 
   try {
     let query = supabase
