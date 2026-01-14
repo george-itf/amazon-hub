@@ -174,7 +174,8 @@ export default function OrdersPage() {
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
-        const matchesOrder = order.external_order_id?.toLowerCase().includes(query);
+        const matchesOrderNumber = order.order_number?.toLowerCase().includes(query);
+        const matchesOrderId = order.external_order_id?.toLowerCase().includes(query);
         const matchesCustomer = (order.customer_name || order.customer_email || '').toLowerCase().includes(query);
         const matchesItem = order.order_lines?.some(
           (line) =>
@@ -182,7 +183,7 @@ export default function OrdersPage() {
             line.asin?.toLowerCase().includes(query) ||
             line.sku?.toLowerCase().includes(query)
         );
-        if (!matchesOrder && !matchesCustomer && !matchesItem) {
+        if (!matchesOrderNumber && !matchesOrderId && !matchesCustomer && !matchesItem) {
           return false;
         }
       }
@@ -269,7 +270,7 @@ export default function OrdersPage() {
     ),
     // Order Number (clickable)
     <Text variant="bodyMd" fontWeight="semibold" key={order.id}>
-      #{order.external_order_id}
+      {order.order_number || `#${order.external_order_id}`}
     </Text>,
     // Customer
     order.customer_name || order.customer_email || '-',
@@ -459,7 +460,7 @@ export default function OrdersPage() {
         <Modal
           open={!!selectedOrder}
           onClose={() => setSelectedOrder(null)}
-          title={`Order #${selectedOrder.external_order_id}`}
+          title={`Order ${selectedOrder.order_number || '#' + selectedOrder.external_order_id}`}
           large
         >
           <Modal.Section>

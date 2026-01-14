@@ -111,6 +111,7 @@ router.post('/import', requireStaff, async (req, res) => {
         .from('orders')
         .insert({
           external_order_id: externalOrderId,
+          order_number: shopifyOrder.name || shopifyOrder.order_number?.toString() || externalOrderId,
           channel: 'shopify',
           status: finalStatus,
           order_date: shopifyOrder.created_at ? shopifyOrder.created_at.split('T')[0] : null,
@@ -327,6 +328,7 @@ router.post('/import-historical', requireAdmin, async (req, res) => {
         .from('orders')
         .insert({
           external_order_id: externalOrderId,
+          order_number: shopifyOrder.name || shopifyOrder.order_number?.toString() || externalOrderId,
           channel: 'shopify',
           status: orderStatus,
           order_date: shopifyOrder.created_at ? shopifyOrder.created_at.split('T')[0] : null,
