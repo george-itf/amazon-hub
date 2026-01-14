@@ -16,7 +16,7 @@ import {
   ExitIcon,
   KeyboardIcon,
   SearchIcon,
-  ChecklistIcon,
+  CircleTickIcon,
 } from '@shopify/polaris-icons';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -40,7 +40,7 @@ export default function Nav() {
   const inventoryItems = [
     { label: 'Components', url: '/components', icon: InventoryIcon },
     { label: 'BOMs / Bundles', url: '/bundles', icon: ProductIcon },
-    { label: 'BOM Review', url: '/bom-review', icon: ChecklistIcon },
+    { label: 'BOM Review', url: '/bom-review', icon: CircleTickIcon },
     { label: 'Listings', url: '/listings', icon: CartIcon },
     { label: 'Returns', url: '/returns', icon: ExchangeIcon },
   ];
