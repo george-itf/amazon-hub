@@ -416,16 +416,22 @@ export default function BundlesPage() {
       const cost = getCost(bom);
 
       return [
-        <Text
-          variant="bodyMd"
-          fontWeight="semibold"
+        <button
           key={bom.id}
-          as="button"
           onClick={() => setSelectedBom(bom)}
-          style={{ cursor: 'pointer', textDecoration: 'underline' }}
+          style={{
+            background: 'none',
+            border: 'none',
+            padding: 0,
+            cursor: 'pointer',
+            textDecoration: 'underline',
+            color: 'var(--p-color-text-emphasis)',
+          }}
         >
-          {bom.bundle_sku}
-        </Text>,
+          <Text variant="bodyMd" fontWeight="semibold">
+            {bom.bundle_sku}
+          </Text>
+        </button>,
         bom.description || '-',
         <BlockStack gap="100" key={`comp-${bom.id}`}>
           <InlineStack gap="100" wrap>

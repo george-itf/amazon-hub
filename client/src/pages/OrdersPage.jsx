@@ -274,11 +274,23 @@ export default function OrdersPage() {
         <span key={`select-${order.id}`} />
       ),
       // Order Number (clickable)
-      <span key={order.id} style={rowStyle}>
+      <button
+        key={order.id}
+        onClick={() => setSelectedOrder(order)}
+        style={{
+          ...rowStyle,
+          background: 'none',
+          border: 'none',
+          padding: 0,
+          cursor: 'pointer',
+          textDecoration: 'underline',
+          color: 'var(--p-color-text-emphasis)',
+        }}
+      >
         <Text variant="bodyMd" fontWeight="semibold">
           {order.order_number || `#${order.external_order_id}`}
         </Text>
-      </span>,
+      </button>,
       // Customer
       <span key={`cust-${order.id}`} style={rowStyle}>
         {order.customer_name || order.customer_email || '-'}
@@ -466,7 +478,6 @@ export default function OrdersPage() {
               headings={['', 'Order #', 'Customer', 'Date', 'Status', 'Items', 'Total']}
               rows={rows}
               hoverable
-              onRowClick={(row, index) => setSelectedOrder(filteredOrders[index])}
               footerContent={`${filteredOrders.length} order(s)`}
             />
           )}
