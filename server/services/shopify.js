@@ -6,8 +6,47 @@ dotenv.config();
 const domain = process.env.SHOPIFY_DOMAIN;
 const token = process.env.SHOPIFY_ADMIN_TOKEN;
 
+// Request timeout (30 seconds)
+const REQUEST_TIMEOUT = 30000;
+
+// ISO date format regex (YYYY-MM-DD or full ISO string)
+const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d{3})?(Z|[+-]\d{2}:\d{2})?)?$/;
+
 if (!domain || !token) {
   console.warn('Shopify domain or token not configured.  Order import will not work until these are set.');
+}
+
+/**
+ * Helper to validate ISO date strings
+ */
+function isValidISODate(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string') return false;
+  if (!ISO_DATE_REGEX.test(dateStr)) return false;
+  const date = new Date(dateStr);
+  return !isNaN(date.getTime());
+}
+
+/**
+ * Helper to make fetch request with timeout
+ */
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+    return response;
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Shopify API request timeout after ${REQUEST_TIMEOUT}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
@@ -24,7 +63,7 @@ export async function fetchOpenOrders() {
     throw new Error('Shopify credentials are not configured.');
   }
   const url = `https://${domain}/admin/api/2023-10/orders.json?status=open&fulfillment_status=unfulfilled`;
-  const resp = await fetch(url, {
+  const resp = await fetchWithTimeout(url, {
     headers: {
       'X-Shopify-Access-Token': token,
       'Content-Type': 'application/json',
@@ -32,8 +71,10 @@ export async function fetchOpenOrders() {
     }
   });
   if (!resp.ok) {
+    // Limit error body size to prevent memory issues
     const body = await resp.text();
-    throw new Error(`Failed to fetch orders from Shopify: ${resp.status} ${body}`);
+    const truncatedBody = body.length > 500 ? body.substring(0, 500) + '...' : body;
+    throw new Error(`Failed to fetch orders from Shopify: ${resp.status} ${truncatedBody}`);
   }
   const data = await resp.json();
   return data.orders || [];
@@ -66,24 +107,33 @@ export async function fetchHistoricalOrders(options = {}) {
     params.set('fulfillment_status', options.fulfillment_status);
   }
 
-  // Date filters
+  // Date filters with validation
   if (options.created_at_min) {
+    if (!isValidISODate(options.created_at_min)) {
+      throw new Error('Invalid created_at_min date format. Use ISO 8601 format (YYYY-MM-DD or full ISO string).');
+    }
     params.set('created_at_min', options.created_at_min);
   }
   if (options.created_at_max) {
+    if (!isValidISODate(options.created_at_max)) {
+      throw new Error('Invalid created_at_max date format. Use ISO 8601 format (YYYY-MM-DD or full ISO string).');
+    }
     params.set('created_at_max', options.created_at_max);
   }
 
   // Limit (max 250 per Shopify API)
-  const limit = Math.min(options.limit || 50, 250);
+  const limit = Math.min(Math.max(options.limit || 50, 1), 250);
   params.set('limit', limit.toString());
+
+  // Validate maxTotal
+  const maxTotal = Math.min(Math.max(options.maxTotal || 1000, 1), 10000);
 
   const allOrders = [];
   let url = `https://${domain}/admin/api/2023-10/orders.json?${params.toString()}`;
 
   // Paginate through all results
   while (url) {
-    const resp = await fetch(url, {
+    const resp = await fetchWithTimeout(url, {
       headers: {
         'X-Shopify-Access-Token': token,
         'Content-Type': 'application/json',
@@ -92,8 +142,10 @@ export async function fetchHistoricalOrders(options = {}) {
     });
 
     if (!resp.ok) {
+      // Limit error body size
       const body = await resp.text();
-      throw new Error(`Failed to fetch orders from Shopify: ${resp.status} ${body}`);
+      const truncatedBody = body.length > 500 ? body.substring(0, 500) + '...' : body;
+      throw new Error(`Failed to fetch orders from Shopify: ${resp.status} ${truncatedBody}`);
     }
 
     const data = await resp.json();
@@ -104,13 +156,13 @@ export async function fetchHistoricalOrders(options = {}) {
     url = null;
     if (linkHeader) {
       const nextMatch = linkHeader.match(/<([^>]+)>;\s*rel="next"/);
-      if (nextMatch) {
+      if (nextMatch && nextMatch[1]) {
         url = nextMatch[1];
       }
     }
 
     // Safety limit to prevent infinite loops
-    if (allOrders.length >= (options.maxTotal || 1000)) {
+    if (allOrders.length >= maxTotal) {
       console.warn(`Historical import capped at ${allOrders.length} orders`);
       break;
     }

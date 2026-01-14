@@ -82,7 +82,7 @@ router.get('/summary', requireStaff, async (req, res) => {
     sendSuccess(res, metrics);
   } catch (err) {
     console.error('Analytics error:', err);
-    errors.internal(res, 'Failed to generate analytics');
+    return errors.internal(res, 'Failed to generate analytics');
   }
 });
 
@@ -220,7 +220,7 @@ router.get('/products', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Product analytics error:', err);
-    errors.internal(res, 'Failed to generate product analytics');
+    return errors.internal(res, 'Failed to generate product analytics');
   }
 });
 
@@ -339,7 +339,7 @@ router.get('/trends', requireStaff, async (req, res) => {
     sendSuccess(res, { trends, granularity });
   } catch (err) {
     console.error('Trends error:', err);
-    errors.internal(res, 'Failed to generate trend data');
+    return errors.internal(res, 'Failed to generate trend data');
   }
 });
 
@@ -430,7 +430,7 @@ router.get('/customers', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Customer analytics error:', err);
-    errors.internal(res, 'Failed to generate customer analytics');
+    return errors.internal(res, 'Failed to generate customer analytics');
   }
 });
 
@@ -492,7 +492,7 @@ router.get('/export', requireStaff, async (req, res) => {
     res.send(csv);
   } catch (err) {
     console.error('Export error:', err);
-    errors.internal(res, 'Failed to export data');
+    return errors.internal(res, 'Failed to export data');
   }
 });
 

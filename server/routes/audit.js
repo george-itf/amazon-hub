@@ -1,6 +1,7 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
+import { requireStaff } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -8,7 +9,7 @@ const router = express.Router();
  * GET /audit/timeline
  * Get unified audit timeline combining system events, stock movements, etc.
  */
-router.get('/timeline', async (req, res) => {
+router.get('/timeline', requireStaff, async (req, res) => {
   const { limit = 100, offset = 0, entity_type, entity_id, since, until } = req.query;
 
   try {
@@ -176,7 +177,7 @@ router.get('/timeline', async (req, res) => {
  * GET /audit/timeline/market-context
  * Get Keepa price change events for timeline overlay
  */
-router.get('/timeline/market-context', async (req, res) => {
+router.get('/timeline/market-context', requireStaff, async (req, res) => {
   const { asin, since, until } = req.query;
 
   try {
@@ -268,7 +269,7 @@ router.get('/timeline/market-context', async (req, res) => {
  * GET /audit/entity/:type/:id
  * Get audit history for a specific entity
  */
-router.get('/entity/:type/:id', async (req, res) => {
+router.get('/entity/:type/:id', requireStaff, async (req, res) => {
   const { type, id } = req.params;
   const { limit = 50 } = req.query;
 
@@ -301,7 +302,7 @@ router.get('/entity/:type/:id', async (req, res) => {
  * GET /audit/activity
  * Get recent activity by user
  */
-router.get('/activity', async (req, res) => {
+router.get('/activity', requireStaff, async (req, res) => {
   const { user_id, limit = 50 } = req.query;
 
   try {

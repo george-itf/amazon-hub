@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Page,
   Layout,
@@ -72,57 +72,76 @@ export default function BundlesPage() {
     load();
   }, []);
 
-  // Calculate availability for a BOM
-  function calculateAvailability(bom) {
-    if (!bom.bom_components?.length) return { available: 0, limited: false, limitingComponent: null };
+  // Pre-calculate availability and cost for all BOMs once (memoized)
+  const bomCalculations = useMemo(() => {
+    const calculations = new Map();
 
-    let minAvailable = Infinity;
-    let limitingComponent = null;
+    for (const bom of boms) {
+      // Calculate availability
+      let minAvailable = Infinity;
+      let limitingComponent = null;
 
-    for (const bc of bom.bom_components) {
-      const comp = bc.components || components.find((c) => c.id === bc.component_id);
-      if (!comp) continue;
+      if (bom.bom_components?.length) {
+        for (const bc of bom.bom_components) {
+          const comp = bc.components || components.find((c) => c.id === bc.component_id);
+          if (!comp) continue;
 
-      const available = comp.total_available || 0;
-      const canMake = Math.floor(available / bc.qty_required);
+          const available = comp.total_available || 0;
+          const canMake = Math.floor(available / bc.qty_required);
 
-      if (canMake < minAvailable) {
-        minAvailable = canMake;
-        limitingComponent = comp;
+          if (canMake < minAvailable) {
+            minAvailable = canMake;
+            limitingComponent = comp;
+          }
+        }
       }
+
+      const availability = {
+        available: minAvailable === Infinity ? 0 : minAvailable,
+        limited: minAvailable < 10,
+        limitingComponent,
+      };
+
+      // Calculate cost
+      let totalCost = 0;
+      if (bom.bom_components?.length) {
+        for (const bc of bom.bom_components) {
+          const comp = bc.components || components.find((c) => c.id === bc.component_id);
+          if (comp?.cost_ex_vat_pence) {
+            totalCost += comp.cost_ex_vat_pence * bc.qty_required;
+          }
+        }
+      }
+
+      calculations.set(bom.id, {
+        availability,
+        cost: totalCost || null,
+      });
     }
 
-    return {
-      available: minAvailable === Infinity ? 0 : minAvailable,
-      limited: minAvailable < 10,
-      limitingComponent,
-    };
-  }
+    return calculations;
+  }, [boms, components]);
 
-  // Calculate total cost for a BOM
-  function calculateCost(bom) {
-    if (!bom.bom_components?.length) return null;
+  // Helper to get pre-calculated availability (fast lookup)
+  const getAvailability = useCallback((bom) => {
+    return bomCalculations.get(bom.id)?.availability || { available: 0, limited: false, limitingComponent: null };
+  }, [bomCalculations]);
 
-    let totalCost = 0;
-    for (const bc of bom.bom_components) {
-      const comp = bc.components || components.find((c) => c.id === bc.component_id);
-      if (!comp?.cost_ex_vat_pence) continue;
-      totalCost += comp.cost_ex_vat_pence * bc.qty_required;
-    }
+  // Helper to get pre-calculated cost (fast lookup)
+  const getCost = useCallback((bom) => {
+    return bomCalculations.get(bom.id)?.cost;
+  }, [bomCalculations]);
 
-    return totalCost || null;
-  }
-
-  // Filter BOMs
+  // Filter BOMs (uses pre-calculated values for fast filtering/sorting)
   const filteredBoms = useMemo(() => {
     let result = boms.filter((bom) => {
       // Status filter
       if (statusFilter === 'active' && !bom.is_active) return false;
       if (statusFilter === 'inactive' && bom.is_active) return false;
 
-      // Availability filter
+      // Availability filter (uses pre-calculated values)
       if (availabilityFilter !== 'all') {
-        const { available } = calculateAvailability(bom);
+        const { available } = getAvailability(bom);
         if (availabilityFilter === 'in_stock' && available <= 0) return false;
         if (availabilityFilter === 'low' && (available <= 0 || available >= 10)) return false;
         if (availabilityFilter === 'out' && available > 0) return false;
@@ -143,17 +162,17 @@ export default function BundlesPage() {
       return true;
     });
 
-    // Sort
+    // Sort (uses pre-calculated values for fast sorting)
     result.sort((a, b) => {
       if (sortBy === 'sku') return (a.bundle_sku || '').localeCompare(b.bundle_sku || '');
       if (sortBy === 'availability') {
-        const availA = calculateAvailability(a).available;
-        const availB = calculateAvailability(b).available;
+        const availA = getAvailability(a).available;
+        const availB = getAvailability(b).available;
         return availA - availB;
       }
       if (sortBy === 'cost') {
-        const costA = calculateCost(a) || 0;
-        const costB = calculateCost(b) || 0;
+        const costA = getCost(a) || 0;
+        const costB = getCost(b) || 0;
         return costB - costA;
       }
       if (sortBy === 'components') {
@@ -163,7 +182,7 @@ export default function BundlesPage() {
     });
 
     return result;
-  }, [boms, statusFilter, availabilityFilter, searchQuery, components, sortBy]);
+  }, [boms, statusFilter, availabilityFilter, searchQuery, components, sortBy, getAvailability, getCost]);
 
   // Filter components for the create form
   const filteredComponents = useMemo(() => {
@@ -185,17 +204,18 @@ export default function BundlesPage() {
 
   const hasFilters = searchQuery || statusFilter !== 'all' || availabilityFilter !== 'all' || sortBy !== 'sku';
 
-  function handleFormChange(field) {
+  // Memoized form change handlers to prevent re-creation on each render
+  const handleFormChange = useCallback((field) => {
     return (value) => setForm((prev) => ({ ...prev, [field]: value }));
-  }
+  }, []);
 
-  function handleQuantityChange(componentId) {
+  const handleQuantityChange = useCallback((componentId) => {
     return (value) =>
       setForm((prev) => ({
         ...prev,
         componentQuantities: { ...prev.componentQuantities, [componentId]: value },
       }));
-  }
+  }, []);
 
   async function handleCreate() {
     setCreating(true);
@@ -252,7 +272,7 @@ export default function BundlesPage() {
     return total;
   }, [form.componentQuantities, components]);
 
-  // Calculate stats
+  // Calculate stats (uses pre-calculated values)
   const stats = useMemo(() => {
     let inStock = 0;
     let lowStock = 0;
@@ -260,8 +280,8 @@ export default function BundlesPage() {
     let totalValue = 0;
 
     boms.forEach((bom) => {
-      const { available } = calculateAvailability(bom);
-      const cost = calculateCost(bom) || 0;
+      const { available } = getAvailability(bom);
+      const cost = getCost(bom) || 0;
 
       if (available > 10) inStock++;
       else if (available > 0) lowStock++;
@@ -271,10 +291,11 @@ export default function BundlesPage() {
     });
 
     return { total: boms.length, inStock, lowStock, outOfStock, totalValue };
-  }, [boms, components]);
+  }, [boms, getAvailability, getCost]);
 
-  function getAvailabilityBadge(bom) {
-    const { available, limitingComponent } = calculateAvailability(bom);
+  // Memoized availability badge renderer
+  const getAvailabilityBadge = useCallback((bom) => {
+    const { available, limitingComponent } = getAvailability(bom);
     if (available <= 0) {
       return (
         <Badge tone="critical">
@@ -292,51 +313,53 @@ export default function BundlesPage() {
       );
     }
     return <Badge tone="success">{available} available</Badge>;
-  }
+  }, [getAvailability]);
 
-  // Prepare rows for the BOM table
-  const rows = filteredBoms.map((bom) => {
-    const compCount = bom.bom_components?.length || 0;
-    const compList = bom.bom_components?.slice(0, 3).map((bc) => {
-      const comp = bc.components || components.find((c) => c.id === bc.component_id);
-      return `${comp?.internal_sku || '?'} ×${bc.qty_required}`;
-    }) || [];
-    const cost = calculateCost(bom);
+  // Memoize rows for the BOM table (uses pre-calculated values)
+  const rows = useMemo(() => {
+    return filteredBoms.map((bom) => {
+      const compCount = bom.bom_components?.length || 0;
+      const compList = bom.bom_components?.slice(0, 3).map((bc) => {
+        const comp = bc.components || components.find((c) => c.id === bc.component_id);
+        return `${comp?.internal_sku || '?'} ×${bc.qty_required}`;
+      }) || [];
+      const cost = getCost(bom);
 
-    return [
-      <Text
-        variant="bodyMd"
-        fontWeight="semibold"
-        key={bom.id}
-        as="button"
-        onClick={() => setSelectedBom(bom)}
-        style={{ cursor: 'pointer', textDecoration: 'underline' }}
-      >
-        {bom.bundle_sku}
-      </Text>,
-      bom.description || '-',
-      <BlockStack gap="100" key={`comp-${bom.id}`}>
-        <InlineStack gap="100" wrap>
-          {compList.map((c, i) => (
-            <Badge key={i} tone="info">
-              {c}
-            </Badge>
-          ))}
-          {compCount > 3 && (
-            <Badge tone="default">+{compCount - 3} more</Badge>
-          )}
-        </InlineStack>
-        {compCount === 0 && <Text tone="subdued">No components</Text>}
-      </BlockStack>,
-      cost ? formatPrice(cost) : '-',
-      getAvailabilityBadge(bom),
-      bom.is_active ? (
-        <Badge tone="success">Active</Badge>
-      ) : (
-        <Badge tone="default">Inactive</Badge>
-      ),
-    ];
-  });
+      return [
+        <Text
+          variant="bodyMd"
+          fontWeight="semibold"
+          key={bom.id}
+          as="button"
+          onClick={() => setSelectedBom(bom)}
+          style={{ cursor: 'pointer', textDecoration: 'underline' }}
+        >
+          {bom.bundle_sku}
+        </Text>,
+        bom.description || '-',
+        <BlockStack gap="100" key={`comp-${bom.id}`}>
+          <InlineStack gap="100" wrap>
+            {compList.map((c, i) => (
+              <Badge key={i} tone="info">
+                {c}
+              </Badge>
+            ))}
+            {compCount > 3 && (
+              <Badge tone="default">+{compCount - 3} more</Badge>
+            )}
+          </InlineStack>
+          {compCount === 0 && <Text tone="subdued">No components</Text>}
+        </BlockStack>,
+        cost ? formatPrice(cost) : '-',
+        getAvailabilityBadge(bom),
+        bom.is_active ? (
+          <Badge tone="success">Active</Badge>
+        ) : (
+          <Badge tone="default">Inactive</Badge>
+        ),
+      ];
+    });
+  }, [filteredBoms, components, getCost, getAvailabilityBadge]);
 
   return (
     <Page
@@ -639,7 +662,7 @@ export default function BundlesPage() {
                 <BlockStack gap="100">
                   <Text variant="bodySm" tone="subdued">Total Cost</Text>
                   <Text variant="bodyMd" fontWeight="semibold">
-                    {formatPrice(calculateCost(selectedBom))}
+                    {formatPrice(getCost(selectedBom))}
                   </Text>
                 </BlockStack>
                 <BlockStack gap="100">
@@ -657,8 +680,8 @@ export default function BundlesPage() {
 
               {/* Availability Breakdown */}
               {(() => {
-                const { available, limitingComponent } = calculateAvailability(selectedBom);
-                const cost = calculateCost(selectedBom);
+                const { available, limitingComponent } = getAvailability(selectedBom);
+                const cost = getCost(selectedBom);
                 return (
                   <Card>
                     <InlineStack gap="800">

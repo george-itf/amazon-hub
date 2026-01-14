@@ -19,10 +19,28 @@ const oauthClient = new OAuth2Client(clientId);
  * @returns {Promise<Object>} Google token payload
  */
 export async function verifyIdToken(idToken) {
-  const ticket = await oauthClient.verifyIdToken({
-    idToken,
-    audience: clientId
-  });
-  const payload = ticket.getPayload();
-  return payload;
+  // Validate input
+  if (!idToken || typeof idToken !== 'string') {
+    throw new Error('Invalid idToken: token must be a non-empty string');
+  }
+
+  // Basic JWT format validation (3 parts separated by dots)
+  const parts = idToken.split('.');
+  if (parts.length !== 3) {
+    throw new Error('Invalid idToken: malformed JWT format');
+  }
+
+  try {
+    const ticket = await oauthClient.verifyIdToken({
+      idToken,
+      audience: clientId
+    });
+    const payload = ticket.getPayload();
+    return payload;
+  } catch (err) {
+    // Wrap library errors with context for better debugging
+    const error = new Error(`Google token verification failed: ${err.message}`);
+    error.originalError = err;
+    throw error;
+  }
 }
