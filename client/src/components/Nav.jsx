@@ -15,6 +15,7 @@ import {
   ClockIcon,
   ExitIcon,
   KeyboardIcon,
+  SearchIcon,
 } from '@shopify/polaris-icons';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -43,6 +44,7 @@ export default function Nav() {
   ];
 
   const analyticsItems = [
+    { label: 'ASIN Analyzer', url: '/analyzer', icon: SearchIcon },
     { label: 'Replenishment', url: '/replenishment', icon: ArrowDownIcon },
     { label: 'Profitability', url: '/profit', icon: ChartVerticalFilledIcon },
     { label: 'Audit Log', url: '/audit', icon: ClockIcon },
