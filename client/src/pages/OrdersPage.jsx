@@ -483,26 +483,29 @@ export default function OrdersPage() {
         >
           <Modal.Section>
             <BlockStack gap="400">
-              {/* Order Info */}
-              <InlineStack gap="800">
+              {/* Order Header */}
+              <InlineStack gap="800" wrap>
                 <BlockStack gap="100">
-                  <Text variant="bodySm" tone="subdued">Customer</Text>
-                  <Text variant="bodyMd" fontWeight="semibold">
-                    {selectedOrder.customer_name || 'N/A'}
+                  <Text variant="bodySm" tone="subdued">Order Number</Text>
+                  <Text variant="headingMd" fontWeight="bold">
+                    {selectedOrder.order_number || `#${selectedOrder.external_order_id}`}
                   </Text>
-                  <Text variant="bodySm">{selectedOrder.customer_email || ''}</Text>
-                </BlockStack>
-                <BlockStack gap="100">
-                  <Text variant="bodySm" tone="subdued">Date</Text>
-                  <Text variant="bodyMd">{formatDate(selectedOrder.order_date)}</Text>
                 </BlockStack>
                 <BlockStack gap="100">
                   <Text variant="bodySm" tone="subdued">Status</Text>
                   {getStatusBadge(selectedOrder.status)}
                 </BlockStack>
                 <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Order Date</Text>
+                  <Text variant="bodyMd">{formatDate(selectedOrder.order_date)}</Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Channel</Text>
+                  <Badge tone="info">{selectedOrder.channel?.toUpperCase() || 'UNKNOWN'}</Badge>
+                </BlockStack>
+                <BlockStack gap="100">
                   <Text variant="bodySm" tone="subdued">Total</Text>
-                  <Text variant="bodyMd" fontWeight="semibold">
+                  <Text variant="headingMd" fontWeight="bold">
                     {formatPrice(selectedOrder.total_price_pence, selectedOrder.currency)}
                   </Text>
                 </BlockStack>
@@ -510,30 +513,75 @@ export default function OrdersPage() {
 
               <Divider />
 
-              {/* Order Lines */}
+              {/* Customer Info */}
               <BlockStack gap="200">
-                <Text variant="headingSm">Order Items</Text>
+                <Text variant="headingSm">Customer</Text>
+                <InlineStack gap="800" wrap>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Name</Text>
+                    <Text variant="bodyMd" fontWeight="semibold">
+                      {selectedOrder.customer_name || 'N/A'}
+                    </Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Email</Text>
+                    <Text variant="bodyMd">
+                      {selectedOrder.customer_email || 'N/A'}
+                    </Text>
+                  </BlockStack>
+                  {selectedOrder.shipping_address?.phone && (
+                    <BlockStack gap="100">
+                      <Text variant="bodySm" tone="subdued">Phone</Text>
+                      <Text variant="bodyMd">{selectedOrder.shipping_address.phone}</Text>
+                    </BlockStack>
+                  )}
+                </InlineStack>
+              </BlockStack>
+
+              <Divider />
+
+              {/* Order Lines - Enhanced */}
+              <BlockStack gap="200">
+                <InlineStack align="space-between">
+                  <Text variant="headingSm">Order Items ({selectedOrder.order_lines?.length || 0})</Text>
+                  <Text variant="bodySm" tone="subdued">
+                    {selectedOrder.order_lines?.filter(l => l.is_resolved).length || 0} of {selectedOrder.order_lines?.length || 0} resolved
+                  </Text>
+                </InlineStack>
                 {selectedOrder.order_lines?.length > 0 ? (
                   <DataTable
-                    columnContentTypes={['text', 'text', 'numeric', 'text']}
-                    headings={['Item', 'SKU/ASIN', 'Qty', 'Status']}
+                    columnContentTypes={['text', 'text', 'numeric', 'numeric', 'text']}
+                    headings={['Item', 'SKU / ASIN', 'Qty', 'Unit Price', 'Status']}
                     rows={selectedOrder.order_lines.map((line) => [
                       <BlockStack gap="100" key={line.id}>
-                        <Text variant="bodyMd">{line.title || 'Unknown item'}</Text>
+                        <Text variant="bodyMd" fontWeight="semibold">
+                          {line.title || 'Unknown item'}
+                        </Text>
                         {line.boms && (
-                          <Text variant="bodySm" tone="subdued">
-                            → {line.boms.bundle_sku}: {line.boms.description}
-                          </Text>
+                          <Badge tone="success">
+                            BOM: {line.boms.bundle_sku}
+                          </Badge>
                         )}
                       </BlockStack>,
-                      line.asin || line.sku || '-',
+                      <BlockStack gap="100" key={`ids-${line.id}`}>
+                        {line.sku && <Text variant="bodySm">SKU: {line.sku}</Text>}
+                        {line.asin && <Text variant="bodySm">ASIN: {line.asin}</Text>}
+                        {!line.sku && !line.asin && <Text variant="bodySm" tone="subdued">-</Text>}
+                      </BlockStack>,
                       line.quantity,
-                      line.is_resolved ? (
-                        <Badge tone="success">Resolved</Badge>
-                      ) : (
-                        <Badge tone="warning">Needs Review</Badge>
-                      ),
+                      formatPrice(line.unit_price_pence, selectedOrder.currency),
+                      <BlockStack gap="100" key={`status-${line.id}`}>
+                        {line.is_resolved ? (
+                          <Badge tone="success">Resolved</Badge>
+                        ) : (
+                          <Badge tone="warning">Needs Review</Badge>
+                        )}
+                        {line.resolution_source && (
+                          <Text variant="bodySm" tone="subdued">{line.resolution_source}</Text>
+                        )}
+                      </BlockStack>,
                     ])}
+                    footerContent={`Total: ${formatPrice(selectedOrder.total_price_pence, selectedOrder.currency)}`}
                   />
                 ) : (
                   <Text tone="subdued">No line items</Text>
@@ -546,16 +594,57 @@ export default function OrdersPage() {
                   <Divider />
                   <BlockStack gap="200">
                     <Text variant="headingSm">Shipping Address</Text>
-                    <Text variant="bodyMd">
-                      {selectedOrder.shipping_address.name}<br />
-                      {selectedOrder.shipping_address.address1}<br />
-                      {selectedOrder.shipping_address.address2 && <>{selectedOrder.shipping_address.address2}<br /></>}
-                      {selectedOrder.shipping_address.city}, {selectedOrder.shipping_address.province_code} {selectedOrder.shipping_address.zip}<br />
-                      {selectedOrder.shipping_address.country}
-                    </Text>
+                    <Card>
+                      <Text variant="bodyMd">
+                        <strong>{selectedOrder.shipping_address.name}</strong><br />
+                        {selectedOrder.shipping_address.company && <>{selectedOrder.shipping_address.company}<br /></>}
+                        {selectedOrder.shipping_address.address1}<br />
+                        {selectedOrder.shipping_address.address2 && <>{selectedOrder.shipping_address.address2}<br /></>}
+                        {selectedOrder.shipping_address.city}
+                        {selectedOrder.shipping_address.province_code && `, ${selectedOrder.shipping_address.province_code}`}
+                        {selectedOrder.shipping_address.zip && ` ${selectedOrder.shipping_address.zip}`}<br />
+                        {selectedOrder.shipping_address.country_code || selectedOrder.shipping_address.country}
+                        {selectedOrder.shipping_address.phone && (
+                          <>
+                            <br /><br />
+                            <strong>Phone:</strong> {selectedOrder.shipping_address.phone}
+                          </>
+                        )}
+                      </Text>
+                    </Card>
                   </BlockStack>
                 </>
               )}
+
+              {/* Technical Details */}
+              <Divider />
+              <BlockStack gap="200">
+                <Text variant="headingSm">Technical Details</Text>
+                <InlineStack gap="800" wrap>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Internal ID</Text>
+                    <Text variant="bodySm" fontFamily="monospace">
+                      {selectedOrder.id?.slice(0, 8)}...
+                    </Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">External ID</Text>
+                    <Text variant="bodySm" fontFamily="monospace">
+                      {selectedOrder.external_order_id}
+                    </Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Created</Text>
+                    <Text variant="bodySm">
+                      {selectedOrder.created_at ? new Date(selectedOrder.created_at).toLocaleString() : '-'}
+                    </Text>
+                  </BlockStack>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Currency</Text>
+                    <Text variant="bodySm">{selectedOrder.currency || 'GBP'}</Text>
+                  </BlockStack>
+                </InlineStack>
+              </BlockStack>
             </BlockStack>
           </Modal.Section>
         </Modal>
