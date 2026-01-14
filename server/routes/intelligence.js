@@ -148,7 +148,6 @@ router.get('/constraints/:componentId', async (req, res) => {
 
     // Get Keepa price estimate for blocked value
     let blockedPoundsEstimate = null;
-    const affectedBomIds = affectedBoms.map(b => b.bom_id);
 
     if (affectedBomIds.length > 0) {
       const { data: listings } = await supabase
