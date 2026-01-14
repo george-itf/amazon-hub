@@ -199,19 +199,10 @@ router.post('/', requireStaff, async (req, res) => {
       });
     }
 
-    // Get all order lines with their BOM components
+    // Get all order lines (without FK hint - fetch bom_components separately)
     const { data: orderLines, error: linesError } = await supabase
       .from('order_lines')
-      .select(`
-        id,
-        order_id,
-        quantity,
-        bom_id,
-        bom_components (
-          component_id,
-          qty_required
-        )
-      `)
+      .select('id, order_id, quantity, bom_id')
       .in('order_id', order_ids)
       .eq('is_resolved', true);
 
@@ -220,11 +211,38 @@ router.post('/', requireStaff, async (req, res) => {
       return errors.internal(res, 'Failed to fetch order lines');
     }
 
+    // Get unique bom_ids and fetch their components separately
+    const bomIds = [...new Set(orderLines?.filter(ol => ol.bom_id).map(ol => ol.bom_id) || [])];
+    let bomComponentsMap = {};
+
+    if (bomIds.length > 0) {
+      const { data: bomComponents, error: bcError } = await supabase
+        .from('bom_components')
+        .select('bom_id, component_id, qty_required')
+        .in('bom_id', bomIds);
+
+      if (bcError) {
+        console.error('BOM components fetch error:', bcError);
+        return errors.internal(res, 'Failed to fetch BOM components');
+      }
+
+      // Group bom_components by bom_id
+      for (const bc of bomComponents || []) {
+        if (!bomComponentsMap[bc.bom_id]) {
+          bomComponentsMap[bc.bom_id] = [];
+        }
+        bomComponentsMap[bc.bom_id].push({
+          component_id: bc.component_id,
+          qty_required: bc.qty_required
+        });
+      }
+    }
+
     // Aggregate component requirements
     const componentRequirements = {};
-    for (const line of orderLines) {
-      if (!line.bom_components) continue;
-      for (const bc of line.bom_components) {
+    for (const line of orderLines || []) {
+      const bomComponents = bomComponentsMap[line.bom_id] || [];
+      for (const bc of bomComponents) {
         const key = `${bc.component_id}:Warehouse`; // Default location
         if (!componentRequirements[key]) {
           componentRequirements[key] = {

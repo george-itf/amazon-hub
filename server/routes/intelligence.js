@@ -105,30 +105,45 @@ router.get('/constraints/:componentId', async (req, res) => {
       bundles_possible: Math.floor(totalAvailable / bc.qty_required)
     }));
 
-    // Get affected orders
-    const { data: affectedOrders, error: ordersError } = await supabase
-      .from('order_lines')
-      .select(`
-        id,
-        quantity,
-        orders (
-          id,
-          external_order_id,
-          status,
-          customer_name
-        ),
-        bom_components!inner (
-          qty_required
-        )
-      `)
-      .eq('bom_components.component_id', componentId);
+    // Build lookup map for qty_required by bom_id
+    const bomQtyMap = {};
+    for (const bc of bomComponents || []) {
+      bomQtyMap[bc.boms.id] = bc.qty_required;
+    }
 
-    if (ordersError) throw ordersError;
+    // Get affected orders (fetch order_lines separately without FK hint to bom_components)
+    const affectedBomIds = affectedBoms.map(b => b.bom_id);
+    let affectedOrders = [];
+
+    if (affectedBomIds.length > 0) {
+      const { data: orderLinesData, error: ordersError } = await supabase
+        .from('order_lines')
+        .select(`
+          id,
+          quantity,
+          bom_id,
+          orders (
+            id,
+            external_order_id,
+            status,
+            customer_name
+          )
+        `)
+        .in('bom_id', affectedBomIds);
+
+      if (ordersError) throw ordersError;
+
+      // Manually add qty_required from bomQtyMap
+      affectedOrders = (orderLinesData || []).map(ol => ({
+        ...ol,
+        bom_components: { qty_required: bomQtyMap[ol.bom_id] || 0 }
+      }));
+    }
 
     // Calculate what "+1 unit" would unlock
-    const ordersBlockedByThis = (affectedOrders || []).filter(ol => {
+    const ordersBlockedByThis = affectedOrders.filter(ol => {
       const needed = ol.bom_components.qty_required * ol.quantity;
-      return totalAvailable < needed && ol.orders.status !== 'PICKED';
+      return totalAvailable < needed && ol.orders?.status !== 'PICKED';
     });
 
     // Get Keepa price estimate for blocked value
