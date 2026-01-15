@@ -779,3 +779,51 @@ export async function updateSchedulerSettings(settings) {
     body: settings,
   });
 }
+
+// ============ Inventory Pools API ============
+
+export async function getInventoryRecommendations(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/inventory/recommendations${query ? `?${query}` : ''}`);
+}
+
+export async function getInventoryPools(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/inventory/pools${query ? `?${query}` : ''}`);
+}
+
+export async function getInventoryPool(id) {
+  return request(`/inventory/pools/${id}`);
+}
+
+export async function createInventoryPool(pool) {
+  return request('/inventory/pools', { method: 'POST', body: pool });
+}
+
+export async function updateInventoryPool(id, updates) {
+  return request(`/inventory/pools/${id}`, { method: 'PUT', body: updates });
+}
+
+export async function deleteInventoryPool(id) {
+  return request(`/inventory/pools/${id}`, { method: 'DELETE' });
+}
+
+export async function addPoolMember(poolId, member) {
+  return request(`/inventory/pools/${poolId}/members`, {
+    method: 'POST',
+    body: member,
+  });
+}
+
+export async function updatePoolMember(poolId, memberId, updates) {
+  return request(`/inventory/pools/${poolId}/members/${memberId}`, {
+    method: 'PUT',
+    body: updates,
+  });
+}
+
+export async function removePoolMember(poolId, memberId) {
+  return request(`/inventory/pools/${poolId}/members/${memberId}`, {
+    method: 'DELETE',
+  });
+}

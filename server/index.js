@@ -30,6 +30,7 @@ import analyticsRoutes from './routes/analytics.js';
 import profitRoutes from './routes/profit.js';
 import amazonRoutes from './routes/amazon.js';
 import shippingRoutes from './routes/shipping.js';
+import inventoryRoutes from './routes/inventory.js';
 import scheduler from './services/scheduler.js';
 
 // Create the Express app
@@ -202,6 +203,9 @@ app.use('/amazon', amazonRoutes);
 
 // Shipping routes (Royal Mail Click & Drop)
 app.use('/shipping', shippingRoutes);
+
+// Inventory routes (pool allocation, recommendations)
+app.use('/inventory', inventoryRoutes);
 
 // 404 handler
 app.use((req, res) => {

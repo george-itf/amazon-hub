@@ -686,17 +686,20 @@ router.get('/listings', requireAdmin, async (req, res) => {
     if (error) throw error;
 
     // Enrich with listing memory info
+    // NOTE: Schema fix - boms uses bundle_sku/description, not name
     const asins = catalogItems?.map(c => c.asin) || [];
     const { data: memoryMatches } = await supabase
       .from('listing_memory')
-      .select('asin, bom_id, boms(id, name)')
-      .in('asin', asins);
+      .select('asin, bom_id, boms(id, bundle_sku, description)')
+      .in('asin', asins)
+      .eq('is_active', true);
 
     const memoryByAsin = {};
     for (const match of memoryMatches || []) {
       memoryByAsin[match.asin] = {
         bom_id: match.bom_id,
-        bom_name: match.boms?.name,
+        // Map bundle_sku to bom_name for client compatibility
+        bom_name: match.boms?.bundle_sku || match.boms?.description,
       };
     }
 
@@ -741,9 +744,10 @@ router.post('/listings/:asin/map', requireAdmin, async (req, res) => {
 
   try {
     // Verify BOM exists
+    // NOTE: Schema fix - boms uses bundle_sku/description, not name
     const { data: bom, error: bomError } = await supabase
       .from('boms')
-      .select('id, name')
+      .select('id, bundle_sku, description')
       .eq('id', bomId)
       .single();
 
@@ -758,34 +762,62 @@ router.post('/listings/:asin/map', requireAdmin, async (req, res) => {
       .eq('asin', asin)
       .maybeSingle();
 
-    // Create or update listing memory
-    await supabase
+    const normalizedAsin = normalizeAsin(asin);
+    const titleForFingerprint = catalog?.title || asin;
+    const fingerprint = fingerprintTitle(titleForFingerprint);
+
+    // Check if an active listing already exists for this ASIN
+    // NOTE: Schema fix - listing_memory uses partial unique index on asin where is_active=true
+    // We can't use simple upsert, need to check and insert/update appropriately
+    const { data: existingListing } = await supabase
       .from('listing_memory')
-      .upsert({
-        asin: normalizeAsin(asin),
-        sku: null,
-        title: catalog?.title || asin,
-        title_fingerprint: fingerprintTitle(catalog?.title || asin),
-        bom_id: bomId,
-        resolution_source: 'MANUAL',
-        confidence: 1.0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'asin' });
+      .select('id')
+      .eq('asin', normalizedAsin)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    if (existingListing) {
+      // Update existing active listing
+      await supabase
+        .from('listing_memory')
+        .update({
+          bom_id: bomId,
+          resolution_source: 'MANUAL',
+          title_fingerprint: fingerprint,
+        })
+        .eq('id', existingListing.id);
+    } else {
+      // Create new listing memory entry
+      // NOTE: Schema fix - listing_memory does NOT have title, confidence, or updated_at columns
+      await supabase
+        .from('listing_memory')
+        .insert({
+          asin: normalizedAsin,
+          sku: null,
+          title_fingerprint: fingerprint,
+          title_fingerprint_hash: fingerprint, // Use same value for hash
+          bom_id: bomId,
+          resolution_source: 'MANUAL',
+          is_active: true,
+        });
+    }
+
+    // Use bundle_sku as the display name for client compatibility
+    const bomDisplayName = bom.bundle_sku || bom.description;
 
     await recordSystemEvent({
       eventType: 'LISTING_MAPPED',
       entityType: 'LISTING',
       entityId: asin,
-      description: `Mapped ASIN ${asin} to BOM "${bom.name}"`,
-      metadata: { asin, bomId, bomName: bom.name },
+      description: `Mapped ASIN ${asin} to BOM "${bomDisplayName}"`,
+      metadata: { asin, bomId, bomName: bomDisplayName },
     });
 
     sendSuccess(res, {
       message: 'Listing mapped successfully',
       asin,
       bomId,
-      bomName: bom.name,
+      bomName: bomDisplayName,
     });
   } catch (err) {
     console.error('Failed to map listing:', err);
@@ -875,6 +907,10 @@ router.get('/order/:orderId/details', requireAdmin, async (req, res) => {
 
   try {
     // Get order with all related data
+    // NOTE: Schema fix - Use correct column names:
+    // - boms: bundle_sku/description (not name/sku)
+    // - bom_components: qty_required (not quantity)
+    // - components: internal_sku/description/cost_ex_vat_pence (not name/sku/unit_cost_pence)
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .select(`
@@ -890,16 +926,16 @@ router.get('/order/:orderId/details', requireAdmin, async (req, res) => {
           listing_memory_id,
           boms (
             id,
-            name,
-            sku,
+            bundle_sku,
+            description,
             bom_components (
               component_id,
-              quantity,
+              qty_required,
               components (
                 id,
-                name,
-                sku,
-                unit_cost_pence
+                internal_sku,
+                description,
+                cost_ex_vat_pence
               )
             )
           )
@@ -937,11 +973,12 @@ router.get('/order/:orderId/details', requireAdmin, async (req, res) => {
     }
 
     // Calculate component costs
+    // NOTE: Schema fix - use qty_required and cost_ex_vat_pence
     for (const line of order.order_lines || []) {
       if (line.boms?.bom_components) {
         for (const bc of line.boms.bom_components) {
-          const unitCost = bc.components?.unit_cost_pence || 0;
-          totalCost += unitCost * bc.quantity * line.quantity;
+          const unitCost = bc.components?.cost_ex_vat_pence || 0;
+          totalCost += unitCost * bc.qty_required * line.quantity;
         }
       }
     }
