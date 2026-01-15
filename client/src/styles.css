@@ -1,0 +1,127 @@
+@import '@shopify/polaris/build/esm/styles.css';
+
+/*
+ * Global styles to align the Hub UI with Invicta's branding.  These
+ * overrides adjust the background colours, typography and accent
+ * colours used by Shopify Polaris.  Polaris uses CSS variables
+ * internally; overriding them at the :root level allows you to
+ * customise colours without invasive changes.  Feel free to adjust
+ * these values to more closely match your storefront.
+ */
+
+:root {
+  /* Base background colour for content areas */
+  --p-background: #f5f5f5;
+  /* Base surface colour for cards and tables */
+  --p-surface: #ffffff;
+  /* Text colour for primary content */
+  --p-text: #0d0d0d;
+  /* Critical / accent colour (Invicta red) */
+  --p-interactive-critical: #d32f2f;
+  --p-interactive-critical-hovered: #b71c1c;
+}
+
+body {
+  background-color: var(--p-background);
+  color: var(--p-text);
+}
+
+/* Darken the navigation menu to match the Invicta admin aesthetic */
+.Polaris-Navigation {
+  background-color: #202020 !important;
+}
+
+.Polaris-Navigation__PrimaryNavigation {
+  background-color: #202020 !important;
+}
+
+.Polaris-Navigation__Item {
+  color: #ffffff !important;
+  background-color: transparent !important;
+}
+
+.Polaris-Navigation__Item:hover,
+.Polaris-Navigation__Item:focus,
+.Polaris-Navigation__Item:active {
+  background-color: #383838 !important;
+  color: #ffffff !important;
+}
+
+/* Fix all inner wrappers on hover */
+.Polaris-Navigation__Item:hover *,
+.Polaris-Navigation__Item:focus *,
+.Polaris-Navigation__Item:active * {
+  color: #ffffff !important;
+  background-color: transparent !important;
+}
+
+.Polaris-Navigation__ItemWrapper,
+.Polaris-Navigation__ItemInnerWrapper {
+  background-color: transparent !important;
+}
+
+.Polaris-Navigation__ItemWrapper:hover,
+.Polaris-Navigation__ItemInnerWrapper:hover {
+  background-color: transparent !important;
+}
+
+.Polaris-Navigation__Item--selected,
+.Polaris-Navigation__Item--selected:hover,
+.Polaris-Navigation__Item--selected:focus {
+  background-color: var(--p-interactive-critical) !important;
+  color: #ffffff !important;
+}
+
+.Polaris-Navigation__Item--selected:hover {
+  background-color: var(--p-interactive-critical-hovered) !important;
+}
+
+/* Fix text and icon colors in navigation */
+.Polaris-Navigation__Text,
+.Polaris-Navigation__Icon,
+.Polaris-Navigation__Item svg {
+  color: inherit !important;
+  fill: currentColor !important;
+}
+
+/* Section headers in navigation */
+.Polaris-Navigation__SectionHeading {
+  color: #999999 !important;
+}
+
+.Polaris-Frame__Navigation {
+  border-right: none;
+  background-color: #202020 !important;
+}
+
+/* Prevent white flash during navigation */
+.Polaris-Frame__Main {
+  background-color: var(--p-background);
+  min-height: 100vh;
+}
+
+.Polaris-Frame__Content {
+  background-color: var(--p-background);
+}
+
+/* Ensure page content area has consistent background */
+.Polaris-Page {
+  background-color: var(--p-background);
+}
+
+/* Spinner loading states - ensure consistent background */
+.Polaris-Spinner {
+  margin: 20px auto;
+}
+
+/* Card styling - ensure they don't flash white unexpectedly */
+.Polaris-Card {
+  background-color: var(--p-surface);
+}
+
+/* Smooth transition for loading states */
+.Polaris-Page,
+.Polaris-Card,
+.Polaris-Frame__Content {
+  transition: opacity 0.15s ease-in-out;
+}

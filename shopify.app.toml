@@ -1,0 +1,16 @@
+# Shopify app configuration
+# This file is used by the Shopify CLI
+
+name = "amazon-hub"
+client_id = "42d5da1acb3503fa9f68906e5af3bfac"
+application_url = "https://amazon-hub-production.up.railway.app"
+embedded = false
+
+[access_scopes]
+scopes = "read_orders,read_products"
+
+[auth]
+redirect_urls = ["https://amazon-hub-production.up.railway.app/auth/callback"]
+
+[webhooks]
+api_version = "2024-01"

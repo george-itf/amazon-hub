@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Build outputs
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test coverage
+coverage/
+
+# Temporary/working files
+~$*
+*.tmp
+session-handoff.json
+
+# Data files (should not be in repo)
+*.xlsx
+*.txt
+!README.txt
+
+# Generated reports
+SYSTEM_AUDIT_REPORT.docx
