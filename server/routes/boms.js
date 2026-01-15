@@ -15,6 +15,7 @@ router.get('/review', async (req, res) => {
   const { status = 'PENDING_REVIEW', limit = 50, offset = 0 } = req.query;
 
   try {
+    // First, fetch BOMs with components
     let query = supabase
       .from('boms')
       .select(`
@@ -31,40 +32,61 @@ router.get('/review', async (req, res) => {
             cost_ex_vat_pence,
             total_available
           )
-        ),
-        listing_memory (
-          id,
-          asin,
-          sku,
-          title_fingerprint,
-          is_active
         )
       `, { count: 'exact' })
       .order('created_at', { ascending: false });
 
+    // Only filter by review_status if not 'ALL'
+    // Handle case where column might not exist yet
     if (status !== 'ALL') {
       query = query.eq('review_status', status);
     }
 
-    const { data, error, count } = await query.range(
+    const { data: boms, error, count } = await query.range(
       parseInt(offset),
       parseInt(offset) + parseInt(limit) - 1
     );
 
     if (error) {
+      // If error mentions 'review_status' column, the migration hasn't been run
+      if (error.message?.includes('review_status') || error.code === '42703') {
+        console.warn('BOM review_status column not found - migration 003 may need to be run');
+        // Return empty result gracefully
+        return sendSuccess(res, {
+          boms: [],
+          total: 0,
+          limit: parseInt(limit),
+          offset: parseInt(offset),
+          warning: 'BOM review feature requires database migration. Please run migration 003_bom_review_status.sql'
+        });
+      }
       console.error('BOM review fetch error:', error);
-      return errors.internal(res, 'Failed to fetch BOM review queue');
+      return errors.internal(res, `Failed to fetch BOM review queue: ${error.message}`);
     }
 
+    // Fetch linked listings separately for each BOM (reverse relationship)
+    const bomsWithListings = await Promise.all((boms || []).map(async (bom) => {
+      const { data: listings } = await supabase
+        .from('listing_memory')
+        .select('id, asin, sku, title_fingerprint, is_active')
+        .eq('bom_id', bom.id)
+        .eq('is_active', true);
+
+      return {
+        ...bom,
+        listing_memory: listings || []
+      };
+    }));
+
     sendSuccess(res, {
-      boms: data || [],
+      boms: bomsWithListings,
       total: count || 0,
       limit: parseInt(limit),
       offset: parseInt(offset)
     });
   } catch (err) {
     console.error('BOM review fetch error:', err);
-    errors.internal(res, 'Failed to fetch BOM review queue');
+    errors.internal(res, `Failed to fetch BOM review queue: ${err.message}`);
   }
 });
 
