@@ -671,7 +671,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Sales Metrics Row */}
+        {/* Sales Metrics Row - Uses same data source as Pulse for consistency */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, 1fr)',
@@ -679,21 +679,24 @@ export default function Dashboard() {
         }}>
           <MetricCard
             title="Today's Orders"
-            value={amazonStats?.sales_trend?.slice(-1)[0]?.orders || stats.orders_today || 0}
-            subtitle={formatPrice(amazonStats?.sales_trend?.slice(-1)[0]?.revenue_pence || 0)}
+            value={pulseData?.orders?.today || 0}
+            subtitle={formatPrice(pulseData?.revenue?.today || 0)}
             onClick={() => navigate('/shipping')}
+            loading={pulseLoading}
           />
           <MetricCard
             title="This Week"
-            value={`${amazonStats?.sales_trend?.slice(-7).reduce((sum, d) => sum + d.orders, 0) || 0} orders`}
-            subtitle={formatPrice(amazonStats?.sales_trend?.slice(-7).reduce((sum, d) => sum + d.revenue_pence, 0) || 0)}
+            value={`${pulseData?.orders?.week || 0} orders`}
+            subtitle={formatPrice(pulseData?.revenue?.week || 0)}
+            loading={pulseLoading}
           />
           <MetricCard
             title="This Month"
-            value={formatPrice(amazonStats?.monthly_revenue_pence || 0)}
-            subtitle={`${amazonStats?.monthly_order_count || 0} orders`}
+            value={formatPrice(pulseData?.revenue?.month || 0)}
+            subtitle={`${pulseData?.orders?.month || 0} orders`}
             trend={amazonStats?.revenue_growth_percent ? `${amazonStats.revenue_growth_percent}%` : null}
             trendUp={amazonStats?.revenue_growth_percent > 0}
+            loading={pulseLoading}
           />
           <MetricCard
             title="Pending Shipment"

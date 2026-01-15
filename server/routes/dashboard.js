@@ -240,26 +240,29 @@ router.get('/pulse', async (req, res) => {
     monthAgo.setDate(1);
     const monthStr = monthAgo.toISOString().split('T')[0];
 
-    // Fetch orders for different time periods in parallel
+    // Fetch Amazon orders for different time periods in parallel
     const [todayOrders, weekOrders, monthOrders] = await Promise.all([
-      // Today's orders
+      // Today's orders (Amazon only)
       supabase
         .from('orders')
         .select('id, total_price_pence')
+        .eq('channel', 'AMAZON')
         .eq('order_date', todayStr)
         .not('status', 'eq', 'CANCELLED'),
 
-      // This week's orders (last 7 days)
+      // This week's orders - last 7 days (Amazon only)
       supabase
         .from('orders')
         .select('id, total_price_pence')
+        .eq('channel', 'AMAZON')
         .gte('order_date', weekStr)
         .not('status', 'eq', 'CANCELLED'),
 
-      // This month's orders
+      // This month's orders (Amazon only)
       supabase
         .from('orders')
         .select('id, total_price_pence')
+        .eq('channel', 'AMAZON')
         .gte('order_date', monthStr)
         .not('status', 'eq', 'CANCELLED'),
     ]);
