@@ -17,12 +17,14 @@ async function seed() {
   try {
     // 1. Create admin user
     console.log('Creating admin user...');
-    const adminPassword = await bcrypt.hash('admin123456', SALT_ROUNDS);
+    // Use environment variable override or generate random password
+    const adminPlainPassword = process.env.SEED_ADMIN_PASSWORD || crypto.randomBytes(16).toString('hex');
+    const adminPasswordHash = await bcrypt.hash(adminPlainPassword, SALT_ROUNDS);
     const { data: adminUser, error: adminError } = await supabase
       .from('users')
       .upsert({
         email: 'admin@invicta.local',
-        password_hash: adminPassword,
+        password_hash: adminPasswordHash,
         name: 'Admin User',
         role: 'ADMIN',
         is_active: true,
@@ -33,17 +35,19 @@ async function seed() {
     if (adminError) {
       console.error('Admin user error:', adminError);
     } else {
-      console.log('  Created admin: admin@invicta.local / admin123456');
+      console.log(`  Created admin: admin@invicta.local / ${adminPlainPassword}`);
     }
 
     // 2. Create staff user
     console.log('Creating staff user...');
-    const staffPassword = await bcrypt.hash('staff123456', SALT_ROUNDS);
+    // Use environment variable override or generate random password
+    const staffPlainPassword = process.env.SEED_STAFF_PASSWORD || crypto.randomBytes(16).toString('hex');
+    const staffPasswordHash = await bcrypt.hash(staffPlainPassword, SALT_ROUNDS);
     const { data: staffUser, error: staffError } = await supabase
       .from('users')
       .upsert({
         email: 'staff@invicta.local',
-        password_hash: staffPassword,
+        password_hash: staffPasswordHash,
         name: 'Staff User',
         role: 'STAFF',
         is_active: true,
@@ -54,7 +58,7 @@ async function seed() {
     if (staffError) {
       console.error('Staff user error:', staffError);
     } else {
-      console.log('  Created staff: staff@invicta.local / staff123456');
+      console.log(`  Created staff: staff@invicta.local / ${staffPlainPassword}`);
     }
 
     // 3. Create sample components
@@ -239,8 +243,10 @@ async function seed() {
 
     console.log('\n✅ Seed completed successfully!');
     console.log('\nTest accounts:');
-    console.log('  Admin: admin@invicta.local / admin123456');
-    console.log('  Staff: staff@invicta.local / staff123456');
+    console.log(`  Admin: admin@invicta.local / ${adminPlainPassword}`);
+    console.log(`  Staff: staff@invicta.local / ${staffPlainPassword}`);
+    console.log('\nNOTE: Save these credentials now - they are randomly generated and will not be shown again.');
+    console.log('      To use specific passwords, set SEED_ADMIN_PASSWORD and SEED_STAFF_PASSWORD environment variables.');
 
   } catch (err) {
     console.error('\n❌ Seed failed:', err);

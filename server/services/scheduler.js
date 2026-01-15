@@ -20,6 +20,30 @@ const SCHEDULES = {
   CLEANUP: 'system_cleanup',
 };
 
+// Batch size for order processing
+const ORDER_BATCH_SIZE = 5;
+
+/**
+ * Process items in batches using Promise.all
+ * @param {Array} items - Array of items to process
+ * @param {number} batchSize - Number of items to process in parallel
+ * @param {Function} processFn - Async function to process each item
+ * @returns {Promise<Array>} Results of all processed items
+ */
+async function processBatches(items, batchSize, processFn) {
+  const results = [];
+
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(item => processFn(item).catch(err => ({ error: err, item })))
+    );
+    results.push(...batchResults);
+  }
+
+  return results;
+}
+
 class Scheduler {
   constructor() {
     this.intervals = {};
@@ -221,6 +245,7 @@ class Scheduler {
 
   /**
    * Sync Amazon orders - fully imports new orders and updates existing ones
+   * Uses batch processing for improved throughput
    */
   async syncOrders() {
     if (!spApiClient.isConfigured()) {
@@ -236,23 +261,26 @@ class Scheduler {
       orderStatuses: ['Unshipped', 'Shipped', 'PartiallyShipped'],
     });
 
-    console.log(`[Scheduler] Found ${orders.length} orders to process`);
+    console.log(`[Scheduler] Found ${orders.length} orders to process in batches of ${ORDER_BATCH_SIZE}`);
 
     // Use the shared order processor for full import
     const results = createResultsTracker();
     results.total = orders.length;
 
-    for (const order of orders) {
+    // Process orders in batches for improved throughput
+    await processBatches(orders, ORDER_BATCH_SIZE, async (order) => {
       try {
         await processAmazonOrder(order, results);
+        return { success: true, orderId: order.AmazonOrderId };
       } catch (err) {
         console.error(`[Scheduler] Error processing order ${order.AmazonOrderId}:`, err.message);
         results.errors.push({
           orderId: order.AmazonOrderId,
           error: err.message,
         });
+        return { success: false, orderId: order.AmazonOrderId, error: err.message };
       }
-    }
+    });
 
     const summary = `Auto-sync: ${results.total} orders - ${results.created} created, ${results.linked} linked, ${results.updated} updated, ${results.skipped} skipped`;
     console.log(`[Scheduler] ${summary}`);

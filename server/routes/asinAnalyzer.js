@@ -393,9 +393,11 @@ router.post('/analyze', requireStaff, async (req, res) => {
     // 1. FETCH DIRECTLY FROM KEEPA API (live data, not cached)
     const { products: keepaProducts, error: keepaError, tokensUsed } = await fetchFromKeepaApi(validAsins);
 
-    if (keepaError && Object.keys(keepaProducts).length === 0) {
-      // If Keepa API fails completely, return error
-      return errors.badRequest(res, keepaError);
+    // Track if Keepa failed - we'll still return results but with warnings
+    let keepaWarning = null;
+    if (keepaError) {
+      keepaWarning = keepaError;
+      console.warn(`[AsinAnalyzer] Keepa warning: ${keepaError}`);
     }
 
     // Build keepa data maps from API response
@@ -712,7 +714,8 @@ router.post('/analyze', requireStaff, async (req, res) => {
         invalid_asins: invalidAsins,
         has_demand_model: !!demandModel,
         keepa_tokens_used: tokensUsed || 0,
-        data_source: 'KEEPA_API_LIVE',
+        keepa_warning: keepaWarning,
+        data_source: keepaWarning ? 'NO_KEEPA_DATA' : 'KEEPA_API_LIVE',
         used_defaults: {
           location,
           scoring: scoringConfig,
@@ -731,7 +734,7 @@ router.post('/analyze', requireStaff, async (req, res) => {
 // ============================================================================
 
 router.get('/bom-candidates', requireStaff, async (req, res) => {
-  const { asin } = req.query;
+  const { asin, title: providedTitle } = req.query;
 
   if (!asin) {
     return errors.badRequest(res, 'asin query parameter is required');
@@ -743,14 +746,25 @@ router.get('/bom-candidates', requireStaff, async (req, res) => {
   }
 
   try {
-    // Get product title from cache
-    const { data: productCache } = await supabase
-      .from('keepa_products_cache')
-      .select('payload_json')
-      .eq('asin', normalizedAsin)
-      .maybeSingle();
+    // Use provided title or try to get from cache
+    let title = providedTitle || null;
 
-    const title = productCache?.payload_json?.title || null;
+    if (!title) {
+      // Get product title from cache
+      const { data: productCache } = await supabase
+        .from('keepa_products_cache')
+        .select('payload_json')
+        .eq('asin', normalizedAsin)
+        .maybeSingle();
+
+      title = productCache?.payload_json?.title || null;
+    }
+
+    // If still no title, try to fetch from Keepa API directly
+    if (!title) {
+      const { products } = await fetchFromKeepaApi([normalizedAsin]);
+      title = products[normalizedAsin]?.title || null;
+    }
 
     // Parse title if available
     let parseIntent = null;

@@ -18,6 +18,7 @@ import { getBomCandidates } from '../utils/api.jsx';
  */
 export default function BomSuggestionPopover({
   asin,
+  title,
   currentBomId,
   currentBomName,
   confidence,
@@ -43,7 +44,7 @@ export default function BomSuggestionPopover({
     setLoading(true);
     setError(null);
     try {
-      const data = await getBomCandidates(asin);
+      const data = await getBomCandidates(asin, title);
       setCandidates(data.candidates || []);
       setParseIntent(data.parse_intent);
     } catch (err) {

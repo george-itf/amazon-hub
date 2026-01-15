@@ -268,7 +268,7 @@ router.post('/import', requireStaff, requireIdempotencyKey, async (req, res) => 
     });
   } catch (err) {
     console.error('Order import error:', err);
-    errors.internal(res, 'Failed to import orders from Shopify');
+    return errors.internal(res, 'Failed to import orders from Shopify');
   } finally {
     // Always release the lock
     if (lockAcquired) {
@@ -482,7 +482,7 @@ router.post('/import-historical', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('Historical order import error:', err);
-    errors.internal(res, 'Failed to import historical orders from Shopify');
+    return errors.internal(res, 'Failed to import historical orders from Shopify');
   }
 });
 
@@ -506,7 +506,7 @@ router.post('/re-evaluate', requireStaff, async (req, res) => {
     sendSuccess(res, result.data?.data || { orders_updated: 0 });
   } catch (err) {
     console.error('Re-evaluate error:', err);
-    errors.internal(res, 'Failed to re-evaluate orders');
+    return errors.internal(res, 'Failed to re-evaluate orders');
   }
 });
 
@@ -573,7 +573,7 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('Orders fetch error:', err);
-    errors.internal(res, 'Failed to fetch orders');
+    return errors.internal(res, 'Failed to fetch orders');
   }
 });
 
@@ -639,7 +639,7 @@ router.get('/:id', async (req, res) => {
     sendSuccess(res, data);
   } catch (err) {
     console.error('Order fetch error:', err);
-    errors.internal(res, 'Failed to fetch order');
+    return errors.internal(res, 'Failed to fetch order');
   }
 });
 
@@ -677,7 +677,7 @@ router.get('/status/ready-to-pick', async (req, res) => {
     sendSuccess(res, data || []);
   } catch (err) {
     console.error('Ready orders fetch error:', err);
-    errors.internal(res, 'Failed to fetch ready orders');
+    return errors.internal(res, 'Failed to fetch ready orders');
   }
 });
 
@@ -728,7 +728,7 @@ router.post('/:id/cancel', requireAdmin, async (req, res) => {
     sendSuccess(res, { message: 'Order cancelled' });
   } catch (err) {
     console.error('Order cancel error:', err);
-    errors.internal(res, 'Failed to cancel order');
+    return errors.internal(res, 'Failed to cancel order');
   }
 });
 

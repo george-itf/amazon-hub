@@ -867,7 +867,7 @@ router.get('/hub/summary', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Analytics hub summary error:', err);
-    errors.internal(res, 'Failed to generate analytics summary');
+    return errors.internal(res, 'Failed to generate analytics summary');
   }
 });
 
@@ -949,7 +949,7 @@ router.get('/hub/dead-stock', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Dead stock query error:', err);
-    errors.internal(res, 'Failed to fetch dead stock data');
+    return errors.internal(res, 'Failed to fetch dead stock data');
   }
 });
 
@@ -1102,7 +1102,7 @@ router.get('/hub/movers', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Movers query error:', err);
-    errors.internal(res, 'Failed to fetch movers data');
+    return errors.internal(res, 'Failed to fetch movers data');
   }
 });
 
@@ -1283,7 +1283,7 @@ router.get('/hub/profitability', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Profitability query error:', err);
-    errors.internal(res, 'Failed to fetch profitability data');
+    return errors.internal(res, 'Failed to fetch profitability data');
   }
 });
 
@@ -1497,7 +1497,7 @@ router.get('/hub/stock-risk', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Stock risk query error:', err);
-    errors.internal(res, 'Failed to fetch stock risk data');
+    return errors.internal(res, 'Failed to fetch stock risk data');
   }
 });
 
@@ -1620,7 +1620,7 @@ router.get('/hub/data-quality', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Data quality check error:', err);
-    errors.internal(res, 'Failed to check data quality');
+    return errors.internal(res, 'Failed to check data quality');
   }
 });
 

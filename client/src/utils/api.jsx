@@ -1,5 +1,13 @@
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001';
 
+// Validate environment variables in production
+if (import.meta.env.PROD && !import.meta.env.VITE_API_BASE) {
+  console.warn(
+    '[API] Warning: VITE_API_BASE environment variable is not set in production. ' +
+    'API requests will default to http://localhost:3001 which may not work correctly.'
+  );
+}
+
 // Token storage helpers
 const TOKEN_KEY = 'amazon_hub_token';
 
@@ -1119,9 +1127,14 @@ export async function analyzeAsins(params) {
 /**
  * Get BOM candidates/suggestions for an ASIN
  * @param {string} asin - ASIN to get suggestions for
+ * @param {string} title - Optional product title (improves matching when cache unavailable)
  */
-export async function getBomCandidates(asin) {
-  return request(`/asin/bom-candidates?asin=${encodeURIComponent(asin)}`);
+export async function getBomCandidates(asin, title = null) {
+  let url = `/asin/bom-candidates?asin=${encodeURIComponent(asin)}`;
+  if (title) {
+    url += `&title=${encodeURIComponent(title)}`;
+  }
+  return request(url);
 }
 
 /**
@@ -1202,4 +1215,47 @@ export async function getSystemHealth(params = {}) {
 export async function getSystemEvents(params = {}) {
   const query = new URLSearchParams(params).toString();
   return request(`/health/events${query ? `?${query}` : ''}`);
+}
+
+// ============ User Preferences API ============
+
+/**
+ * Get all preferences for the current user
+ * @returns {Promise<{preferences: Object}>} Object with all preferences keyed by preference_key
+ */
+export async function getUserPreferences() {
+  return request('/preferences');
+}
+
+/**
+ * Get a specific preference by key
+ * @param {string} key - The preference key
+ * @returns {Promise<{value: any, exists: boolean, updated_at?: string}>}
+ */
+export async function getUserPreference(key) {
+  return request(`/preferences/${encodeURIComponent(key)}`);
+}
+
+/**
+ * Set (create or update) a preference
+ * @param {string} key - The preference key
+ * @param {any} value - The preference value (will be stored as JSON)
+ * @returns {Promise<{key: string, value: any, updated_at: string}>}
+ */
+export async function setUserPreference(key, value) {
+  return request(`/preferences/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: { value },
+  });
+}
+
+/**
+ * Delete a preference
+ * @param {string} key - The preference key to delete
+ * @returns {Promise<{deleted: boolean, key: string}>}
+ */
+export async function deleteUserPreference(key) {
+  return request(`/preferences/${encodeURIComponent(key)}`, {
+    method: 'DELETE',
+  });
 }

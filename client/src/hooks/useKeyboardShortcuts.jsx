@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useState } from 'react';
+import { useEffect, useCallback, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 /**
@@ -20,6 +20,7 @@ import { useNavigate } from 'react-router-dom';
 export function useKeyboardShortcuts({ onShowHelp }) {
   const navigate = useNavigate();
   const [pendingPrefix, setPendingPrefix] = useState(null);
+  const timeoutRef = useRef(null);
 
   const handleKeyDown = useCallback((event) => {
     // Ignore when typing in inputs, textareas, or select elements
@@ -42,8 +43,12 @@ export function useKeyboardShortcuts({ onShowHelp }) {
     // Handle "g" prefix for navigation
     if (event.key === 'g' && !event.ctrlKey && !event.metaKey && !event.altKey) {
       setPendingPrefix('g');
+      // Clear any existing timeout
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
       // Clear prefix after 1 second
-      setTimeout(() => setPendingPrefix(null), 1000);
+      timeoutRef.current = setTimeout(() => setPendingPrefix(null), 1000);
       return;
     }
 
@@ -102,7 +107,13 @@ export function useKeyboardShortcuts({ onShowHelp }) {
 
   useEffect(() => {
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      // Clear timeout on unmount to prevent memory leak
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
   }, [handleKeyDown]);
 
   return { pendingPrefix };

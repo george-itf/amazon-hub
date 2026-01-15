@@ -30,6 +30,7 @@ import {
   updateListingSettings,
   getShippingOptions,
 } from '../utils/api.jsx';
+import { useUserPreferences } from '../hooks/useUserPreferences.jsx';
 
 /**
  * Format price from pence to pounds
@@ -65,8 +66,12 @@ export default function AmazonListingsPage() {
   const [bomFilter, setBomFilter] = useState('all');
   const [sortBy, setSortBy] = useState('asin');
 
-  // Custom tabs state - stored in localStorage
+  // User preferences for cross-device sync
+  const { getPreference, setPreference, loading: prefsLoading } = useUserPreferences();
+
+  // Custom tabs state - synced via user preferences
   const [customTabs, setCustomTabs] = useState(() => {
+    // Initial load from localStorage while preferences are loading
     try {
       const saved = localStorage.getItem('listings_custom_tabs');
       return saved ? JSON.parse(saved) : [];
@@ -75,6 +80,16 @@ export default function AmazonListingsPage() {
     }
   });
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
+
+  // Sync custom tabs from user preferences when loaded
+  useEffect(() => {
+    if (!prefsLoading) {
+      const savedTabs = getPreference('listings_custom_tabs', []);
+      if (Array.isArray(savedTabs)) {
+        setCustomTabs(savedTabs);
+      }
+    }
+  }, [prefsLoading, getPreference]);
 
   // Tab management modal
   const [tabModalOpen, setTabModalOpen] = useState(false);
@@ -102,10 +117,13 @@ export default function AmazonListingsPage() {
   // Bulk selection
   const [selectedListings, setSelectedListings] = useState(new Set());
 
-  // Save custom tabs to localStorage
+  // Save custom tabs to user preferences (syncs to server if logged in)
   useEffect(() => {
-    localStorage.setItem('listings_custom_tabs', JSON.stringify(customTabs));
-  }, [customTabs]);
+    // Skip initial render to avoid overwriting server data before it loads
+    if (!prefsLoading) {
+      setPreference('listings_custom_tabs', customTabs);
+    }
+  }, [customTabs, setPreference, prefsLoading]);
 
   async function load() {
     setLoading(true);
@@ -402,51 +420,53 @@ export default function AmazonListingsPage() {
     );
   }
 
-  // Table rows
-  const rows = filteredListings.map(l => {
-    const settings = listingSettingsMap[l.id] || {};
-    return [
-      <Checkbox
-        key={`check-${l.id}`}
-        label=""
-        labelHidden
-        checked={selectedListings.has(l.id)}
-        onChange={() => toggleSelection(l.id)}
-      />,
-      <Text variant="bodyMd" fontWeight="semibold" key={`asin-${l.id}`}>
-        {l.asin || '-'}
-      </Text>,
-      <Text variant="bodySm" key={`sku-${l.id}`} tone="subdued">
-        {l.sku || '-'}
-      </Text>,
-      getBomDisplay(l.bom_id),
-      <Text variant="bodyMd" key={`price-${l.id}`}>
-        {settings.price_override_pence
-          ? formatPrice(settings.price_override_pence)
-          : <span style={{ color: '#9CA3AF' }}>Auto</span>}
-      </Text>,
-      <Text variant="bodyMd" key={`qty-${l.id}`}>
-        {settings.quantity_override != null
-          ? settings.quantity_override
-          : settings.quantity_cap != null
-            ? `Cap: ${settings.quantity_cap}`
+  // Table rows - memoized to avoid expensive re-computation on every render
+  const rows = useMemo(() => {
+    return filteredListings.map(l => {
+      const settings = listingSettingsMap[l.id] || {};
+      return [
+        <Checkbox
+          key={`check-${l.id}`}
+          label=""
+          labelHidden
+          checked={selectedListings.has(l.id)}
+          onChange={() => toggleSelection(l.id)}
+        />,
+        <Text variant="bodyMd" fontWeight="semibold" key={`asin-${l.id}`}>
+          {l.asin || '-'}
+        </Text>,
+        <Text variant="bodySm" key={`sku-${l.id}`} tone="subdued">
+          {l.sku || '-'}
+        </Text>,
+        getBomDisplay(l.bom_id),
+        <Text variant="bodyMd" key={`price-${l.id}`}>
+          {settings.price_override_pence
+            ? formatPrice(settings.price_override_pence)
             : <span style={{ color: '#9CA3AF' }}>Auto</span>}
-      </Text>,
-      <Text variant="bodySm" key={`ship-${l.id}`}>
-        {settings.shipping_rule || <span style={{ color: '#9CA3AF' }}>Default</span>}
-      </Text>,
-      l.is_active
-        ? <Badge tone="success" key={`status-${l.id}`}>Active</Badge>
-        : <Badge tone="default" key={`status-${l.id}`}>Inactive</Badge>,
-      <Button
-        key={`settings-${l.id}`}
-        icon={SettingsIcon}
-        variant={hasSettings(l.id) ? 'primary' : 'tertiary'}
-        size="slim"
-        onClick={() => openSettingsModal(l)}
-      />,
-    ];
-  });
+        </Text>,
+        <Text variant="bodyMd" key={`qty-${l.id}`}>
+          {settings.quantity_override != null
+            ? settings.quantity_override
+            : settings.quantity_cap != null
+              ? `Cap: ${settings.quantity_cap}`
+              : <span style={{ color: '#9CA3AF' }}>Auto</span>}
+        </Text>,
+        <Text variant="bodySm" key={`ship-${l.id}`}>
+          {settings.shipping_rule || <span style={{ color: '#9CA3AF' }}>Default</span>}
+        </Text>,
+        l.is_active
+          ? <Badge tone="success" key={`status-${l.id}`}>Active</Badge>
+          : <Badge tone="default" key={`status-${l.id}`}>Inactive</Badge>,
+        <Button
+          key={`settings-${l.id}`}
+          icon={SettingsIcon}
+          variant={hasSettings(l.id) ? 'primary' : 'tertiary'}
+          size="slim"
+          onClick={() => openSettingsModal(l)}
+        />,
+      ];
+    });
+  }, [filteredListings, listingSettingsMap, selectedListings, boms]);
 
   // BOM options for selects
   const bomOptions = [

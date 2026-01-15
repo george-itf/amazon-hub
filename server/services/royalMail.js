@@ -6,6 +6,9 @@ import fetch from 'node-fetch';
 
 const CLICK_DROP_API_URL = 'https://api.parcel.royalmail.com/api/v1';
 
+// Default timeout for API calls (30 seconds)
+const DEFAULT_TIMEOUT_MS = 30000;
+
 class RoyalMailClient {
   constructor() {
     this.apiKey = process.env.ROYAL_MAIL_API_KEY;
@@ -27,23 +30,42 @@ class RoyalMailClient {
       throw new Error('Royal Mail API not configured');
     }
 
-    const url = `${CLICK_DROP_API_URL}${path}`;
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
+    // Set up request timeout with AbortController
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`Royal Mail API error: ${response.status}`, errorText);
-      throw new Error(`Royal Mail API error: ${response.status} - ${errorText}`);
+    try {
+      const url = `${CLICK_DROP_API_URL}${path}`;
+      const response = await fetch(url, {
+        ...options,
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Royal Mail API error: ${response.status}`, errorText);
+        throw new Error(`Royal Mail API error: ${response.status} - ${errorText}`);
+      }
+
+      return response.json();
+    } catch (err) {
+      clearTimeout(timeoutId);
+
+      // Handle AbortError (timeout)
+      if (err.name === 'AbortError') {
+        const timeoutError = new Error(`Royal Mail API request timeout after ${DEFAULT_TIMEOUT_MS}ms for ${path}`);
+        timeoutError.code = 'ETIMEDOUT';
+        throw timeoutError;
+      }
+
+      throw err;
     }
-
-    return response.json();
   }
 
   /**

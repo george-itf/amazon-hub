@@ -32,6 +32,9 @@ const RETRY_CONFIG = {
   retryableStatuses: [429, 500, 502, 503, 504],
 };
 
+// Default timeout for API calls (30 seconds)
+const DEFAULT_TIMEOUT_MS = 30000;
+
 // Note: Rate limit configuration is now defined in utils/persistentRateLimiter.js
 // which persists state to database to survive server restarts (Fix for audit finding)
 
@@ -113,6 +116,10 @@ class SpApiClient {
     let lastError = null;
 
     for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+      // Set up request timeout with AbortController
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
       try {
         const response = await fetch(LWA_TOKEN_URL, {
           method: 'POST',
@@ -125,7 +132,9 @@ class SpApiClient {
             client_id: this.clientId,
             client_secret: this.clientSecret,
           }),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
 
         if (!response.ok) {
           const error = await response.text();
@@ -148,7 +157,22 @@ class SpApiClient {
 
         return this.accessToken;
       } catch (err) {
+        clearTimeout(timeoutId);
         lastError = err;
+
+        // Handle AbortError (timeout)
+        if (err.name === 'AbortError') {
+          const timeoutError = new Error(`SP-API token refresh timeout after ${DEFAULT_TIMEOUT_MS}ms`);
+          timeoutError.code = 'ETIMEDOUT';
+
+          if (attempt < RETRY_CONFIG.maxRetries) {
+            const delay = calculateBackoff(attempt);
+            console.warn(`[SP-API] Token refresh timeout, retrying in ${delay}ms (attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries})`);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+          throw timeoutError;
+        }
 
         // Check if network error is retryable
         if (isRetryableError(err, null) && attempt < RETRY_CONFIG.maxRetries) {
@@ -180,6 +204,10 @@ class SpApiClient {
     let lastStatus = null;
 
     for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+      // Set up request timeout with AbortController
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
       try {
         const token = await this.getAccessToken();
         const url = `${this.endpoint}${path}`;
@@ -191,7 +219,9 @@ class SpApiClient {
             'Content-Type': 'application/json',
             ...options.headers,
           },
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
 
         lastStatus = response.status;
 
@@ -229,7 +259,22 @@ class SpApiClient {
 
         return response.json();
       } catch (err) {
+        clearTimeout(timeoutId);
         lastError = err;
+
+        // Handle AbortError (timeout)
+        if (err.name === 'AbortError') {
+          const timeoutError = new Error(`SP-API request timeout after ${DEFAULT_TIMEOUT_MS}ms for ${path}`);
+          timeoutError.code = 'ETIMEDOUT';
+
+          if (attempt < RETRY_CONFIG.maxRetries) {
+            const delay = calculateBackoff(attempt);
+            console.warn(`[SP-API] Request timeout on ${path}, retrying in ${delay}ms (attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries})`);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+          throw timeoutError;
+        }
 
         // Don't retry if it's an API error we already handled
         if (err.status && !isRetryableError(null, err.status)) {

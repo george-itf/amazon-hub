@@ -127,7 +127,7 @@ router.post('/sync/orders', requireAdmin, async (req, res) => {
     sendSuccess(res, results);
   } catch (err) {
     console.error('Amazon order sync failed:', err);
-    errors.internal(res, `Sync failed: ${err.message}`);
+    return errors.internal(res, `Sync failed: ${err.message}`);
   }
 });
 
@@ -166,7 +166,7 @@ router.get('/orders/recent', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('Failed to fetch recent Amazon orders:', err);
-    errors.internal(res, `Failed to fetch orders: ${err.message}`);
+    return errors.internal(res, `Failed to fetch orders: ${err.message}`);
   }
 });
 
@@ -191,7 +191,7 @@ router.get('/order/:orderId', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error(`Failed to fetch Amazon order ${orderId}:`, err);
-    errors.internal(res, `Failed to fetch order: ${err.message}`);
+    return errors.internal(res, `Failed to fetch order: ${err.message}`);
   }
 });
 
@@ -264,7 +264,7 @@ router.post('/shipment/confirm', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('Failed to confirm shipment:', err);
-    errors.internal(res, `Failed to confirm shipment: ${err.message}`);
+    return errors.internal(res, `Failed to confirm shipment: ${err.message}`);
   }
 });
 
@@ -316,7 +316,7 @@ router.get('/orders/pending-shipment', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('Failed to fetch pending shipment orders:', err);
-    errors.internal(res, `Failed to fetch orders: ${err.message}`);
+    return errors.internal(res, `Failed to fetch orders: ${err.message}`);
   }
 });
 
@@ -432,7 +432,7 @@ router.post('/sync/fees', requireAdmin, async (req, res) => {
     sendSuccess(res, results);
   } catch (err) {
     console.error('Amazon fees sync failed:', err);
-    errors.internal(res, `Sync failed: ${err.message}`);
+    return errors.internal(res, `Sync failed: ${err.message}`);
   }
 });
 
@@ -497,7 +497,7 @@ router.get('/catalog/:asin', requireAdmin, async (req, res) => {
     sendSuccess(res, catalogRecord);
   } catch (err) {
     console.error(`Failed to fetch catalog for ${asin}:`, err);
-    errors.internal(res, `Failed to fetch catalog: ${err.message}`);
+    return errors.internal(res, `Failed to fetch catalog: ${err.message}`);
   }
 });
 
@@ -605,7 +605,7 @@ router.post('/sync/catalog', requireAdmin, async (req, res) => {
     sendSuccess(res, results);
   } catch (err) {
     console.error('Catalog sync failed:', err);
-    errors.internal(res, `Sync failed: ${err.message}`);
+    return errors.internal(res, `Sync failed: ${err.message}`);
   }
 });
 
@@ -648,7 +648,7 @@ router.get('/catalog', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('Failed to fetch catalog:', err);
-    errors.internal(res, 'Failed to fetch catalog');
+    return errors.internal(res, 'Failed to fetch catalog');
   }
 });
 
@@ -748,7 +748,7 @@ router.get('/listings', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('Failed to fetch listings:', err);
-    errors.internal(res, 'Failed to fetch listings');
+    return errors.internal(res, 'Failed to fetch listings');
   }
 });
 
@@ -843,7 +843,7 @@ router.post('/listings/:asin/map', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('Failed to map listing:', err);
-    errors.internal(res, `Failed to map listing: ${err.message}`);
+    return errors.internal(res, `Failed to map listing: ${err.message}`);
   }
 });
 
@@ -868,7 +868,7 @@ router.get('/settings', requireAdmin, async (req, res) => {
     sendSuccess(res, settings);
   } catch (err) {
     console.error('Failed to fetch settings:', err);
-    errors.internal(res, 'Failed to fetch settings');
+    return errors.internal(res, 'Failed to fetch settings');
   }
 });
 
@@ -893,7 +893,7 @@ router.put('/settings', requireAdmin, async (req, res) => {
     sendSuccess(res, { message: 'Settings updated' });
   } catch (err) {
     console.error('Failed to update settings:', err);
-    errors.internal(res, 'Failed to update settings');
+    return errors.internal(res, 'Failed to update settings');
   }
 });
 
@@ -916,7 +916,7 @@ router.get('/sync/history', requireAdmin, async (req, res) => {
     sendSuccess(res, data || []);
   } catch (err) {
     console.error('Failed to fetch sync history:', err);
-    errors.internal(res, 'Failed to fetch sync history');
+    return errors.internal(res, 'Failed to fetch sync history');
   }
 });
 
@@ -1025,7 +1025,7 @@ router.get('/order/:orderId/details', requireAdmin, async (req, res) => {
     sendSuccess(res, enhancedOrder);
   } catch (err) {
     console.error('Failed to fetch order details:', err);
-    errors.internal(res, 'Failed to fetch order details');
+    return errors.internal(res, 'Failed to fetch order details');
   }
 });
 
@@ -1085,7 +1085,7 @@ router.post('/scheduler/settings', requireAdmin, async (req, res) => {
     sendSuccess(res, { message: 'Scheduler settings updated', settings: updates });
   } catch (err) {
     console.error('Failed to update scheduler settings:', err);
-    errors.internal(res, 'Failed to update settings');
+    return errors.internal(res, 'Failed to update settings');
   }
 });
 
@@ -1315,7 +1315,7 @@ router.post('/inventory/push', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('Inventory push failed:', err);
-    errors.internal(res, `Inventory push failed: ${err.message}`);
+    return errors.internal(res, `Inventory push failed: ${err.message}`);
   }
 });
 
@@ -1458,7 +1458,7 @@ router.get('/stats', requireAdmin, async (req, res) => {
     });
   } catch (err) {
     console.error('Failed to fetch Amazon stats:', err);
-    errors.internal(res, 'Failed to fetch stats');
+    return errors.internal(res, 'Failed to fetch stats');
   }
 });
 

@@ -23,6 +23,7 @@ import {
 } from '@shopify/polaris';
 import { PlusIcon, DeleteIcon, EditIcon } from '@shopify/polaris-icons';
 import { getComponents, createComponent, adjustStock, getStockMovements, updateComponent } from '../utils/api.jsx';
+import { useUserPreferences } from '../hooks/useUserPreferences.jsx';
 
 /**
  * Format price from pence to pounds
@@ -53,8 +54,12 @@ export default function InventoryPage() {
   const [stockFilter, setStockFilter] = useState('all');
   const [sortBy, setSortBy] = useState('sku');
 
-  // Custom tabs state - stored in localStorage
+  // User preferences for cross-device sync
+  const { getPreference, setPreference, loading: prefsLoading } = useUserPreferences();
+
+  // Custom tabs state - synced via user preferences
   const [customTabs, setCustomTabs] = useState(() => {
+    // Initial load from localStorage while preferences are loading
     try {
       const saved = localStorage.getItem('inventory_custom_tabs');
       return saved ? JSON.parse(saved) : [];
@@ -63,6 +68,16 @@ export default function InventoryPage() {
     }
   });
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
+
+  // Sync custom tabs from user preferences when loaded
+  useEffect(() => {
+    if (!prefsLoading) {
+      const savedTabs = getPreference('inventory_custom_tabs', []);
+      if (Array.isArray(savedTabs)) {
+        setCustomTabs(savedTabs);
+      }
+    }
+  }, [prefsLoading, getPreference]);
 
   // Tab management modal
   const [tabModalOpen, setTabModalOpen] = useState(false);
@@ -90,10 +105,13 @@ export default function InventoryPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
 
-  // Save custom tabs to localStorage
+  // Save custom tabs to user preferences (syncs to server if logged in)
   useEffect(() => {
-    localStorage.setItem('inventory_custom_tabs', JSON.stringify(customTabs));
-  }, [customTabs]);
+    // Skip initial render to avoid overwriting server data before it loads
+    if (!prefsLoading) {
+      setPreference('inventory_custom_tabs', customTabs);
+    }
+  }, [customTabs, setPreference, prefsLoading]);
 
   async function load() {
     setLoading(true);

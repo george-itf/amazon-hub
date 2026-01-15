@@ -318,10 +318,20 @@ export default function AsinAnalyzerPage() {
                 </Card>
 
                 {/* Data Quality Warnings */}
-                {meta && (meta.invalid_asins?.length > 0 || meta.unresolved_asins?.length > 0) && (
+                {meta && (meta.invalid_asins?.length > 0 || meta.unresolved_asins?.length > 0 || meta.keepa_warning || !meta.has_demand_model) && (
                   <Card>
                     <BlockStack gap="200">
                       <Text variant="headingSm">Warnings</Text>
+                      {meta.keepa_warning && (
+                        <Banner tone="critical">
+                          <strong>Keepa API Error:</strong> {meta.keepa_warning}
+                          {meta.keepa_warning.includes('not configured') && (
+                            <Text variant="bodySm">
+                              Set KEEPA_API_KEY environment variable to enable product data.
+                            </Text>
+                          )}
+                        </Banner>
+                      )}
                       {meta.invalid_asins?.length > 0 && (
                         <Banner tone="warning">
                           {meta.invalid_asins.length} invalid ASINs skipped
@@ -412,6 +422,7 @@ export default function AsinAnalyzerPage() {
                           <BomSuggestionPopover
                             key="bom"
                             asin={r.asin}
+                            title={r.title}
                             currentBomId={r.bom_suggestion?.suggested_bom_id}
                             currentBomName={r.bom_suggestion?.suggested_bom_name}
                             confidence={r.bom_suggestion?.confidence}

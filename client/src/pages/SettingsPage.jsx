@@ -32,6 +32,7 @@ import {
   trainDemandModel,
   getDemandModelHistory,
 } from '../utils/api.jsx';
+import { useUserPreferences } from '../hooks/useUserPreferences.jsx';
 
 /**
  * Format price from pence to pounds
@@ -54,22 +55,37 @@ function parsePounds(value) {
  * Default Settings Card
  */
 function DefaultSettingsCard() {
-  // These would be persisted to localStorage or a backend config endpoint
+  const { getPreference, setPreference, loading: prefsLoading } = useUserPreferences();
+
+  const defaultSettings = {
+    min_margin: '10',
+    target_margin: '15',
+    horizon_days: '14',
+    default_service_code: 'CRL1',
+  };
+
+  // Load defaults from preferences or localStorage initially
   const [defaults, setDefaults] = useState(() => {
     try {
       const saved = localStorage.getItem('amazon_hub_defaults');
-      return saved ? JSON.parse(saved) : {
-        min_margin: '10',
-        target_margin: '15',
-        horizon_days: '14',
-        default_service_code: 'CRL1',
-      };
-    } catch { return { min_margin: '10', target_margin: '15', horizon_days: '14', default_service_code: 'CRL1' }; }
+      return saved ? JSON.parse(saved) : defaultSettings;
+    } catch { return defaultSettings; }
   });
   const [saved, setSaved] = useState(false);
 
-  const handleSave = () => {
-    localStorage.setItem('amazon_hub_defaults', JSON.stringify(defaults));
+  // Sync defaults from user preferences when loaded
+  useEffect(() => {
+    if (!prefsLoading) {
+      const savedDefaults = getPreference('amazon_hub_defaults', null);
+      if (savedDefaults && typeof savedDefaults === 'object') {
+        setDefaults({ ...defaultSettings, ...savedDefaults });
+      }
+    }
+  }, [prefsLoading, getPreference]);
+
+  const handleSave = async () => {
+    // Save to user preferences (syncs to server if logged in)
+    await setPreference('amazon_hub_defaults', defaults);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -632,21 +648,38 @@ function DemandModelCard() {
  * Data Management Card
  */
 function DataManagementCard() {
+  const { deletePreference, isLoggedIn } = useUserPreferences();
   const [clearing, setClearing] = useState(false);
 
-  const handleClearLocalStorage = () => {
-    if (!confirm('This will clear all local preferences (custom tabs, defaults). Continue?')) return;
+  const handleClearPreferences = async () => {
+    const message = isLoggedIn
+      ? 'This will clear all preferences (custom tabs, defaults) from your account and this browser. Continue?'
+      : 'This will clear all local preferences (custom tabs, defaults). Continue?';
+
+    if (!confirm(message)) return;
     setClearing(true);
 
-    // Clear specific keys, not everything
-    localStorage.removeItem('inventory_custom_tabs');
-    localStorage.removeItem('listings_custom_tabs');
-    localStorage.removeItem('amazon_hub_defaults');
+    try {
+      // Delete from server (if logged in) and localStorage
+      await deletePreference('inventory_custom_tabs');
+      await deletePreference('listings_custom_tabs');
+      await deletePreference('amazon_hub_defaults');
 
-    setTimeout(() => {
+      // Also clear localStorage directly for immediate effect
+      localStorage.removeItem('inventory_custom_tabs');
+      localStorage.removeItem('listings_custom_tabs');
+      localStorage.removeItem('amazon_hub_defaults');
+
+      setTimeout(() => {
+        setClearing(false);
+        window.location.reload();
+      }, 500);
+    } catch (err) {
+      console.error('Failed to clear preferences:', err);
       setClearing(false);
+      // Still try to reload to clear what we can
       window.location.reload();
-    }, 500);
+    }
   };
 
   return (
@@ -658,14 +691,16 @@ function DataManagementCard() {
         <BlockStack gap="300">
           <InlineStack align="space-between" blockAlign="center">
             <BlockStack gap="100">
-              <Text variant="bodyMd" fontWeight="semibold">Clear Local Preferences</Text>
+              <Text variant="bodyMd" fontWeight="semibold">Clear User Preferences</Text>
               <Text variant="bodySm" tone="subdued">
-                Resets custom tabs, default settings, and other browser-stored preferences.
+                {isLoggedIn
+                  ? 'Resets custom tabs, default settings, and other synced preferences from your account.'
+                  : 'Resets custom tabs, default settings, and other browser-stored preferences.'}
               </Text>
             </BlockStack>
             <Button
               tone="critical"
-              onClick={handleClearLocalStorage}
+              onClick={handleClearPreferences}
               loading={clearing}
             >
               Clear Preferences

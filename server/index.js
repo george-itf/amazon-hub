@@ -8,6 +8,41 @@ import { fileURLToPath } from 'url';
 // Load environment variables from .env
 dotenv.config();
 
+// ============================================================================
+// JWT_SECRET VALIDATION: Ensure JWT_SECRET is properly configured
+// ============================================================================
+const PLACEHOLDER_SECRETS = [
+  'change-this-secret',
+  'your-secret-here',
+  'secret',
+  'jwt-secret',
+  'your_jwt_secret',
+  'changeme',
+  'replace-me',
+  'placeholder',
+];
+
+const jwtSecret = process.env.JWT_SECRET;
+const isProduction = process.env.NODE_ENV === 'production';
+const isPlaceholder = !jwtSecret || PLACEHOLDER_SECRETS.includes(jwtSecret.toLowerCase());
+
+if (isPlaceholder) {
+  if (isProduction) {
+    console.error('========================================');
+    console.error('[FATAL] JWT_SECRET is missing or set to a placeholder value.');
+    console.error('In production, you MUST set a secure, unique JWT_SECRET.');
+    console.error('Server cannot start with an insecure JWT configuration.');
+    console.error('========================================');
+    process.exit(1);
+  } else {
+    console.warn('========================================');
+    console.warn('[WARNING] JWT_SECRET is missing or set to a placeholder value.');
+    console.warn('This is acceptable for development, but MUST be changed in production.');
+    console.warn('Set a secure, unique JWT_SECRET environment variable.');
+    console.warn('========================================');
+  }
+}
+
 // Get __dirname in ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,6 +97,7 @@ import viewsRoutes from './routes/views.js';
 import listingSettingsRoutes from './routes/listingSettings.js';
 import asinAnalyzerRoutes from './routes/asinAnalyzer.js';
 import healthRoutes from './routes/health.js';
+import preferencesRoutes from './routes/preferences.js';
 import scheduler from './services/scheduler.js';
 
 // Create the Express app
@@ -72,10 +108,13 @@ const app = express();
 app.set('trust proxy', 1);
 
 // First-line request debug logging (before any middleware)
-app.use((req, res, next) => {
-  console.log(`[DEBUG] Incoming request: ${req.method} ${req.url} from ${req.ip}`);
-  next();
-});
+// Only enable in non-production environments to prevent log spam and information leakage
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    console.log(`[DEBUG] Incoming request: ${req.method} ${req.url} from ${req.ip}`);
+    next();
+  });
+}
 
 // CORS configuration - trim whitespace from origins
 const allowedOrigins = process.env.ALLOWED_ORIGINS
@@ -249,6 +288,9 @@ app.use('/asin', asinAnalyzerRoutes);
 
 // System Health routes (integration status, sync history)
 app.use('/health', healthRoutes);
+
+// User Preferences routes (cross-device sync)
+app.use('/preferences', preferencesRoutes);
 
 // 404 handler
 app.use((req, res) => {

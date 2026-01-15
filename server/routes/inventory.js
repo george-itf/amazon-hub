@@ -90,7 +90,7 @@ router.get('/recommendations', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Failed to get recommendations:', err);
-    errors.internal(res, `Failed to get recommendations: ${err.message}`);
+    return errors.internal(res, `Failed to get recommendations: ${err.message}`);
   }
 });
 
@@ -183,7 +183,7 @@ router.get('/pools', requireStaff, async (req, res) => {
     });
   } catch (err) {
     console.error('Failed to list pools:', err);
-    errors.internal(res, `Failed to list pools: ${err.message}`);
+    return errors.internal(res, `Failed to list pools: ${err.message}`);
   }
 });
 
@@ -291,7 +291,7 @@ router.get('/pools/:id', requireStaff, async (req, res) => {
     sendSuccess(res, enrichedPool);
   } catch (err) {
     console.error('Failed to get pool:', err);
-    errors.internal(res, `Failed to get pool: ${err.message}`);
+    return errors.internal(res, `Failed to get pool: ${err.message}`);
   }
 });
 
@@ -354,7 +354,7 @@ router.post('/pools', requireAdmin, async (req, res) => {
     sendSuccess(res, pool, 201);
   } catch (err) {
     console.error('Failed to create pool:', err);
-    errors.internal(res, `Failed to create pool: ${err.message}`);
+    return errors.internal(res, `Failed to create pool: ${err.message}`);
   }
 });
 
@@ -409,7 +409,7 @@ router.put('/pools/:id', requireAdmin, async (req, res) => {
     sendSuccess(res, pool);
   } catch (err) {
     console.error('Failed to update pool:', err);
-    errors.internal(res, `Failed to update pool: ${err.message}`);
+    return errors.internal(res, `Failed to update pool: ${err.message}`);
   }
 });
 
@@ -451,7 +451,7 @@ router.delete('/pools/:id', requireAdmin, async (req, res) => {
     sendSuccess(res, { message: 'Pool deactivated' });
   } catch (err) {
     console.error('Failed to delete pool:', err);
-    errors.internal(res, `Failed to delete pool: ${err.message}`);
+    return errors.internal(res, `Failed to delete pool: ${err.message}`);
   }
 });
 
@@ -531,7 +531,7 @@ router.post('/pools/:poolId/members', requireAdmin, async (req, res) => {
     sendSuccess(res, member, 201);
   } catch (err) {
     console.error('Failed to add pool member:', err);
-    errors.internal(res, `Failed to add pool member: ${err.message}`);
+    return errors.internal(res, `Failed to add pool member: ${err.message}`);
   }
 });
 
@@ -592,7 +592,7 @@ router.put('/pools/:poolId/members/:memberId', requireAdmin, async (req, res) =>
     sendSuccess(res, member);
   } catch (err) {
     console.error('Failed to update pool member:', err);
-    errors.internal(res, `Failed to update pool member: ${err.message}`);
+    return errors.internal(res, `Failed to update pool member: ${err.message}`);
   }
 });
 
@@ -635,7 +635,7 @@ router.delete('/pools/:poolId/members/:memberId', requireAdmin, async (req, res)
     sendSuccess(res, { message: 'Member removed from pool' });
   } catch (err) {
     console.error('Failed to remove pool member:', err);
-    errors.internal(res, `Failed to remove pool member: ${err.message}`);
+    return errors.internal(res, `Failed to remove pool member: ${err.message}`);
   }
 });
 

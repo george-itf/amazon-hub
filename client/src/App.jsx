@@ -8,6 +8,7 @@ import { InvictaLoading } from './components/ui/index.jsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.jsx';
 import KeyboardShortcutsHelp from './components/KeyboardShortcutsHelp.jsx';
 import ProductDetailModal from './components/ProductDetailModal.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 /**
  * Amazon Hub Brain - Lazy loaded pages
@@ -107,22 +108,24 @@ export default function App() {
   return (
     <ProductModalProvider>
       <Frame navigation={<Nav />}>
-        <Suspense fallback={<PageLoader />}>
-          <Routes>
-            {/* Core 8-page architecture */}
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/inventory" element={<InventoryPage />} />
-            <Route path="/listings" element={<AmazonListingsPage />} />
-            <Route path="/analyzer" element={<AsinAnalyzerPage />} />
-            <Route path="/allocation" element={<AllocationPage />} />
-            <Route path="/shipping" element={<ShippingPage />} />
-            <Route path="/analytics" element={<AnalyticsPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
+        <ErrorBoundary>
+          <Suspense fallback={<PageLoader />}>
+            <Routes>
+              {/* Core 8-page architecture */}
+              <Route path="/" element={<Dashboard />} />
+              <Route path="/inventory" element={<InventoryPage />} />
+              <Route path="/listings" element={<AmazonListingsPage />} />
+              <Route path="/analyzer" element={<AsinAnalyzerPage />} />
+              <Route path="/allocation" element={<AllocationPage />} />
+              <Route path="/shipping" element={<ShippingPage />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
 
-            {/* Catch-all redirect to dashboard */}
-            <Route path="*" element={<Navigate to="/" />} />
-          </Routes>
-        </Suspense>
+              {/* Catch-all redirect to dashboard */}
+              <Route path="*" element={<Navigate to="/" />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
         <KeyboardShortcutsHelp
           open={showShortcuts}
           onClose={() => setShowShortcuts(false)}
