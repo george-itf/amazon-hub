@@ -7,12 +7,14 @@ import spApiClient from './spApi.js';
 import royalMailClient from './royalMail.js';
 import { recordSystemEvent } from './audit.js';
 import { processAmazonOrder, createResultsTracker } from '../utils/amazonOrderProcessor.js';
+import { getDemandModelSettings, trainDemandModelRun } from './keepaDemandModel.js';
 
 const SCHEDULES = {
   ORDERS: 'amazon_order_sync',
   TRACKING: 'shipping_tracking_sync',
   CATALOG: 'amazon_catalog_sync',
   FEES: 'amazon_fees_sync',
+  DEMAND_MODEL: 'keepa_demand_model_train',
 };
 
 class Scheduler {
@@ -52,7 +54,29 @@ class Scheduler {
       this.scheduleTask(SCHEDULES.CATALOG, this.syncCatalog.bind(this), interval);
     }
 
+    // Schedule demand model training
+    await this.scheduleDemandModelTask();
+
     console.log('[Scheduler] Auto-sync scheduler initialized');
+  }
+
+  /**
+   * Schedule demand model training task based on keepa_settings
+   */
+  async scheduleDemandModelTask() {
+    try {
+      const settings = await getDemandModelSettings();
+
+      if (!settings.enabled) {
+        console.log('[Scheduler] Demand model training disabled');
+        return;
+      }
+
+      const interval = settings.refreshMinutes || 1440; // Default: daily
+      this.scheduleTask(SCHEDULES.DEMAND_MODEL, this.syncDemandModel.bind(this), interval);
+    } catch (err) {
+      console.error('[Scheduler] Failed to schedule demand model task:', err);
+    }
   }
 
   /**
@@ -307,6 +331,43 @@ class Scheduler {
         eventType: 'SCHEDULED_CATALOG_SYNC',
         description: `Auto-sync: ${synced} catalog items refreshed`,
         metadata: { synced, total: asinsToSync.length },
+      });
+    }
+  }
+
+  /**
+   * Train demand model from Keepa metrics and order history
+   */
+  async syncDemandModel() {
+    try {
+      const settings = await getDemandModelSettings();
+
+      if (!settings.enabled) {
+        console.log('[Scheduler] Demand model training disabled, skipping');
+        return;
+      }
+
+      console.log(`[Scheduler] Training demand model: lookback=${settings.lookbackDays}, lambda=${settings.ridgeLambda}`);
+
+      const result = await trainDemandModelRun({
+        domainId: settings.domainId,
+        lookbackDays: settings.lookbackDays,
+        ridgeLambda: settings.ridgeLambda,
+        minAsins: settings.minAsins,
+      });
+
+      console.log(`[Scheduler] Demand model trained: ${result.training_summary?.rows_total || 0} ASINs`);
+
+      // recordSystemEvent is already called inside trainDemandModelRun
+    } catch (err) {
+      console.error('[Scheduler] Demand model training failed:', err.message);
+
+      // Record failure event (don't crash scheduler)
+      await recordSystemEvent({
+        eventType: 'KEEPA_DEMAND_MODEL_TRAINING_FAILED',
+        description: `Scheduled training failed: ${err.message}`,
+        severity: 'ERROR',
+        metadata: { error: err.message },
       });
     }
   }
