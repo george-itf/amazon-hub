@@ -894,3 +894,31 @@ export async function reorderViews(context, viewIds) {
     body: { context, view_ids: viewIds },
   });
 }
+
+// ============ Listing Settings API ============
+
+export async function getListingSettings(listingMemoryIds) {
+  const params = listingMemoryIds && listingMemoryIds.length > 0
+    ? `?listing_memory_ids=${listingMemoryIds.join(',')}`
+    : '';
+  return request(`/listing-settings${params}`);
+}
+
+export async function getListingSetting(listingMemoryId) {
+  return request(`/listing-settings/${listingMemoryId}`);
+}
+
+export async function updateListingSettings(listingMemoryId, payload) {
+  return request(`/listing-settings/${listingMemoryId}`, {
+    method: 'PUT',
+    body: payload,
+  });
+}
+
+export async function deleteListingSettings(listingMemoryId) {
+  return request(`/listing-settings/${listingMemoryId}`, { method: 'DELETE' });
+}
+
+export async function getListingSettingsByGroup(groupKey) {
+  return request(`/listing-settings/by-group/${encodeURIComponent(groupKey)}`);
+}

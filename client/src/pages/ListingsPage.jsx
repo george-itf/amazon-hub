@@ -19,8 +19,10 @@ import {
   ProgressBar,
   Tabs,
 } from '@shopify/polaris';
-import { getListings, createListing, getBoms, getListingInventory, getSharedComponents } from '../utils/api.jsx';
+import { SettingsIcon } from '@shopify/polaris-icons';
+import { getListings, createListing, getBoms, getListingInventory, getSharedComponents, getListingSettings } from '../utils/api.jsx';
 import SavedViewsBar from '../components/SavedViewsBar.jsx';
+import ListingSettingsModal from '../components/ListingSettingsModal.jsx';
 
 /**
  * ListingsPage lists all entries in the listing memory and allows
@@ -57,6 +59,11 @@ export default function ListingsPage() {
   const [inventoryFilter, setInventoryFilter] = useState('all');
   const [selectedInventoryListing, setSelectedInventoryListing] = useState(null);
 
+  // Listing settings state
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [settingsListing, setSettingsListing] = useState(null);
+  const [listingSettingsMap, setListingSettingsMap] = useState({});
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -64,6 +71,20 @@ export default function ListingsPage() {
       const [listingData, bomData] = await Promise.all([getListings(), getBoms()]);
       setListings(listingData.listings || []);
       setBoms(bomData.boms || []);
+
+      // Load settings for all listings
+      if (listingData.listings?.length > 0) {
+        try {
+          const settingsData = await getListingSettings(listingData.listings.map(l => l.id));
+          const settingsMap = {};
+          for (const s of settingsData.settings || []) {
+            settingsMap[s.listing_memory_id] = s;
+          }
+          setListingSettingsMap(settingsMap);
+        } catch (settingsErr) {
+          console.warn('Failed to load listing settings:', settingsErr);
+        }
+      }
     } catch (err) {
       console.error(err);
       setError(err.message || 'Failed to load listings');
@@ -261,6 +282,35 @@ export default function ListingsPage() {
     return Array.from(sources);
   }, [listings]);
 
+  // Open settings modal for a listing
+  const openSettingsModal = (listing) => {
+    setSettingsListing(listing);
+    setSettingsModalOpen(true);
+  };
+
+  // Handle settings saved
+  const handleSettingsSaved = (data) => {
+    setListingSettingsMap(prev => ({
+      ...prev,
+      [data.listing_memory_id]: data,
+    }));
+  };
+
+  // Check if listing has any settings configured
+  const hasSettings = (listingId) => {
+    const s = listingSettingsMap[listingId];
+    if (!s) return false;
+    return (
+      s.price_override_pence != null ||
+      s.quantity_cap != null ||
+      s.quantity_override != null ||
+      s.min_margin_override != null ||
+      s.target_margin_override != null ||
+      (s.tags && s.tags.length > 0) ||
+      s.group_key != null
+    );
+  };
+
   const rows = filteredListings.map((l) => [
     <Text
       variant="bodyMd"
@@ -287,6 +337,14 @@ export default function ListingsPage() {
     ) : (
       <Badge tone="default">Inactive</Badge>
     ),
+    <Button
+      key={`settings-${l.id}`}
+      icon={SettingsIcon}
+      variant={hasSettings(l.id) ? 'primary' : 'tertiary'}
+      size="slim"
+      onClick={() => openSettingsModal(l)}
+      accessibilityLabel={`Settings for ${l.asin || l.sku}`}
+    />,
   ]);
 
   const bomOptions = [
@@ -627,8 +685,8 @@ export default function ListingsPage() {
                       </div>
                     ) : (
                       <DataTable
-                        columnContentTypes={['text', 'text', 'text', 'text', 'text', 'text']}
-                        headings={['ASIN', 'SKU', 'Title Fingerprint', 'BOM', 'Source', 'Status']}
+                        columnContentTypes={['text', 'text', 'text', 'text', 'text', 'text', 'text']}
+                        headings={['ASIN', 'SKU', 'Title Fingerprint', 'BOM', 'Source', 'Status', 'Settings']}
                         rows={rows}
                         footerContent={`${filteredListings.length} of ${listings.length} rule(s)`}
                       />
@@ -861,6 +919,17 @@ export default function ListingsPage() {
           </Modal.Section>
         </Modal>
       )}
+
+      {/* Listing Settings Modal */}
+      <ListingSettingsModal
+        open={settingsModalOpen}
+        listing={settingsListing}
+        onClose={() => {
+          setSettingsModalOpen(false);
+          setSettingsListing(null);
+        }}
+        onSave={handleSettingsSaved}
+      />
     </Page>
   );
 }

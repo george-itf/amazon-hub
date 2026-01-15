@@ -230,6 +230,29 @@ export async function buildAllocationPreview({
     return buildEmptyResult(poolComponent, location, poolOnHand, poolReserved, poolAvailable, bufferUnits, allocatableUnits);
   }
 
+  // Step 3b: Fetch listing_settings for all candidate listings
+  const listingIds = listings.map(l => l.id);
+  const { data: listingSettings } = await supabase
+    .from('listing_settings')
+    .select(`
+      listing_memory_id,
+      price_override_pence,
+      quantity_cap,
+      quantity_override,
+      min_margin_override,
+      target_margin_override,
+      shipping_profile_id,
+      tags,
+      group_key
+    `)
+    .in('listing_memory_id', listingIds);
+
+  // Build settings lookup map
+  const settingsMap = {};
+  for (const s of listingSettings || []) {
+    settingsMap[s.listing_memory_id] = s;
+  }
+
   // Step 4: Get full BOM composition for all BOMs (to compute COGS)
   const { data: allBomComponents, error: allBomError } = await supabase
     .from('bom_components')
@@ -456,20 +479,29 @@ export async function buildAllocationPreview({
     const bomId = listing.bom_id;
     const bundleSku = bomBundleSku[bomId] || null;
 
+    // Get per-listing settings (if any)
+    const settings = settingsMap[listing.id] || {};
+
     // COGS
     const cogsPence = bomCogs[bomId] || 0;
 
-    // Price: prefer ASP, fallback to Keepa buybox median
+    // Price: check override first, then ASP, then Keepa buybox
     let pricePence = null;
     let priceSource = null;
 
-    const sales = salesBySku[sku] || salesBySku[asin];
-    if (sales?.total_units_30d > 0) {
-      pricePence = Math.round(sales.total_revenue_30d / sales.total_units_30d);
-      priceSource = 'ASP_30D';
-    } else if (asin && keepaData[asin]?.buybox_median) {
-      pricePence = keepaData[asin].buybox_median;
-      priceSource = 'KEEPA_BUYBOX';
+    if (settings.price_override_pence != null) {
+      // Use price override
+      pricePence = settings.price_override_pence;
+      priceSource = 'OVERRIDE';
+    } else {
+      const sales = salesBySku[sku] || salesBySku[asin];
+      if (sales?.total_units_30d > 0) {
+        pricePence = Math.round(sales.total_revenue_30d / sales.total_units_30d);
+        priceSource = 'ASP_30D';
+      } else if (asin && keepaData[asin]?.buybox_median) {
+        pricePence = keepaData[asin].buybox_median;
+        priceSource = 'KEEPA_BUYBOX';
+      }
     }
 
     // Fee rate
@@ -525,16 +557,24 @@ export async function buildAllocationPreview({
       keepa?.offer_count
     );
 
+    // Use margin overrides if set, otherwise use function params (defaults: min=10, target=15)
+    const effectiveMinMargin = settings.min_margin_override != null
+      ? parseFloat(settings.min_margin_override)
+      : minMarginPercent;
+    const effectiveTargetMargin = settings.target_margin_override != null
+      ? parseFloat(settings.target_margin_override)
+      : targetMarginPercent;
+
     // Margin multiplier and final score
     const marginMultiplier =
       marginPercent != null
-        ? computeMarginMultiplier(marginPercent, minMarginPercent, targetMarginPercent)
+        ? computeMarginMultiplier(marginPercent, effectiveMinMargin, effectiveTargetMargin)
         : 0;
 
     const score = demandScore * marginMultiplier;
 
-    // Eligibility check
-    const eligible = pricePence != null && marginPercent != null && marginPercent >= minMarginPercent;
+    // Eligibility check (using effective min margin)
+    const eligible = pricePence != null && marginPercent != null && marginPercent >= effectiveMinMargin;
 
     candidates.push({
       listing_memory_id: listing.id,
@@ -564,6 +604,16 @@ export async function buildAllocationPreview({
         internal_weight: Math.round(blendedDemand.internal_weight * 100) / 100,
         model_prediction: blendedDemand.model_prediction,
       },
+      // Per-listing settings
+      quantity_cap: settings.quantity_cap ?? null,
+      quantity_override: settings.quantity_override ?? null,
+      margin_overrides: {
+        min: settings.min_margin_override != null ? parseFloat(settings.min_margin_override) : null,
+        target: settings.target_margin_override != null ? parseFloat(settings.target_margin_override) : null,
+      },
+      tags: settings.tags || [],
+      group_key: settings.group_key || null,
+      shipping_profile_id: settings.shipping_profile_id || null,
       _bom_composition: bomComposition[bomId], // Internal use for allocation
     });
   }
@@ -576,12 +626,53 @@ export async function buildAllocationPreview({
   const eligibleCandidates = candidates.filter(c => c.eligible);
   let unitsToAllocate = allocatableUnits;
 
+  // Step 9a: Handle quantity_override first - allocate fixed quantities
+  for (const candidate of eligibleCandidates) {
+    if (candidate.quantity_override != null && candidate.quantity_override > 0) {
+      // Determine max buildable units
+      const bomComp = candidate._bom_composition;
+      let maxBuildable = Infinity;
+
+      for (const comp of bomComp) {
+        const available = workingStock.get(comp.component_id) || 0;
+        maxBuildable = Math.min(maxBuildable, Math.floor(available / comp.qty_required));
+      }
+
+      // Clamp override to buildable and available pool
+      const allocateQty = Math.min(
+        candidate.quantity_override,
+        maxBuildable,
+        unitsToAllocate
+      );
+
+      if (allocateQty > 0) {
+        candidate.recommended_qty = allocateQty;
+        unitsToAllocate -= allocateQty;
+
+        // Decrement stock for all BOM components
+        for (const comp of bomComp) {
+          const current = workingStock.get(comp.component_id) || 0;
+          workingStock.set(comp.component_id, current - comp.qty_required * allocateQty);
+        }
+      }
+    }
+  }
+
+  // Step 9b: Standard allocation for remaining candidates
   while (unitsToAllocate > 0 && eligibleCandidates.length > 0) {
     // Find best candidate: max score/(allocated+1)
     let bestCandidate = null;
     let bestScore = -1;
 
     for (const candidate of eligibleCandidates) {
+      // Skip if quantity_override was already handled
+      if (candidate.quantity_override != null) continue;
+
+      // Skip if at quantity_cap
+      if (candidate.quantity_cap != null && candidate.recommended_qty >= candidate.quantity_cap) {
+        continue;
+      }
+
       // Check feasibility: can we allocate one more unit?
       const bomComp = candidate._bom_composition;
       let feasible = true;

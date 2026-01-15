@@ -32,6 +32,7 @@ import amazonRoutes from './routes/amazon.js';
 import shippingRoutes from './routes/shipping.js';
 import inventoryRoutes from './routes/inventory.js';
 import viewsRoutes from './routes/views.js';
+import listingSettingsRoutes from './routes/listingSettings.js';
 import scheduler from './services/scheduler.js';
 
 // Create the Express app
@@ -210,6 +211,9 @@ app.use('/inventory', inventoryRoutes);
 
 // UI Views routes (saved filter views)
 app.use('/views', viewsRoutes);
+
+// Listing Settings routes (per-listing overrides)
+app.use('/listing-settings', listingSettingsRoutes);
 
 // 404 handler
 app.use((req, res) => {
