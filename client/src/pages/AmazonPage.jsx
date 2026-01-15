@@ -1201,7 +1201,8 @@ export default function AmazonPage() {
                 label="Select BOM"
                 placeholder="Choose a BOM..."
                 options={availableBoms.map(bom => ({
-                  label: `${bom.name}${bom.sku ? ` (${bom.sku})` : ''}`,
+                  // NOTE: Schema uses bundle_sku/description, not name/sku
+                  label: `${bom.bundle_sku}${bom.description ? ` - ${bom.description}` : ''}`,
                   value: bom.id,
                 }))}
                 value={selectedBomId}
