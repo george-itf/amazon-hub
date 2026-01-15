@@ -16,9 +16,7 @@ export default defineConfig({
         manualChunks: {
           // Vendor chunks - split large dependencies
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-polaris': ['@shopify/polaris', '@shopify/polaris-icons'],
-          // Group utility libraries
-          'vendor-utils': ['date-fns'],
+          'vendor-polaris': ['@shopify/polaris'],
         },
       },
     },
