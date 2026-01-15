@@ -1138,6 +1138,48 @@ export async function reverseSearchComponent(params) {
   });
 }
 
+// ============ Demand Model API ============
+
+/**
+ * Get demand model status and metrics
+ */
+export async function getDemandModelStatus() {
+  return request('/intelligence/demand-model/status');
+}
+
+/**
+ * Train a new demand model (admin only)
+ * @param {Object} params - Training params
+ * @param {number} params.lookback_days - Days of data to use (optional)
+ * @param {number} params.ridge_lambda - Regularization parameter (optional)
+ */
+export async function trainDemandModel(params = {}) {
+  return request('/intelligence/demand-model/train', {
+    method: 'POST',
+    body: params,
+    timeout: 120000, // 2 minute timeout for training
+  });
+}
+
+/**
+ * Get demand prediction for an ASIN
+ * @param {string} asin - ASIN to predict
+ * @param {string} date - Optional date for historical lookup
+ */
+export async function getDemandPrediction(asin, date = null) {
+  const params = new URLSearchParams({ asin });
+  if (date) params.append('date', date);
+  return request(`/intelligence/demand-model/predict?${params.toString()}`);
+}
+
+/**
+ * Get demand model training history
+ * @param {number} limit - Max runs to return (default: 10)
+ */
+export async function getDemandModelHistory(limit = 10) {
+  return request(`/intelligence/demand-model/history?limit=${limit}`);
+}
+
 // ============ System Health API ============
 
 /**

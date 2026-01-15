@@ -12,14 +12,15 @@ import ProductDetailModal from './components/ProductDetailModal.jsx';
 /**
  * Amazon Hub Brain - Lazy loaded pages
  *
- * Clean 7-page architecture:
+ * Clean 8-page architecture:
  * 1. Dashboard - Overview, orders, pipeline, quick actions
  * 2. Inventory - Component stock with custom tabs by brand/type
  * 3. Amazon Listings - All Amazon listings with tabs, filters, BOM assignment
  * 4. ASIN Analyzer - Analyze ASINs with scoring
- * 5. Shipping - Royal Mail integration, parcels, tracking
- * 6. Analytics - Profitability, charts, trends
- * 7. Settings - System configuration
+ * 5. Allocation - Intelligent stock distribution across shared components
+ * 6. Shipping - Royal Mail integration, parcels, tracking
+ * 7. Analytics - Profitability, charts, trends
+ * 8. Settings - System configuration
  */
 
 // Core pages
@@ -27,6 +28,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
 const InventoryPage = lazy(() => import('./pages/InventoryPage.jsx'));
 const AmazonListingsPage = lazy(() => import('./pages/AmazonListingsPage.jsx'));
 const AsinAnalyzerPage = lazy(() => import('./pages/AsinAnalyzerPage.jsx'));
+const AllocationPage = lazy(() => import('./pages/AllocationPage.jsx'));
 const ShippingPage = lazy(() => import('./pages/ShippingPage.jsx'));
 const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage.jsx'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage.jsx'));
@@ -107,11 +109,12 @@ export default function App() {
       <Frame navigation={<Nav />}>
         <Suspense fallback={<PageLoader />}>
           <Routes>
-            {/* Core 7-page architecture */}
+            {/* Core 8-page architecture */}
             <Route path="/" element={<Dashboard />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/listings" element={<AmazonListingsPage />} />
             <Route path="/analyzer" element={<AsinAnalyzerPage />} />
+            <Route path="/allocation" element={<AllocationPage />} />
             <Route path="/shipping" element={<ShippingPage />} />
             <Route path="/analytics" element={<AnalyticsPage />} />
             <Route path="/settings" element={<SettingsPage />} />

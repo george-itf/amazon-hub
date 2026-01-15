@@ -6,6 +6,7 @@ import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
 import { requireStaff } from '../middleware/auth.js';
+import royalMailClient from '../services/royalMail.js';
 
 const router = express.Router();
 
@@ -125,12 +126,18 @@ router.get('/system', requireStaff, async (req, res) => {
       }
     }
 
+    // Check API configuration status
+    const keepaConfigured = !!process.env.KEEPA_API_KEY;
+    const royalMailConfigured = royalMailClient.isConfigured();
+    const amazonConfigured = !!process.env.SP_API_REFRESH_TOKEN;
+
     // Build response
     const response = {
       generated_at: new Date().toISOString(),
       lookback_days: parseInt(days_back),
 
       amazon_sync: {
+        configured: amazonConfigured,
         last_sync_at: lastAmazonSync?.created_at || null,
         last_status: lastAmazonSync?.severity === 'WARN' || lastAmazonSync?.severity === 'ERROR' ? 'failed' : 'success',
         last_result: lastAmazonSync?.metadata || null,
@@ -144,6 +151,7 @@ router.get('/system', requireStaff, async (req, res) => {
       },
 
       keepa_refresh: {
+        configured: keepaConfigured,
         last_refresh_at: lastKeepaRefresh?.created_at || null,
         last_tokens_spent: lastKeepaRefresh?.metadata?.tokens_spent || 0,
         last_asins_refreshed: lastKeepaRefresh?.metadata?.asins_refreshed || 0,
@@ -164,6 +172,7 @@ router.get('/system', requireStaff, async (req, res) => {
       },
 
       royal_mail: {
+        configured: royalMailConfigured,
         last_batch_at: lastRoyalMailBatch?.created_at || null,
         last_batch_dry_run: lastRoyalMailBatch?.metadata?.dry_run || false,
         last_batch_success: lastRoyalMailBatch?.metadata?.success || 0,

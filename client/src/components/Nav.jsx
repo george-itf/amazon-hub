@@ -6,6 +6,7 @@ import {
   InventoryIcon,
   ProductIcon,
   SearchIcon,
+  TargetIcon,
   DeliveryIcon,
   ChartVerticalFilledIcon,
   SettingsIcon,
@@ -16,21 +17,22 @@ import { useAuth } from '../context/AuthContext.jsx';
 /**
  * Amazon Hub Brain Navigation
  *
- * Clean 7-page architecture:
+ * Clean 8-page architecture:
  * 1. Dashboard - Overview, orders, pipeline, quick actions
  * 2. Inventory - Component stock with custom tabs by brand/type
  * 3. Amazon Listings - All Amazon listings with tabs, filters, BOM assignment
  * 4. ASIN Analyzer - Analyze ASINs with scoring
- * 5. Shipping - Royal Mail integration, parcels, tracking
- * 6. Analytics - Profitability, charts, trends
- * 7. Settings - System configuration
+ * 5. Allocation - Intelligent stock distribution across shared components
+ * 6. Shipping - Royal Mail integration, parcels, tracking
+ * 7. Analytics - Profitability, charts, trends
+ * 8. Settings - System configuration
  */
 export default function Nav() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
-  // Main navigation items - clean 7-page structure
+  // Main navigation items - clean 8-page structure
   const mainItems = [
     {
       label: 'Dashboard',
@@ -52,6 +54,11 @@ export default function Nav() {
       label: 'ASIN Analyzer',
       url: '/analyzer',
       icon: SearchIcon,
+    },
+    {
+      label: 'Allocation',
+      url: '/allocation',
+      icon: TargetIcon,
     },
     {
       label: 'Shipping',

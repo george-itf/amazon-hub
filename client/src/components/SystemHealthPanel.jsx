@@ -67,12 +67,21 @@ function formatAbsoluteTime(isoString) {
 /**
  * Health Status Card component for individual integration
  */
-function HealthStatusCard({ title, icon, children, status, lastSyncTime }) {
+function HealthStatusCard({ title, icon, children, status, lastSyncTime, configured }) {
   const statusColors = {
     success: 'success',
     warning: 'warning',
     error: 'critical',
     unknown: 'attention',
+  };
+
+  // Determine status label based on configuration and status
+  const getStatusLabel = () => {
+    if (configured === false) return 'Not Configured';
+    if (status === 'success') return 'Healthy';
+    if (status === 'warning') return 'No Activity';
+    if (status === 'error') return 'Error';
+    return 'Unknown';
   };
 
   return (
@@ -85,7 +94,7 @@ function HealthStatusCard({ title, icon, children, status, lastSyncTime }) {
           </InlineStack>
           <InlineStack gap="200" blockAlign="center">
             <Badge tone={statusColors[status] || 'attention'}>
-              {status === 'success' ? 'Healthy' : status === 'warning' ? 'Warning' : status === 'error' ? 'Error' : 'Unknown'}
+              {getStatusLabel()}
             </Badge>
             {lastSyncTime && (
               <Tooltip content={formatAbsoluteTime(lastSyncTime)}>
@@ -172,14 +181,16 @@ export default function SystemHealthPanel() {
 
   // Determine overall health status
   const getAmazonStatus = () => {
-    if (!amazon_sync.last_sync_at) return 'unknown';
+    if (!amazon_sync.configured) return 'error';
+    if (!amazon_sync.last_sync_at) return 'warning';
     if (amazon_sync.last_status === 'failed') return 'error';
     if (amazon_sync.period_stats.failed_count > amazon_sync.period_stats.success_count) return 'warning';
     return 'success';
   };
 
   const getKeepaStatus = () => {
-    if (!keepa_refresh.last_refresh_at) return 'unknown';
+    if (!keepa_refresh.configured) return 'error';
+    if (!keepa_refresh.last_refresh_at) return 'warning';
     return 'success';
   };
 
@@ -192,7 +203,8 @@ export default function SystemHealthPanel() {
   };
 
   const getRoyalMailStatus = () => {
-    if (!royal_mail.last_batch_at) return 'unknown';
+    if (!royal_mail.configured) return 'error';
+    if (!royal_mail.last_batch_at) return 'warning';
     if (royal_mail.period_stats.total_labels_failed > 0) return 'warning';
     return 'success';
   };
@@ -244,6 +256,7 @@ export default function SystemHealthPanel() {
         title="Amazon Order Sync"
         status={getAmazonStatus()}
         lastSyncTime={amazon_sync.last_sync_at}
+        configured={amazon_sync.configured}
       >
         <BlockStack gap="200">
           {amazon_sync.last_description && (
@@ -297,35 +310,48 @@ export default function SystemHealthPanel() {
         title="Keepa Data Refresh"
         status={getKeepaStatus()}
         lastSyncTime={keepa_refresh.last_refresh_at}
+        configured={keepa_refresh.configured}
       >
         <BlockStack gap="200">
-          {keepa_refresh.last_description && (
-            <Text variant="bodySm" tone="subdued">
-              {keepa_refresh.last_description}
+          {!keepa_refresh.configured ? (
+            <Text variant="bodySm" tone="critical">
+              KEEPA_API_KEY not configured. Set it in your environment variables.
             </Text>
+          ) : keepa_refresh.configured && !keepa_refresh.last_refresh_at ? (
+            <Text variant="bodySm" tone="subdued">
+              API configured and ready. Use the ASIN Analyzer to fetch Keepa data.
+            </Text>
+          ) : (
+            <>
+              {keepa_refresh.last_description && (
+                <Text variant="bodySm" tone="subdued">
+                  {keepa_refresh.last_description}
+                </Text>
+              )}
+              <StatRow
+                label="Last tokens spent"
+                value={keepa_refresh.last_tokens_spent.toLocaleString()}
+              />
+              <StatRow
+                label="Last ASINs refreshed"
+                value={keepa_refresh.last_asins_refreshed.toLocaleString()}
+              />
+              <Divider />
+              <StatRow
+                label="Total requests"
+                value={keepa_refresh.period_stats.total_requests.toLocaleString()}
+                suffix={`(${daysBack}d)`}
+              />
+              <StatRow
+                label="Total tokens spent"
+                value={keepa_refresh.period_stats.total_tokens_spent.toLocaleString()}
+              />
+              <StatRow
+                label="Total ASINs refreshed"
+                value={keepa_refresh.period_stats.total_asins_refreshed.toLocaleString()}
+              />
+            </>
           )}
-          <StatRow
-            label="Last tokens spent"
-            value={keepa_refresh.last_tokens_spent.toLocaleString()}
-          />
-          <StatRow
-            label="Last ASINs refreshed"
-            value={keepa_refresh.last_asins_refreshed.toLocaleString()}
-          />
-          <Divider />
-          <StatRow
-            label="Total requests"
-            value={keepa_refresh.period_stats.total_requests.toLocaleString()}
-            suffix={`(${daysBack}d)`}
-          />
-          <StatRow
-            label="Total tokens spent"
-            value={keepa_refresh.period_stats.total_tokens_spent.toLocaleString()}
-          />
-          <StatRow
-            label="Total ASINs refreshed"
-            value={keepa_refresh.period_stats.total_asins_refreshed.toLocaleString()}
-          />
         </BlockStack>
       </HealthStatusCard>
 
@@ -403,64 +429,77 @@ export default function SystemHealthPanel() {
         title="Royal Mail Shipping"
         status={getRoyalMailStatus()}
         lastSyncTime={royal_mail.last_batch_at}
+        configured={royal_mail.configured}
       >
         <BlockStack gap="200">
-          {royal_mail.last_description && (
-            <Text variant="bodySm" tone="subdued">
-              {royal_mail.last_description}
+          {!royal_mail.configured ? (
+            <Text variant="bodySm" tone="critical">
+              ROYAL_MAIL_API_KEY not configured. Set it in your environment variables.
             </Text>
-          )}
-          {royal_mail.last_batch_at && (
+          ) : royal_mail.configured && !royal_mail.last_batch_at ? (
+            <Text variant="bodySm" tone="subdued">
+              API configured and ready. Create shipping labels from the Shipping page.
+            </Text>
+          ) : (
             <>
-              <Text variant="bodySm" fontWeight="semibold">Last Batch</Text>
+              {royal_mail.last_description && (
+                <Text variant="bodySm" tone="subdued">
+                  {royal_mail.last_description}
+                </Text>
+              )}
+              {royal_mail.last_batch_at && (
+                <>
+                  <Text variant="bodySm" fontWeight="semibold">Last Batch</Text>
+                  <StatRow
+                    label="Type"
+                    value={royal_mail.last_batch_dry_run ? 'Dry run' : 'Live'}
+                    tone={royal_mail.last_batch_dry_run ? 'subdued' : undefined}
+                  />
+                  <StatRow
+                    label="Labels created"
+                    value={royal_mail.last_batch_success}
+                    tone="success"
+                  />
+                  {royal_mail.last_batch_failed > 0 && (
+                    <StatRow
+                      label="Labels failed"
+                      value={royal_mail.last_batch_failed}
+                      tone="critical"
+                    />
+                  )}
+                  {!royal_mail.last_batch_dry_run && royal_mail.last_batch_cost_pence > 0 && (
+                    <StatRow
+                      label="Batch cost"
+                      value={formatPrice(royal_mail.last_batch_cost_pence)}
+                    />
+                  )}
+                </>
+              )}
+              <Divider />
+              <Text variant="bodySm" fontWeight="semibold">Period Totals ({daysBack}d)</Text>
               <StatRow
-                label="Type"
-                value={royal_mail.last_batch_dry_run ? 'Dry run' : 'Live'}
-                tone={royal_mail.last_batch_dry_run ? 'subdued' : undefined}
+                label="Total batches"
+                value={royal_mail.period_stats.total_batches.toLocaleString()}
               />
               <StatRow
                 label="Labels created"
-                value={royal_mail.last_batch_success}
+                value={royal_mail.period_stats.total_labels_success.toLocaleString()}
                 tone="success"
               />
-              {royal_mail.last_batch_failed > 0 && (
+              {royal_mail.period_stats.total_labels_failed > 0 && (
                 <StatRow
                   label="Labels failed"
-                  value={royal_mail.last_batch_failed}
+                  value={royal_mail.period_stats.total_labels_failed.toLocaleString()}
                   tone="critical"
                 />
               )}
-              {!royal_mail.last_batch_dry_run && royal_mail.last_batch_cost_pence > 0 && (
-                <StatRow
-                  label="Batch cost"
-                  value={formatPrice(royal_mail.last_batch_cost_pence)}
-                />
-              )}
+              <StatRow
+                label="Total shipping cost"
+                value={formatPrice(royal_mail.period_stats.total_cost_pence)}
+                tone={royal_mail.period_stats.total_cost_pence > 0 ? 'critical' : undefined}
+              />
             </>
           )}
-          <Divider />
-          <Text variant="bodySm" fontWeight="semibold">Period Totals ({daysBack}d)</Text>
-          <StatRow
-            label="Total batches"
-            value={royal_mail.period_stats.total_batches.toLocaleString()}
-          />
-          <StatRow
-            label="Labels created"
-            value={royal_mail.period_stats.total_labels_success.toLocaleString()}
-            tone="success"
-          />
-          {royal_mail.period_stats.total_labels_failed > 0 && (
-            <StatRow
-              label="Labels failed"
-              value={royal_mail.period_stats.total_labels_failed.toLocaleString()}
-              tone="critical"
-            />
-          )}
-          <StatRow
-            label="Total shipping cost"
-            value={formatPrice(royal_mail.period_stats.total_cost_pence)}
-            tone={royal_mail.period_stats.total_cost_pence > 0 ? 'critical' : undefined}
-          />
         </BlockStack>
       </HealthStatusCard>
 

@@ -28,6 +28,9 @@ import {
   createShippingRule,
   updateShippingRule,
   deleteShippingRule,
+  getDemandModelStatus,
+  trainDemandModel,
+  getDemandModelHistory,
 } from '../utils/api.jsx';
 
 /**
@@ -413,6 +416,219 @@ function ShippingRulesCard() {
 }
 
 /**
+ * Demand Model Management Card
+ */
+function DemandModelCard() {
+  const [modelStatus, setModelStatus] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [training, setTraining] = useState(false);
+  const [error, setError] = useState(null);
+  const [success, setSuccess] = useState(null);
+
+  const loadModelData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [statusData, historyData] = await Promise.all([
+        getDemandModelStatus(),
+        getDemandModelHistory(5),
+      ]);
+      setModelStatus(statusData);
+      setHistory(historyData.runs || []);
+      setError(null);
+    } catch (err) {
+      setError(err.message || 'Failed to load demand model data');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadModelData();
+  }, [loadModelData]);
+
+  const handleTrainModel = async () => {
+    if (!confirm('Train a new demand model? This may take up to 2 minutes.')) return;
+
+    setTraining(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const result = await trainDemandModel();
+      setSuccess(`Model trained successfully! MAE: ${result.model?.metrics?.holdout_mae?.toFixed(3) || 'N/A'}`);
+      loadModelData(); // Refresh data
+    } catch (err) {
+      setError(err.message || 'Failed to train demand model');
+    } finally {
+      setTraining(false);
+    }
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '-';
+    return new Date(dateStr).toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  return (
+    <Card>
+      <BlockStack gap="400">
+        <InlineStack align="space-between" blockAlign="center">
+          <BlockStack gap="100">
+            <Text variant="headingMd">Demand Prediction Model</Text>
+            <Text variant="bodySm" tone="subdued">
+              ML model that predicts daily sales from Keepa market signals (rank, offers, price).
+            </Text>
+          </BlockStack>
+          <Button
+            variant="primary"
+            onClick={handleTrainModel}
+            loading={training}
+            disabled={loading}
+          >
+            Train New Model
+          </Button>
+        </InlineStack>
+
+        {error && (
+          <Banner tone="critical" onDismiss={() => setError(null)}>
+            <p>{error}</p>
+          </Banner>
+        )}
+
+        {success && (
+          <Banner tone="success" onDismiss={() => setSuccess(null)}>
+            <p>{success}</p>
+          </Banner>
+        )}
+
+        <Divider />
+
+        {loading ? (
+          <Text tone="subdued">Loading model status...</Text>
+        ) : modelStatus?.active ? (
+          <BlockStack gap="300">
+            <InlineStack align="space-between" blockAlign="center">
+              <Text variant="bodyMd" fontWeight="semibold">Current Active Model</Text>
+              <Badge tone="success">Active</Badge>
+            </InlineStack>
+
+            <BlockStack gap="200">
+              <InlineStack gap="400" wrap>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Model Name</Text>
+                  <Text variant="bodyMd">{modelStatus.model?.model_name || '-'}</Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Trained</Text>
+                  <Text variant="bodyMd">{formatDate(modelStatus.model?.trained_at)}</Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Training Period</Text>
+                  <Text variant="bodyMd">{modelStatus.model?.lookback_days || '-'} days</Text>
+                </BlockStack>
+              </InlineStack>
+
+              {modelStatus.model?.training_summary && (
+                <InlineStack gap="400" wrap>
+                  <BlockStack gap="100">
+                    <Text variant="bodySm" tone="subdued">Training ASINs</Text>
+                    <Text variant="bodyMd">{modelStatus.model.training_summary.rows_total?.toLocaleString() || '-'}</Text>
+                  </BlockStack>
+                </InlineStack>
+              )}
+
+              {modelStatus.model?.metrics && (
+                <>
+                  <Divider />
+                  <Text variant="bodyMd" fontWeight="semibold">Model Performance</Text>
+                  <InlineStack gap="400" wrap>
+                    {modelStatus.model.metrics.holdout_mae != null && (
+                      <BlockStack gap="100">
+                        <Text variant="bodySm" tone="subdued">MAE (units/day)</Text>
+                        <Text variant="bodyMd">{modelStatus.model.metrics.holdout_mae.toFixed(3)}</Text>
+                      </BlockStack>
+                    )}
+                    {modelStatus.model.metrics.holdout_r2_log != null && (
+                      <BlockStack gap="100">
+                        <Text variant="bodySm" tone="subdued">R² (log scale)</Text>
+                        <Text variant="bodyMd">{modelStatus.model.metrics.holdout_r2_log.toFixed(3)}</Text>
+                      </BlockStack>
+                    )}
+                    {modelStatus.model.metrics.holdout_count != null && (
+                      <BlockStack gap="100">
+                        <Text variant="bodySm" tone="subdued">Holdout Size</Text>
+                        <Text variant="bodyMd">{modelStatus.model.metrics.holdout_count}</Text>
+                      </BlockStack>
+                    )}
+                  </InlineStack>
+                </>
+              )}
+
+              {modelStatus.model?.coefficients && (
+                <>
+                  <Divider />
+                  <Text variant="bodyMd" fontWeight="semibold">Model Coefficients</Text>
+                  <Text variant="bodySm" tone="subdued">
+                    ln(units/day) = {modelStatus.model.coefficients.intercept?.toFixed(3)}
+                    + {modelStatus.model.coefficients.ln_rank?.toFixed(3)} × ln(rank)
+                    + {modelStatus.model.coefficients.ln_offer?.toFixed(3)} × ln(offers)
+                    + {modelStatus.model.coefficients.ln_price?.toFixed(3)} × ln(price)
+                  </Text>
+                </>
+              )}
+            </BlockStack>
+          </BlockStack>
+        ) : (
+          <Banner tone="warning">
+            <p>No demand model is currently active. Train a model to enable demand predictions in the ASIN Analyzer.</p>
+          </Banner>
+        )}
+
+        {history.length > 0 && (
+          <>
+            <Divider />
+            <Text variant="bodyMd" fontWeight="semibold">Training History</Text>
+            <BlockStack gap="200">
+              {history.map((run) => (
+                <Card key={run.id}>
+                  <InlineStack align="space-between" blockAlign="center">
+                    <InlineStack gap="200" blockAlign="center">
+                      <Text variant="bodySm">{formatDate(run.trained_at)}</Text>
+                      {run.is_active && <Badge tone="success" size="small">Active</Badge>}
+                    </InlineStack>
+                    <InlineStack gap="300" wrap>
+                      <Text variant="bodySm" tone="subdued">
+                        {run.training_summary?.rows_total || '?'} ASINs
+                      </Text>
+                      <Text variant="bodySm" tone="subdued">
+                        MAE: {run.metrics?.holdout_mae?.toFixed(3) || 'N/A'}
+                      </Text>
+                    </InlineStack>
+                  </InlineStack>
+                </Card>
+              ))}
+            </BlockStack>
+          </>
+        )}
+
+        <Divider />
+        <Text variant="bodySm" tone="subdued">
+          The model is used in ASIN Analyzer to predict units/day based on Keepa data.
+          Training is automatic (daily) but can be triggered manually above.
+        </Text>
+      </BlockStack>
+    </Card>
+  );
+}
+
+/**
  * Data Management Card
  */
 function DataManagementCard() {
@@ -469,6 +685,7 @@ export default function SettingsPage() {
 
   const tabs = [
     { id: 'health', content: 'System Health' },
+    { id: 'demand', content: 'Demand Model' },
     { id: 'defaults', content: 'Defaults' },
     { id: 'shipping', content: 'Shipping Rules' },
     { id: 'data', content: 'Data' },
@@ -483,9 +700,10 @@ export default function SettingsPage() {
         <Layout.Section>
           <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab} fitted>
             {selectedTab === 0 && <SystemHealthPanel />}
-            {selectedTab === 1 && <DefaultSettingsCard />}
-            {selectedTab === 2 && <ShippingRulesCard />}
-            {selectedTab === 3 && <DataManagementCard />}
+            {selectedTab === 1 && <DemandModelCard />}
+            {selectedTab === 2 && <DefaultSettingsCard />}
+            {selectedTab === 3 && <ShippingRulesCard />}
+            {selectedTab === 4 && <DataManagementCard />}
           </Tabs>
         </Layout.Section>
       </Layout>
