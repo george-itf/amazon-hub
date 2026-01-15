@@ -65,6 +65,30 @@ function getStatusBadge(status) {
 }
 
 /**
+ * Get channel badge with Amazon-linked indicator
+ * When a Shopify order is linked to Amazon (source_channel = 'AMAZON'), show special badge
+ */
+function getChannelBadge(order) {
+  const isLinkedToAmazon = order.channel === 'shopify' && order.source_channel === 'AMAZON';
+  const isAmazonDirect = order.channel === 'AMAZON';
+
+  if (isLinkedToAmazon) {
+    return (
+      <InlineStack gap="100">
+        <Badge tone="warning">Shopify</Badge>
+        <Badge tone="info">→ Amazon</Badge>
+      </InlineStack>
+    );
+  }
+
+  if (isAmazonDirect) {
+    return <Badge tone="info">Amazon</Badge>;
+  }
+
+  return <Badge tone="success">Shopify</Badge>;
+}
+
+/**
  * OrdersPage - View and manage orders imported from Shopify
  */
 export default function OrdersPage() {
@@ -622,7 +646,7 @@ export default function OrdersPage() {
                 </BlockStack>
                 <BlockStack gap="100">
                   <Text variant="bodySm" tone="subdued">Channel</Text>
-                  <Badge tone="info">{selectedOrder.channel?.toUpperCase() || 'UNKNOWN'}</Badge>
+                  {getChannelBadge(selectedOrder)}
                 </BlockStack>
                 <BlockStack gap="100">
                   <Text variant="bodySm" tone="subdued">Total</Text>
@@ -639,8 +663,26 @@ export default function OrdersPage() {
                   <BlockStack gap="300">
                     <InlineStack align="space-between">
                       <Text variant="headingSm">Amazon Details</Text>
-                      <Badge tone="info">Amazon FBM</Badge>
+                      <InlineStack gap="200">
+                        {selectedOrder.channel === 'shopify' && selectedOrder.source_channel === 'AMAZON' && (
+                          <Badge tone="attention">Linked Order</Badge>
+                        )}
+                        <Badge tone="info">Amazon FBM</Badge>
+                      </InlineStack>
                     </InlineStack>
+
+                    {/* Linked Order Banner */}
+                    {selectedOrder.channel === 'shopify' && selectedOrder.source_channel === 'AMAZON' && (
+                      <Banner tone="info">
+                        <p>
+                          This Shopify order was linked to Amazon order <strong>{selectedOrder.amazon_order_id}</strong>.
+                          Order lines have been replaced with Amazon data for accurate resolution.
+                          {selectedOrder.raw_payload?._lines_replaced_at && (
+                            <> Lines replaced at {new Date(selectedOrder.raw_payload._lines_replaced_at).toLocaleString()}.</>
+                          )}
+                        </p>
+                      </Banner>
+                    )}
 
                     {loadingAmazonDetails ? (
                       <InlineStack gap="200" blockAlign="center">
@@ -837,6 +879,9 @@ export default function OrdersPage() {
                           <Badge tone="success">Resolved</Badge>
                         ) : (
                           <Badge tone="warning">Needs Review</Badge>
+                        )}
+                        {line.line_source === 'AMAZON' && selectedOrder.channel === 'shopify' && (
+                          <Badge tone="info" size="small">From Amazon</Badge>
                         )}
                         {line.resolution_source && (
                           <Text variant="bodySm" tone="subdued">{line.resolution_source}</Text>

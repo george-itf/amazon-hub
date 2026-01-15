@@ -189,6 +189,180 @@ async function attemptSkuBasedBomInference(asin, sku, title, fingerprint) {
 }
 
 /**
+ * Replace Shopify order lines with Amazon-sourced lines
+ *
+ * When a Shopify order is linked to an Amazon order, we need to replace
+ * the original Shopify line items with Amazon's authoritative data because:
+ * - Amazon always provides ASIN (Shopify often doesn't)
+ * - Amazon has accurate SKU mapping
+ * - Resolution is more reliable with direct ASIN lookup
+ *
+ * @param {string} orderId - The internal order UUID
+ * @param {string} amazonOrderId - The Amazon order ID (e.g., 206-1234567-8901234)
+ * @param {Object} amazonOrder - Raw Amazon order data from SP-API
+ * @returns {Promise<{replaced: number, resolved: number, unresolved: number, allResolved: boolean}>}
+ */
+export async function replaceOrderLinesFromAmazon(orderId, amazonOrderId, amazonOrder) {
+  console.log(`[Amazon] Replacing order lines for ${orderId} with Amazon data from ${amazonOrderId}`);
+
+  // Step 1: Delete existing order lines for this order
+  const { data: existingLines, error: fetchError } = await supabase
+    .from('order_lines')
+    .select('id')
+    .eq('order_id', orderId);
+
+  if (fetchError) {
+    console.error('[Amazon] Failed to fetch existing order lines:', fetchError.message);
+    throw new Error(`Failed to fetch existing order lines: ${fetchError.message}`);
+  }
+
+  const existingLineIds = (existingLines || []).map(l => l.id);
+
+  if (existingLineIds.length > 0) {
+    // Delete the existing order lines
+    const { error: deleteError } = await supabase
+      .from('order_lines')
+      .delete()
+      .eq('order_id', orderId);
+
+    if (deleteError) {
+      console.error('[Amazon] Failed to delete existing order lines:', deleteError.message);
+      throw new Error(`Failed to delete existing order lines: ${deleteError.message}`);
+    }
+
+    console.log(`[Amazon] Deleted ${existingLineIds.length} existing Shopify order lines`);
+  }
+
+  // Step 2: Delete stale review_queue entries for this order
+  const { error: reviewDeleteError } = await supabase
+    .from('review_queue')
+    .delete()
+    .eq('order_id', orderId)
+    .eq('status', 'PENDING');
+
+  if (reviewDeleteError) {
+    console.warn('[Amazon] Failed to clean up review queue:', reviewDeleteError.message);
+    // Non-fatal - continue processing
+  }
+
+  // Step 3: Fetch order items from Amazon
+  const orderItems = await spApiClient.getOrderItems(amazonOrderId);
+  const items = orderItems.OrderItems || [];
+
+  if (items.length === 0) {
+    console.warn(`[Amazon] No order items found for ${amazonOrderId}`);
+    return { replaced: 0, resolved: 0, unresolved: 0, allResolved: true };
+  }
+
+  // Step 4: Process each Amazon line item
+  const processedLines = [];
+  let resolvedCount = 0;
+  let unresolvedCount = 0;
+
+  for (const item of items) {
+    const asin = normalizeAsin(item.ASIN);
+    const sku = normalizeSku(item.SellerSKU);
+    const title = item.Title || '';
+    const fingerprint = fingerprintTitle(title);
+
+    // Attempt to resolve listing using the standard resolution flow
+    let resolution = await resolveListing(asin, sku, title);
+    let isResolved = resolution !== null && resolution.bom_id !== null;
+    let resolutionSource = isResolved ? 'MEMORY' : null;
+
+    // If standard resolution failed, try SKU-based BOM inference
+    if (!isResolved) {
+      const skuInference = await attemptSkuBasedBomInference(asin, sku, title, fingerprint);
+      if (skuInference) {
+        resolution = skuInference;
+        isResolved = true;
+        resolutionSource = 'SKU_INFERENCE';
+        console.log(`[Amazon] SKU inference succeeded for ${sku} -> BOM ${resolution.bom_id}`);
+      }
+    }
+
+    if (isResolved) {
+      resolvedCount++;
+    } else {
+      unresolvedCount++;
+    }
+
+    const quantity = item.QuantityOrdered || 1;
+    const pricePerUnit = item.ItemPrice
+      ? Math.round(parseFloat(item.ItemPrice.Amount) / quantity * 100)
+      : 0;
+
+    processedLines.push({
+      item,
+      asin,
+      sku,
+      title,
+      fingerprint,
+      resolution,
+      isResolved,
+      resolutionSource,
+      quantity,
+      pricePerUnit,
+    });
+  }
+
+  // Step 5: Insert new Amazon-sourced order lines
+  for (const processed of processedLines) {
+    const { item, asin, sku, title, fingerprint, resolution, isResolved, resolutionSource, quantity, pricePerUnit } = processed;
+
+    const { error: lineError } = await supabase
+      .from('order_lines')
+      .insert({
+        order_id: orderId,
+        external_line_id: item.OrderItemId || null,
+        asin: asin,
+        sku: sku,
+        title: title,
+        title_fingerprint: fingerprint,
+        quantity: quantity,
+        unit_price_pence: pricePerUnit,
+        listing_memory_id: resolution?.id || null,
+        bom_id: resolution?.bom_id || null,
+        resolution_source: resolutionSource,
+        is_resolved: isResolved,
+        parse_intent: null,
+        line_source: 'AMAZON',
+      });
+
+    if (lineError) {
+      console.error('[Amazon] Order line insert error:', lineError.message);
+      // Continue processing other lines
+    }
+
+    // Create review queue entry for unresolved items
+    if (!isResolved) {
+      await supabase.from('review_queue').insert({
+        order_id: orderId,
+        order_line_id: null,
+        external_id: `${amazonOrderId}-${item.OrderItemId || item.ASIN}`,
+        asin: asin,
+        sku: sku,
+        title: title,
+        title_fingerprint: fingerprint,
+        reason: resolution ? 'BOM_NOT_SET' : 'UNKNOWN_LISTING',
+        status: 'PENDING',
+      });
+    }
+  }
+
+  const allResolved = unresolvedCount === 0;
+
+  console.log(`[Amazon] Replaced ${processedLines.length} lines: ${resolvedCount} resolved, ${unresolvedCount} unresolved`);
+
+  return {
+    replaced: processedLines.length,
+    resolved: resolvedCount,
+    unresolved: unresolvedCount,
+    allResolved,
+  };
+}
+
+/**
  * Process a single Amazon order
  * @param {Object} amazonOrder - Raw Amazon order data from SP-API
  * @param {Object} results - Results tracking object (modified in place)
@@ -280,22 +454,83 @@ export async function processAmazonOrder(amazonOrder, results) {
     }
   }
 
-  // If we found a matching Shopify order, link them
+  // If we found a matching Shopify order, link them and replace order lines
   if (linkedShopifyOrder) {
-    await supabase
+    console.log(`[Amazon] Found matching Shopify order ${linkedShopifyOrder.external_order_id} for Amazon order ${amazonOrderId}`);
+
+    // Parse Amazon shipping address for enrichment
+    const amazonShippingAddress = amazonOrder.ShippingAddress || {};
+    const amazonCustomerName = amazonShippingAddress.Name || amazonOrder.BuyerInfo?.BuyerName || null;
+    const amazonCustomerEmail = amazonOrder.BuyerInfo?.BuyerEmail || null;
+
+    // Build Amazon shipping address as jsonb
+    const amazonShippingAddressJson = amazonShippingAddress.AddressLine1 ? {
+      name: amazonShippingAddress.Name,
+      address1: amazonShippingAddress.AddressLine1,
+      address2: amazonShippingAddress.AddressLine2 || null,
+      city: amazonShippingAddress.City,
+      province: amazonShippingAddress.StateOrRegion || null,
+      zip: amazonShippingAddress.PostalCode,
+      country: amazonShippingAddress.CountryCode,
+      phone: amazonShippingAddress.Phone || null,
+    } : null;
+
+    // Parse order total from Amazon
+    const amazonOrderTotalPence = amazonOrder.OrderTotal
+      ? Math.round(parseFloat(amazonOrder.OrderTotal.Amount) * 100)
+      : null;
+
+    // Replace order lines with Amazon-sourced data
+    const lineResult = await replaceOrderLinesFromAmazon(
+      linkedShopifyOrder.id,
+      amazonOrderId,
+      amazonOrder
+    );
+
+    // Determine new status based on line resolution and Amazon status
+    let newStatus = linkedShopifyOrder.status;
+    const amazonStatus = STATUS_MAP[amazonOrder.OrderStatus] || 'NEEDS_REVIEW';
+
+    // If Amazon says it's shipped/cancelled, use that status
+    if (amazonStatus === 'DISPATCHED' || amazonStatus === 'CANCELLED') {
+      newStatus = amazonStatus;
+    } else if (lineResult.allResolved) {
+      // All lines resolved - order is ready to pick
+      newStatus = 'READY_TO_PICK';
+    } else {
+      // Some lines unresolved - needs review
+      newStatus = 'NEEDS_REVIEW';
+    }
+
+    // Update order with Amazon data and new status
+    const { error: updateError } = await supabase
       .from('orders')
       .update({
         amazon_order_id: amazonOrderId,
         source_channel: 'AMAZON',
+        status: newStatus,
+        // Enrich with Amazon data (prefer Amazon shipping address if available)
+        shipping_address: amazonShippingAddressJson || linkedShopifyOrder.shipping_address,
+        customer_name: amazonCustomerName || linkedShopifyOrder.customer_name,
+        customer_email: amazonCustomerEmail || linkedShopifyOrder.customer_email,
+        // Update total if Amazon provides it
+        total_price_pence: amazonOrderTotalPence || linkedShopifyOrder.total_price_pence,
         raw_payload: {
           ...linkedShopifyOrder.raw_payload,
           _amazon_data: amazonOrder,
+          _lines_replaced_at: new Date().toISOString(),
+          _lines_replaced_count: lineResult.replaced,
         },
         updated_at: new Date().toISOString(),
       })
       .eq('id', linkedShopifyOrder.id);
 
-    console.log(`[Amazon] Linked Amazon order ${amazonOrderId} to Shopify order ${linkedShopifyOrder.external_order_id}`);
+    if (updateError) {
+      console.error('[Amazon] Failed to update linked order:', updateError.message);
+      throw new Error(`Failed to update linked order: ${updateError.message}`);
+    }
+
+    console.log(`[Amazon] Linked and updated order ${amazonOrderId}: ${lineResult.replaced} lines replaced, status=${newStatus} (${lineResult.resolved} resolved, ${lineResult.unresolved} unresolved)`);
     results.linked++;
     return;
   }
@@ -423,6 +658,7 @@ export async function processAmazonOrder(amazonOrder, results) {
         resolution_source: resolutionSource,
         is_resolved: isResolved,
         parse_intent: null,
+        line_source: 'AMAZON',
       });
 
     if (lineError) {

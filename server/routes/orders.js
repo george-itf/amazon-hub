@@ -208,7 +208,8 @@ router.post('/import', requireStaff, async (req, res) => {
             bom_id: resolution?.bom_id || null,
             resolution_source: resolution ? 'MEMORY' : null,
             is_resolved: isResolved,
-            parse_intent: null
+            parse_intent: null,
+            line_source: 'SHOPIFY',
           });
 
         if (lineError) {
@@ -430,7 +431,8 @@ router.post('/import-historical', requireAdmin, async (req, res) => {
             bom_id: resolution?.bom_id || null,
             resolution_source: resolution ? 'MEMORY' : null,
             is_resolved: isResolved,
-            parse_intent: null
+            parse_intent: null,
+            line_source: 'SHOPIFY',
           });
 
         if (lineError) {
@@ -512,6 +514,7 @@ router.get('/', async (req, res) => {
           unit_price_pence,
           is_resolved,
           resolution_source,
+          line_source,
           bom_id,
           boms (
             id,
@@ -580,6 +583,7 @@ router.get('/:id', async (req, res) => {
           unit_price_pence,
           is_resolved,
           resolution_source,
+          line_source,
           parse_intent,
           listing_memory_id,
           bom_id,
