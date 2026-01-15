@@ -1,118 +1,178 @@
 import React from 'react';
-import { Navigation, Text, InlineStack } from '@shopify/polaris';
+import { Navigation, Text, Badge, InlineStack, BlockStack } from '@shopify/polaris';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   HomeIcon,
   OrderIcon,
-  ListBulletedIcon,
   InventoryIcon,
   ProductIcon,
-  CartIcon,
-  QuestionCircleIcon,
-  ArrowDownIcon,
   ChartVerticalFilledIcon,
-  ExchangeIcon,
-  ClockIcon,
+  SettingsIcon,
   ExitIcon,
-  KeyboardIcon,
+  AlertCircleIcon,
+  PackageIcon,
+  ClipboardCheckIcon,
+  MoneyIcon,
   SearchIcon,
-  CheckIcon,
-  StoreIcon,
-  DeliveryIcon,
+  ReceiptIcon,
+  RefreshIcon,
 } from '@shopify/polaris-icons';
 import { useAuth } from '../context/AuthContext.jsx';
 
 /**
- * Renders the persistent left-hand navigation used throughout the Hub.
- * Items correspond to the top-level pages. The active route is highlighted
- * based on the current URL.
+ * Amazon Seller Hub Navigation
+ * Designed for Amazon FBM seller workflows with clear hierarchy
  */
 export default function Nav() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout, isAdmin } = useAuth();
 
-  const operationsItems = [
-    { label: 'Dashboard', url: '/', icon: HomeIcon },
-    { label: 'Orders', url: '/orders', icon: OrderIcon },
-    { label: 'Pick Batches', url: '/picklists', icon: ListBulletedIcon },
-    { label: 'Review Queue', url: '/review', icon: QuestionCircleIcon },
+  // Core workflow - what sellers do every day
+  const coreItems = [
+    {
+      label: 'Dashboard',
+      url: '/',
+      icon: HomeIcon,
+      exactMatch: true,
+    },
+    {
+      label: 'Orders',
+      url: '/orders',
+      icon: OrderIcon,
+      subNavigationItems: [
+        { label: 'All Orders', url: '/orders', exactMatch: true },
+        { label: 'Pending Shipment', url: '/orders?status=READY_TO_PICK' },
+        { label: 'Needs Review', url: '/review' },
+        { label: 'Pick Lists', url: '/picklists' },
+      ],
+    },
+    {
+      label: 'Inventory',
+      url: '/components',
+      icon: InventoryIcon,
+      subNavigationItems: [
+        { label: 'Stock Levels', url: '/components' },
+        { label: 'Replenishment', url: '/replenishment' },
+        { label: 'Returns', url: '/returns' },
+      ],
+    },
   ];
 
-  const inventoryItems = [
-    { label: 'Components', url: '/components', icon: InventoryIcon },
-    { label: 'BOMs / Bundles', url: '/bundles', icon: ProductIcon },
-    { label: 'BOM Review', url: '/bom-review', icon: CheckIcon },
-    { label: 'Listings', url: '/listings', icon: CartIcon },
-    { label: 'Returns', url: '/returns', icon: ExchangeIcon },
+  // Catalog management
+  const catalogItems = [
+    {
+      label: 'Products',
+      url: '/bundles',
+      icon: ProductIcon,
+      subNavigationItems: [
+        { label: 'BOMs & Bundles', url: '/bundles' },
+        { label: 'Listings', url: '/listings' },
+        { label: 'BOM Review', url: '/bom-review' },
+      ],
+    },
+    {
+      label: 'ASIN Analyzer',
+      url: '/analyzer',
+      icon: SearchIcon,
+    },
   ];
 
+  // Analytics & insights
   const analyticsItems = [
-    { label: 'ASIN Analyzer', url: '/analyzer', icon: SearchIcon },
-    { label: 'Replenishment', url: '/replenishment', icon: ArrowDownIcon },
-    { label: 'Profitability', url: '/profit', icon: ChartVerticalFilledIcon },
-    { label: 'Audit Log', url: '/audit', icon: ClockIcon },
+    {
+      label: 'Analytics',
+      url: '/profit',
+      icon: ChartVerticalFilledIcon,
+      subNavigationItems: [
+        { label: 'Profitability', url: '/profit' },
+        { label: 'Activity Log', url: '/audit' },
+      ],
+    },
   ];
 
-  const integrationsItems = [
-    { label: 'Amazon', url: '/amazon', icon: StoreIcon },
+  // Settings & configuration
+  const settingsItems = [
+    {
+      label: 'Amazon Settings',
+      url: '/amazon',
+      icon: SettingsIcon,
+    },
   ];
+
+  const mapNavItems = (items) => {
+    return items.map(item => {
+      const isSelected = item.exactMatch
+        ? location.pathname === item.url
+        : location.pathname.startsWith(item.url) ||
+          item.subNavigationItems?.some(sub =>
+            location.pathname + location.search === sub.url ||
+            location.pathname === sub.url
+          );
+
+      return {
+        ...item,
+        selected: isSelected,
+        onClick: () => navigate(item.url),
+        subNavigationItems: item.subNavigationItems?.map(sub => ({
+          ...sub,
+          selected: location.pathname + location.search === sub.url ||
+                    (sub.exactMatch && location.pathname === sub.url),
+          onClick: () => navigate(sub.url),
+        })),
+      };
+    });
+  };
 
   return (
     <Navigation location={location.pathname}>
+      {/* Brand Header */}
+      <div style={{
+        padding: '16px 20px',
+        borderBottom: '1px solid #E1E3E5',
+        marginBottom: '8px',
+      }}>
+        <BlockStack gap="100">
+          <Text variant="headingMd" fontWeight="bold">
+            Amazon Hub
+          </Text>
+          <Text variant="bodySm" tone="subdued">
+            Seller Command Center
+          </Text>
+        </BlockStack>
+      </div>
+
+      {/* Core Workflow */}
       <Navigation.Section
-        title="Operations"
-        items={operationsItems.map(item => ({
-          ...item,
-          selected: location.pathname === item.url,
-          onClick: () => navigate(item.url),
-        }))}
+        items={mapNavItems(coreItems)}
       />
 
+      {/* Catalog */}
       <Navigation.Section
-        title="Inventory"
-        items={inventoryItems.map(item => ({
-          ...item,
-          selected: location.pathname === item.url,
-          onClick: () => navigate(item.url),
-        }))}
+        title="Catalog"
+        items={mapNavItems(catalogItems)}
         separator
       />
 
+      {/* Analytics */}
       <Navigation.Section
-        title="Analytics"
-        items={analyticsItems.map(item => ({
-          ...item,
-          selected: location.pathname === item.url,
-          onClick: () => navigate(item.url),
-        }))}
+        title="Insights"
+        items={mapNavItems(analyticsItems)}
         separator
       />
 
+      {/* Settings */}
       <Navigation.Section
-        title="Integrations"
-        items={integrationsItems.map(item => ({
-          ...item,
-          selected: location.pathname === item.url,
-          onClick: () => navigate(item.url),
-        }))}
+        title="Settings"
+        items={mapNavItems(settingsItems)}
         separator
       />
 
+      {/* User Section */}
       <Navigation.Section
-        title="Account"
         items={[
           {
-            label: 'Keyboard Shortcuts',
-            icon: KeyboardIcon,
-            onClick: () => {
-              // Trigger keyboard shortcut help via key event
-              window.dispatchEvent(new KeyboardEvent('keydown', { key: '?', shiftKey: true }));
-            },
-            badge: '?',
-          },
-          {
-            label: user?.name || user?.email || 'User',
+            label: user?.name || user?.email || 'Account',
             icon: ExitIcon,
             onClick: logout,
             secondaryAction: {

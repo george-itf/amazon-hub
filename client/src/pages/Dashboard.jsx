@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Page,
   Layout,
@@ -6,101 +6,278 @@ import {
   Text,
   BlockStack,
   InlineStack,
-  InlineGrid,
   Card,
   Badge,
   Button,
   Divider,
   ProgressBar,
-  Tabs,
+  Box,
+  Icon,
+  Tooltip,
+  Spinner,
 } from '@shopify/polaris';
+import {
+  AlertCircleIcon,
+  ClockIcon,
+  PackageIcon,
+  CheckCircleIcon,
+  ChevronRightIcon,
+  RefreshIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
+} from '@shopify/polaris-icons';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
-import {
-  InvictaSectionHeader,
-  InvictaPanel,
-  InvictaStatPanel,
-  InvictaPanelGrid,
-  InvictaBadge,
-  InvictaButton,
-  InvictaButtonGroup,
-  InvictaLoading,
-  InvictaActivityFeed,
-} from '../components/ui/index.jsx';
-import { KeepaStatusCard } from '../components/KeepaMetrics.jsx';
 import * as api from '../utils/api.jsx';
 
 /**
- * Mini sparkline bar chart
+ * Format currency in GBP
  */
-function MiniChart({ data, valueKey, color = '#2c6ecb' }) {
-  if (!data || data.length === 0) return null;
-  const max = Math.max(...data.map(d => d[valueKey] || 0));
-  if (max === 0) return null;
+function formatPrice(pence) {
+  if (!pence && pence !== 0) return '£0.00';
+  return new Intl.NumberFormat('en-GB', {
+    style: 'currency',
+    currency: 'GBP',
+  }).format(pence / 100);
+}
 
+/**
+ * Format relative time
+ */
+function formatRelativeTime(dateString) {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return 'Just now';
+  if (diffMins < 60) return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return 'Yesterday';
+  return `${diffDays}d ago`;
+}
+
+/**
+ * Metric Card Component - Clean stat display
+ */
+function MetricCard({ title, value, subtitle, trend, trendUp, onClick, highlighted, loading }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '32px' }}>
-      {data.slice(-7).map((d, i) => {
-        const height = max > 0 ? (d[valueKey] / max) * 100 : 0;
-        return (
-          <div
-            key={i}
-            style={{
-              flex: 1,
-              backgroundColor: color,
-              height: `${Math.max(height, 2)}%`,
-              minWidth: '8px',
-              borderRadius: '2px 2px 0 0',
-              opacity: 0.7 + (i / data.length) * 0.3,
-            }}
-            title={`${d.date || d.period}: ${d[valueKey]}`}
-          />
-        );
-      })}
+    <div
+      onClick={onClick}
+      style={{
+        padding: '20px',
+        backgroundColor: highlighted ? '#FFF7ED' : '#FFFFFF',
+        borderRadius: '12px',
+        border: highlighted ? '2px solid #F97316' : '1px solid #E5E7EB',
+        cursor: onClick ? 'pointer' : 'default',
+        transition: 'all 0.2s ease',
+        height: '100%',
+      }}
+      onMouseOver={(e) => onClick && (e.currentTarget.style.borderColor = '#6366F1')}
+      onMouseOut={(e) => onClick && (e.currentTarget.style.borderColor = highlighted ? '#F97316' : '#E5E7EB')}
+    >
+      <BlockStack gap="200">
+        <Text variant="bodySm" tone="subdued">{title}</Text>
+        {loading ? (
+          <Spinner size="small" />
+        ) : (
+          <>
+            <Text variant="heading2xl" fontWeight="bold">{value}</Text>
+            {(subtitle || trend) && (
+              <InlineStack gap="200" blockAlign="center">
+                {subtitle && <Text variant="bodySm" tone="subdued">{subtitle}</Text>}
+                {trend && (
+                  <InlineStack gap="100" blockAlign="center">
+                    <div style={{ color: trendUp ? '#059669' : '#DC2626' }}>
+                      <Icon source={trendUp ? ArrowUpIcon : ArrowDownIcon} />
+                    </div>
+                    <Text variant="bodySm" tone={trendUp ? 'success' : 'critical'}>
+                      {trend}
+                    </Text>
+                  </InlineStack>
+                )}
+              </InlineStack>
+            )}
+          </>
+        )}
+      </BlockStack>
     </div>
   );
 }
 
 /**
- * Dashboard - Ops Command Center
+ * Order Pipeline Stage
+ */
+function PipelineStage({ label, count, color, onClick, active }) {
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        flex: 1,
+        padding: '16px',
+        backgroundColor: active ? color + '15' : '#F9FAFB',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        border: active ? `2px solid ${color}` : '1px solid #E5E7EB',
+        textAlign: 'center',
+        transition: 'all 0.2s ease',
+      }}
+    >
+      <BlockStack gap="100" inlineAlign="center">
+        <Text variant="headingXl" fontWeight="bold" tone={active ? 'success' : undefined}>
+          {count}
+        </Text>
+        <Text variant="bodySm" tone="subdued">{label}</Text>
+      </BlockStack>
+    </div>
+  );
+}
+
+/**
+ * Alert Item Component
+ */
+function AlertItem({ type, title, description, action, onAction }) {
+  const colors = {
+    critical: { bg: '#FEF2F2', border: '#DC2626', icon: AlertCircleIcon },
+    warning: { bg: '#FFFBEB', border: '#D97706', icon: AlertCircleIcon },
+    info: { bg: '#EFF6FF', border: '#3B82F6', icon: ClockIcon },
+  };
+  const style = colors[type] || colors.info;
+
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '12px 16px',
+      backgroundColor: style.bg,
+      borderLeft: `4px solid ${style.border}`,
+      borderRadius: '0 8px 8px 0',
+      marginBottom: '8px',
+    }}>
+      <InlineStack gap="300" blockAlign="center">
+        <div style={{ color: style.border }}>
+          <Icon source={style.icon} />
+        </div>
+        <BlockStack gap="050">
+          <Text variant="bodyMd" fontWeight="semibold">{title}</Text>
+          {description && <Text variant="bodySm" tone="subdued">{description}</Text>}
+        </BlockStack>
+      </InlineStack>
+      {action && (
+        <Button size="slim" onClick={onAction}>{action}</Button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Order Row Component
+ */
+function OrderRow({ order, onClick }) {
+  const isToday = order.order_date &&
+    new Date(order.order_date).toDateString() === new Date().toDateString();
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 16px',
+        backgroundColor: isToday ? '#F0FDF4' : '#FAFAFA',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        transition: 'background-color 0.15s ease',
+        marginBottom: '8px',
+      }}
+      onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'}
+      onMouseOut={(e) => e.currentTarget.style.backgroundColor = isToday ? '#F0FDF4' : '#FAFAFA'}
+    >
+      <BlockStack gap="100">
+        <InlineStack gap="200" blockAlign="center">
+          <Text variant="bodyMd" fontWeight="semibold">
+            {order.order_number || order.external_order_id}
+          </Text>
+          {order.channel === 'AMAZON' && (
+            <Badge tone="info" size="small">Amazon</Badge>
+          )}
+          {isToday && <Badge tone="success" size="small">Today</Badge>}
+        </InlineStack>
+        <Text variant="bodySm" tone="subdued">
+          {order.customer_name || 'Customer'} • {order.order_lines?.length || 0} item(s)
+        </Text>
+      </BlockStack>
+      <InlineStack gap="300" blockAlign="center">
+        <Text variant="bodyMd" fontWeight="semibold">
+          {formatPrice(order.total_price_pence)}
+        </Text>
+        <StatusBadge status={order.status} />
+        <Icon source={ChevronRightIcon} tone="subdued" />
+      </InlineStack>
+    </div>
+  );
+}
+
+/**
+ * Status Badge Component
+ */
+function StatusBadge({ status }) {
+  const statusConfig = {
+    READY_TO_PICK: { label: 'Ready', tone: 'success' },
+    NEEDS_REVIEW: { label: 'Review', tone: 'warning' },
+    PICKED: { label: 'Picked', tone: 'info' },
+    DISPATCHED: { label: 'Shipped', tone: 'success' },
+    IMPORTED: { label: 'New', tone: 'info' },
+    CANCELLED: { label: 'Cancelled', tone: 'critical' },
+  };
+  const config = statusConfig[status] || { label: status, tone: 'info' };
+  return <Badge tone={config.tone}>{config.label}</Badge>;
+}
+
+/**
+ * Dashboard - Amazon Seller Command Center
  */
 export default function Dashboard() {
-  const { user, isAdmin } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
+
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
   const [data, setData] = useState(null);
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState(null);
-  const [importError, setImportError] = useState(null);
-  const [analyticsData, setAnalyticsData] = useState(null);
-  const [selectedTab, setSelectedTab] = useState(0);
-
-  // Amazon sync state
+  const [amazonStats, setAmazonStats] = useState(null);
   const [amazonStatus, setAmazonStatus] = useState(null);
-  const [syncingAmazon, setSyncingAmazon] = useState(false);
-  const [amazonResult, setAmazonResult] = useState(null);
 
-  const loadDashboard = useCallback(async () => {
+  // Sync state
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
+
+  const loadDashboard = useCallback(async (showRefresh = false) => {
     try {
-      setLoading(true);
+      if (showRefresh) setRefreshing(true);
+      else setLoading(true);
       setError(null);
 
-      // Load dashboard, analytics, and Amazon status in parallel
-      const [dashboardData, analytics, amzStatus] = await Promise.all([
+      const [dashboardData, amzStats, amzStatus] = await Promise.all([
         api.getDashboard(),
-        api.getAnalyticsSummary({ start_date: getDateDaysAgo(7) }).catch(() => null),
-        api.getAmazonStatus().catch(() => ({ connected: false, configured: false })),
+        api.getAmazonStats().catch(() => null),
+        api.getAmazonStatus().catch(() => ({ connected: false })),
       ]);
 
       setData(dashboardData);
-      setAnalyticsData(analytics);
+      setAmazonStats(amzStats);
       setAmazonStatus(amzStatus);
     } catch (err) {
       console.error('Dashboard load error:', err);
-      setError(typeof err === 'string' ? err : err.message || JSON.stringify(err));
+      setError(err.message || 'Failed to load dashboard');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
@@ -108,57 +285,35 @@ export default function Dashboard() {
     loadDashboard();
   }, [loadDashboard]);
 
-  const handleImportOrders = async () => {
-    try {
-      setImporting(true);
-      setImportResult(null);
-      setImportError(null);
-      const result = await api.importOrders();
-      await loadDashboard();
-      setImportResult(result);
-    } catch (err) {
-      console.error('Import error:', err);
-      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Import failed');
-      setImportError(errorMsg);
-    } finally {
-      setImporting(false);
-    }
-  };
-
   const handleSyncAmazon = async () => {
     try {
-      setSyncingAmazon(true);
-      setAmazonResult(null);
-      setImportError(null);
-      const result = await api.syncAmazonOrders(7); // Last 7 days
-      await loadDashboard();
-      setAmazonResult(result);
+      setSyncing(true);
+      setSyncResult(null);
+      const result = await api.syncAmazonOrders(7);
+      setSyncResult(result);
+      await loadDashboard(true);
     } catch (err) {
-      console.error('Amazon sync error:', err);
-      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Amazon sync failed');
-      setImportError(errorMsg);
+      console.error('Sync error:', err);
+      setSyncResult({ error: err.message });
     } finally {
-      setSyncingAmazon(false);
+      setSyncing(false);
     }
   };
-
-  // Get date string for X days ago
-  function getDateDaysAgo(days) {
-    const date = new Date();
-    date.setDate(date.getDate() - days);
-    return date.toISOString().split('T')[0];
-  }
-
-  // Format price
-  function formatPrice(pence) {
-    if (!pence && pence !== 0) return '-';
-    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: 'GBP' }).format(pence / 100);
-  }
 
   if (loading) {
     return (
       <Page title="Dashboard">
-        <InvictaLoading message="Loading ops command center..." />
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          minHeight: '400px',
+        }}>
+          <BlockStack gap="400" inlineAlign="center">
+            <Spinner size="large" />
+            <Text tone="subdued">Loading your seller dashboard...</Text>
+          </BlockStack>
+        </div>
       </Page>
     );
   }
@@ -166,680 +321,353 @@ export default function Dashboard() {
   if (error) {
     return (
       <Page title="Dashboard">
-        <Banner tone="critical">
-          <p>Failed to load dashboard: {error}</p>
+        <Banner tone="critical" title="Error loading dashboard">
+          <p>{error}</p>
+          <Button onClick={() => loadDashboard()}>Retry</Button>
         </Banner>
       </Page>
     );
   }
 
   const stats = data?.stats || {};
-  const needsReview = data?.needs_review || [];
   const readyToPick = data?.ready_to_pick || [];
-  const bottlenecks = data?.bottlenecks || [];
+  const needsReview = data?.needs_review || [];
   const recentActivity = data?.recent_activity || [];
-  const criticalBanner = data?.critical_banner;
+  const bottlenecks = data?.bottlenecks || [];
 
-  // Calculate fulfillment progress
-  const totalOrders = stats.orders_total || 0;
-  const dispatched = stats.orders_dispatched || 0;
-  const fulfillmentProgress = totalOrders > 0 ? Math.round((dispatched / totalOrders) * 100) : 0;
+  // Calculate pipeline numbers
+  const pendingCount = stats.orders_ready_to_pick || 0;
+  const reviewCount = stats.orders_needs_review || 0;
+  const pickedCount = stats.orders_picked || 0;
+  const shippedToday = amazonStats?.sales_trend?.slice(-1)[0]?.orders || 0;
 
-  const tabs = [
-    { id: 'overview', content: 'Overview' },
-    { id: 'performance', content: 'Performance' },
-  ];
+  // Build alerts
+  const alerts = [];
+  if (reviewCount > 0) {
+    alerts.push({
+      type: 'warning',
+      title: `${reviewCount} order(s) need review`,
+      description: 'Resolve listing issues to process these orders',
+      action: 'Review Now',
+      onAction: () => navigate('/review'),
+    });
+  }
+  if (bottlenecks.length > 0) {
+    alerts.push({
+      type: 'critical',
+      title: `${bottlenecks.length} stock bottleneck(s)`,
+      description: 'Low inventory blocking orders',
+      action: 'View Stock',
+      onAction: () => navigate('/components'),
+    });
+  }
+  if (!amazonStatus?.connected) {
+    alerts.push({
+      type: 'info',
+      title: 'Connect Amazon SP-API',
+      description: 'Link your Amazon account to sync orders automatically',
+      action: 'Connect',
+      onAction: () => navigate('/amazon'),
+    });
+  }
 
   return (
     <Page
-      title="Ops Command Center"
-      subtitle={`Welcome back, ${user?.name || user?.email}`}
-      primaryAction={amazonStatus?.connected ? {
-        content: syncingAmazon ? 'Syncing Amazon...' : 'Sync Amazon Orders',
+      title={
+        <InlineStack gap="200" blockAlign="center">
+          <span>Seller Dashboard</span>
+          {refreshing && <Spinner size="small" />}
+        </InlineStack>
+      }
+      subtitle={`Welcome back, ${user?.name || user?.email?.split('@')[0] || 'Seller'}`}
+      primaryAction={{
+        content: syncing ? 'Syncing...' : 'Sync Orders',
         onAction: handleSyncAmazon,
-        loading: syncingAmazon,
-      } : {
-        content: 'Import from Shopify',
-        onAction: handleImportOrders,
-        loading: importing,
+        loading: syncing,
+        disabled: !amazonStatus?.connected,
+        icon: RefreshIcon,
       }}
       secondaryActions={[
-        ...(amazonStatus?.connected ? [{
-          content: importing ? 'Importing...' : 'Import Shopify',
-          onAction: handleImportOrders,
-          disabled: importing,
-        }] : []),
-        { content: 'Refresh', onAction: loadDashboard },
+        {
+          content: 'Refresh',
+          onAction: () => loadDashboard(true),
+          disabled: refreshing,
+        },
       ]}
     >
       <BlockStack gap="600">
-        {/* Import Result Banner */}
-        {importResult && (
+        {/* Sync Result Banner */}
+        {syncResult && !syncResult.error && (
           <Banner
-            title="Shopify Import Complete"
-            tone="info"
-            onDismiss={() => setImportResult(null)}
-          >
-            <p>
-              Imported: {importResult.imported} | Updated: {importResult.updated} | Skipped: {importResult.skipped}
-            </p>
-          </Banner>
-        )}
-
-        {/* Amazon Sync Result Banner */}
-        {amazonResult && (
-          <Banner
-            title="Amazon Sync Complete"
             tone="success"
-            onDismiss={() => setAmazonResult(null)}
+            title="Sync Complete"
+            onDismiss={() => setSyncResult(null)}
           >
             <p>
-              {amazonResult.created} new orders imported
-              {amazonResult.linked > 0 && `, ${amazonResult.linked} linked to Shopify`}
-              , {amazonResult.updated} updated, {amazonResult.skipped} unchanged
-              {amazonResult.errors?.length > 0 && ` (${amazonResult.errors.length} errors)`}
+              {syncResult.created} new • {syncResult.updated} updated • {syncResult.skipped} unchanged
             </p>
           </Banner>
         )}
-
-        {/* Import Error Banner */}
-        {importError && (
-          <Banner
-            title="Import Failed"
-            tone="critical"
-            onDismiss={() => setImportError(null)}
-          >
-            <p>{importError}</p>
+        {syncResult?.error && (
+          <Banner tone="critical" title="Sync Failed" onDismiss={() => setSyncResult(null)}>
+            <p>{syncResult.error}</p>
           </Banner>
         )}
 
-        {/* Critical State Banner */}
-        {criticalBanner && criticalBanner.severity !== 'GREEN' && (
-          <Banner
-            title={criticalBanner.message}
-            tone={criticalBanner.severity === 'RED' ? 'critical' : 'warning'}
-            action={criticalBanner.action_url ? {
-              content: 'Take Action',
-              onAction: () => navigate(criticalBanner.action_url),
-            } : undefined}
-          >
-            {criticalBanner.severity === 'RED' && (
-              <p>Orders are blocked and need immediate attention.</p>
-            )}
-          </Banner>
+        {/* Alerts Section */}
+        {alerts.length > 0 && (
+          <div>
+            {alerts.map((alert, i) => (
+              <AlertItem key={i} {...alert} />
+            ))}
+          </div>
         )}
 
-        {/* Urgent Actions Banner */}
-        {needsReview.length > 0 && (
-          <Banner
-            title={`${needsReview.length} order(s) need review`}
-            tone="warning"
-            action={{ content: 'Review Now', onAction: () => navigate('/review') }}
-          >
-            <p>Orders are waiting for listing resolution before they can be picked.</p>
-          </Banner>
-        )}
+        {/* Sales Metrics Row */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gap: '16px',
+        }}>
+          <MetricCard
+            title="Today's Orders"
+            value={amazonStats?.sales_trend?.slice(-1)[0]?.orders || stats.orders_today || 0}
+            subtitle={formatPrice(amazonStats?.sales_trend?.slice(-1)[0]?.revenue_pence || 0)}
+            onClick={() => navigate('/orders')}
+          />
+          <MetricCard
+            title="This Week"
+            value={`${amazonStats?.sales_trend?.slice(-7).reduce((sum, d) => sum + d.orders, 0) || 0} orders`}
+            subtitle={formatPrice(amazonStats?.sales_trend?.slice(-7).reduce((sum, d) => sum + d.revenue_pence, 0) || 0)}
+          />
+          <MetricCard
+            title="This Month"
+            value={formatPrice(amazonStats?.monthly_revenue_pence || 0)}
+            subtitle={`${amazonStats?.monthly_order_count || 0} orders`}
+            trend={amazonStats?.revenue_growth_percent ? `${amazonStats.revenue_growth_percent}%` : null}
+            trendUp={amazonStats?.revenue_growth_percent > 0}
+          />
+          <MetricCard
+            title="Pending Shipment"
+            value={pendingCount}
+            subtitle={pendingCount > 0 ? 'Action required' : 'All caught up'}
+            highlighted={pendingCount > 0}
+            onClick={() => navigate('/orders?status=READY_TO_PICK')}
+          />
+        </div>
 
-        <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab} fitted>
-          {selectedTab === 0 && (
-            <BlockStack gap="600">
-              {/* Key Metrics Row */}
-              <Layout>
-                <Layout.Section variant="oneQuarter">
-                  <Card>
-                    <BlockStack gap="200">
-                      <InlineStack align="space-between">
-                        <Text variant="bodySm" tone="subdued">Ready to Pick</Text>
-                        <Badge tone={stats.orders_ready_to_pick > 0 ? 'success' : 'info'}>
-                          {stats.orders_ready_to_pick > 0 ? 'Active' : 'Clear'}
-                        </Badge>
-                      </InlineStack>
-                      <Text variant="heading2xl" fontWeight="bold">
-                        {stats.orders_ready_to_pick || 0}
-                      </Text>
-                      <InvictaButton
-                        size="slim"
+        {/* Order Pipeline */}
+        <Card>
+          <BlockStack gap="400">
+            <InlineStack align="space-between">
+              <Text variant="headingMd" fontWeight="bold">Order Pipeline</Text>
+              <Button variant="plain" onClick={() => navigate('/orders')}>
+                View all orders
+              </Button>
+            </InlineStack>
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              alignItems: 'stretch',
+            }}>
+              <PipelineStage
+                label="Needs Review"
+                count={reviewCount}
+                color="#D97706"
+                active={reviewCount > 0}
+                onClick={() => navigate('/review')}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', color: '#9CA3AF' }}>→</div>
+              <PipelineStage
+                label="Ready to Pick"
+                count={pendingCount}
+                color="#2563EB"
+                active={pendingCount > 0}
+                onClick={() => navigate('/orders?status=READY_TO_PICK')}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', color: '#9CA3AF' }}>→</div>
+              <PipelineStage
+                label="Picked"
+                count={pickedCount}
+                color="#7C3AED"
+                active={pickedCount > 0}
+                onClick={() => navigate('/picklists')}
+              />
+              <div style={{ display: 'flex', alignItems: 'center', color: '#9CA3AF' }}>→</div>
+              <PipelineStage
+                label="Shipped Today"
+                count={shippedToday}
+                color="#059669"
+                active={false}
+                onClick={() => navigate('/orders?status=DISPATCHED')}
+              />
+            </div>
+          </BlockStack>
+        </Card>
+
+        <Layout>
+          {/* Main Content - Recent Orders */}
+          <Layout.Section>
+            <Card>
+              <BlockStack gap="400">
+                <InlineStack align="space-between">
+                  <Text variant="headingMd" fontWeight="bold">
+                    Orders Awaiting Shipment
+                  </Text>
+                  {readyToPick.length > 0 && (
+                    <Button
+                      variant="primary"
+                      size="slim"
+                      onClick={() => navigate('/orders?status=READY_TO_PICK')}
+                    >
+                      Process Orders
+                    </Button>
+                  )}
+                </InlineStack>
+
+                {readyToPick.length === 0 ? (
+                  <div style={{
+                    textAlign: 'center',
+                    padding: '40px 20px',
+                    backgroundColor: '#F9FAFB',
+                    borderRadius: '8px',
+                  }}>
+                    <BlockStack gap="200" inlineAlign="center">
+                      <div style={{ color: '#10B981' }}>
+                        <Icon source={CheckCircleIcon} />
+                      </div>
+                      <Text variant="headingMd">All caught up!</Text>
+                      <Text tone="subdued">No orders waiting to ship</Text>
+                      <Button onClick={handleSyncAmazon} disabled={syncing || !amazonStatus?.connected}>
+                        Check for new orders
+                      </Button>
+                    </BlockStack>
+                  </div>
+                ) : (
+                  <BlockStack gap="100">
+                    {readyToPick.slice(0, 10).map(order => (
+                      <OrderRow
+                        key={order.id}
+                        order={order}
+                        onClick={() => navigate(`/orders?id=${order.id}`)}
+                      />
+                    ))}
+                    {readyToPick.length > 10 && (
+                      <Button
+                        variant="plain"
                         fullWidth
                         onClick={() => navigate('/orders?status=READY_TO_PICK')}
-                        disabled={!stats.orders_ready_to_pick}
                       >
-                        View Orders
-                      </InvictaButton>
-                    </BlockStack>
-                  </Card>
-                </Layout.Section>
-                <Layout.Section variant="oneQuarter">
-                  <Card>
-                    <BlockStack gap="200">
-                      <InlineStack align="space-between">
-                        <Text variant="bodySm" tone="subdued">Needs Review</Text>
-                        {stats.orders_needs_review > 0 && (
-                          <Badge tone="warning">Action Required</Badge>
-                        )}
-                      </InlineStack>
-                      <Text variant="heading2xl" fontWeight="bold" tone={stats.orders_needs_review > 0 ? 'critical' : undefined}>
-                        {stats.orders_needs_review || 0}
-                      </Text>
-                      <InvictaButton
-                        size="slim"
-                        fullWidth
-                        variant={stats.orders_needs_review > 0 ? 'primary' : 'secondary'}
-                        onClick={() => navigate('/review')}
-                        disabled={!stats.orders_needs_review}
-                      >
-                        Start Review
-                      </InvictaButton>
-                    </BlockStack>
-                  </Card>
-                </Layout.Section>
-                <Layout.Section variant="oneQuarter">
-                  <Card>
-                    <BlockStack gap="200">
-                      <InlineStack align="space-between">
-                        <Text variant="bodySm" tone="subdued">Active Batches</Text>
-                        <Badge tone="info">{stats.batches_in_progress || 0} in progress</Badge>
-                      </InlineStack>
-                      <Text variant="heading2xl" fontWeight="bold">
-                        {stats.batches_in_progress || 0}
-                      </Text>
-                      <InvictaButton
-                        size="slim"
-                        fullWidth
-                        onClick={() => navigate('/picklists')}
-                      >
-                        Manage Batches
-                      </InvictaButton>
-                    </BlockStack>
-                  </Card>
-                </Layout.Section>
-                <Layout.Section variant="oneQuarter">
-                  <Card>
-                    <BlockStack gap="200">
-                      <InlineStack align="space-between">
-                        <Text variant="bodySm" tone="subdued">Low Stock Alerts</Text>
-                        {stats.components_low_stock > 0 && (
-                          <Badge tone="critical">Attention</Badge>
-                        )}
-                      </InlineStack>
-                      <Text variant="heading2xl" fontWeight="bold" tone={stats.components_low_stock > 0 ? 'critical' : 'success'}>
-                        {stats.components_low_stock || 0}
-                      </Text>
-                      <InvictaButton
-                        size="slim"
-                        fullWidth
-                        onClick={() => navigate('/components')}
-                      >
-                        View Inventory
-                      </InvictaButton>
-                    </BlockStack>
-                  </Card>
-                </Layout.Section>
-              </Layout>
-
-              <Layout>
-                {/* Main Content Area */}
-                <Layout.Section>
-                  <BlockStack gap="400">
-                    {/* Ready to Pick Orders */}
-                    <InvictaSectionHeader
-                      title="Ready to Pick"
-                      count={readyToPick.length}
-                      collapsible
-                      action={
-                        readyToPick.length > 0 && isAdmin && (
-                          <InvictaButton
-                            variant="primary"
-                            size="slim"
-                            onClick={() => navigate('/orders?status=READY_TO_PICK')}
-                          >
-                            Create Batch
-                          </InvictaButton>
-                        )
-                      }
-                    >
-                      {readyToPick.length === 0 ? (
-                        <Card>
-                          <BlockStack gap="200" inlineAlign="center">
-                            <Text tone="subdued">No orders ready to pick.</Text>
-                            <Text variant="bodySm" tone="subdued">
-                              Sync orders from Amazon or resolve pending reviews.
-                            </Text>
-                          </BlockStack>
-                        </Card>
-                      ) : (
-                        <Card>
-                          <BlockStack gap="200">
-                            {readyToPick.slice(0, 8).map(order => (
-                              <OrderRow key={order.id} order={order} onClick={() => navigate(`/orders?id=${order.id}`)} />
-                            ))}
-                            {readyToPick.length > 8 && (
-                              <Divider />
-                            )}
-                            {readyToPick.length > 8 && (
-                              <InlineStack align="center">
-                                <InvictaButton variant="secondary" onClick={() => navigate('/orders?status=READY_TO_PICK')}>
-                                  View all {readyToPick.length} orders
-                                </InvictaButton>
-                              </InlineStack>
-                            )}
-                          </BlockStack>
-                        </Card>
-                      )}
-                    </InvictaSectionHeader>
-
-                    {/* Stock Bottlenecks */}
-                    {bottlenecks.length > 0 && (
-                      <InvictaSectionHeader
-                        title="Stock Bottlenecks"
-                        count={bottlenecks.length}
-                        collapsible
-                        action={
-                          <InvictaButton variant="secondary" size="slim" onClick={() => navigate('/components')}>
-                            View Inventory
-                          </InvictaButton>
-                        }
-                      >
-                        <Card>
-                          <BlockStack gap="200">
-                            {bottlenecks.slice(0, 5).map(item => (
-                              <BottleneckRow key={item.component_id} item={item} />
-                            ))}
-                            {bottlenecks.length > 5 && (
-                              <Text variant="bodySm" tone="subdued" alignment="center">
-                                +{bottlenecks.length - 5} more bottlenecks
-                              </Text>
-                            )}
-                          </BlockStack>
-                        </Card>
-                      </InvictaSectionHeader>
-                    )}
-
-                    {/* Needs Review */}
-                    {needsReview.length > 0 && (
-                      <InvictaSectionHeader
-                        title="Needs Review"
-                        count={needsReview.length}
-                        collapsible
-                        defaultCollapsed={false}
-                        action={
-                          <InvictaButton variant="primary" size="slim" onClick={() => navigate('/review')}>
-                            Start Review
-                          </InvictaButton>
-                        }
-                      >
-                        <Card>
-                          <BlockStack gap="200">
-                            {needsReview.slice(0, 5).map(item => (
-                              <ReviewRow key={item.id} item={item} />
-                            ))}
-                            {needsReview.length > 5 && (
-                              <Text variant="bodySm" tone="subdued" alignment="center">
-                                +{needsReview.length - 5} more items in review queue
-                              </Text>
-                            )}
-                          </BlockStack>
-                        </Card>
-                      </InvictaSectionHeader>
+                        View all {readyToPick.length} orders
+                      </Button>
                     )}
                   </BlockStack>
-                </Layout.Section>
+                )}
+              </BlockStack>
+            </Card>
+          </Layout.Section>
 
-                {/* Sidebar */}
-                <Layout.Section variant="oneThird">
-                  <BlockStack gap="400">
-                    {/* Quick Actions */}
-                    <Card>
-                      <BlockStack gap="300">
-                        <Text variant="headingSm">Quick Actions</Text>
-                        <Divider />
-                        <BlockStack gap="200">
-                          <InvictaButton fullWidth onClick={() => navigate('/orders')}>
-                            View All Orders
-                          </InvictaButton>
-                          <InvictaButton fullWidth variant="secondary" onClick={() => navigate('/components')}>
-                            Manage Inventory
-                          </InvictaButton>
-                          <InvictaButton fullWidth variant="secondary" onClick={() => navigate('/bundles')}>
-                            View BOMs
-                          </InvictaButton>
-                          <InvictaButton fullWidth variant="secondary" onClick={() => navigate('/profit')}>
-                            View Analytics
-                          </InvictaButton>
-                          {isAdmin && (
-                            <InvictaButton fullWidth variant="secondary" onClick={() => navigate('/returns')}>
-                              Process Returns
-                            </InvictaButton>
-                          )}
-                        </BlockStack>
-                      </BlockStack>
-                    </Card>
+          {/* Sidebar */}
+          <Layout.Section variant="oneThird">
+            <BlockStack gap="400">
+              {/* Account Health */}
+              <Card>
+                <BlockStack gap="300">
+                  <Text variant="headingMd" fontWeight="bold">Account Status</Text>
+                  <Divider />
+                  <InlineStack align="space-between">
+                    <Text variant="bodySm">Amazon Connection</Text>
+                    <Badge tone={amazonStatus?.connected ? 'success' : 'critical'}>
+                      {amazonStatus?.connected ? 'Connected' : 'Not Connected'}
+                    </Badge>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text variant="bodySm">Active Listings</Text>
+                    <Text variant="bodyMd" fontWeight="semibold">{stats.listings_active || 0}</Text>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text variant="bodySm">Active BOMs</Text>
+                    <Text variant="bodyMd" fontWeight="semibold">{stats.boms_active || 0}</Text>
+                  </InlineStack>
+                  <InlineStack align="space-between">
+                    <Text variant="bodySm">Low Stock Items</Text>
+                    <Badge tone={stats.components_low_stock > 0 ? 'warning' : 'success'}>
+                      {stats.components_low_stock || 0}
+                    </Badge>
+                  </InlineStack>
+                </BlockStack>
+              </Card>
 
-                    {/* Today's Performance */}
-                    {analyticsData && (
-                      <Card>
-                        <BlockStack gap="300">
-                          <Text variant="headingSm">Today's Performance</Text>
-                          <Divider />
-                          <InlineStack align="space-between">
-                            <Text variant="bodySm">Orders</Text>
-                            <Text variant="bodyMd" fontWeight="bold">{analyticsData.orders_today || 0}</Text>
-                          </InlineStack>
-                          <InlineStack align="space-between">
-                            <Text variant="bodySm">Revenue</Text>
-                            <Text variant="bodyMd" fontWeight="bold" tone="success">
-                              {formatPrice(analyticsData.revenue_today || 0)}
-                            </Text>
-                          </InlineStack>
-                          <InlineStack align="space-between">
-                            <Text variant="bodySm">This Week</Text>
-                            <Text variant="bodyMd" fontWeight="bold">
-                              {analyticsData.orders_this_week || 0} orders
-                            </Text>
-                          </InlineStack>
-                          <InlineStack align="space-between">
-                            <Text variant="bodySm">This Month</Text>
-                            <Text variant="bodyMd" fontWeight="bold">
-                              {analyticsData.orders_this_month || 0} orders
-                            </Text>
-                          </InlineStack>
-                        </BlockStack>
-                      </Card>
-                    )}
-
-                    {/* System Status */}
-                    <Card>
-                      <BlockStack gap="300">
-                        <Text variant="headingSm">System Status</Text>
-                        <Divider />
-                        <InlineStack align="space-between">
-                          <Text variant="bodySm">Amazon SP-API</Text>
-                          <Badge tone={amazonStatus?.connected ? 'success' : 'critical'}>
-                            {amazonStatus?.connected ? 'Connected' : 'Not Connected'}
-                          </Badge>
-                        </InlineStack>
-                        <InlineStack align="space-between">
-                          <Text variant="bodySm">Active Listings</Text>
-                          <Text variant="bodyMd" fontWeight="semibold">{stats.listings_active || 0}</Text>
-                        </InlineStack>
-                        <InlineStack align="space-between">
-                          <Text variant="bodySm">Active BOMs</Text>
-                          <Text variant="bodyMd" fontWeight="semibold">{stats.boms_active || 0}</Text>
-                        </InlineStack>
-                        <InlineStack align="space-between">
-                          <Text variant="bodySm">Total Components</Text>
-                          <Text variant="bodyMd" fontWeight="semibold">{stats.components_total || 0}</Text>
-                        </InlineStack>
-                        <InlineStack align="space-between">
-                          <Text variant="bodySm">Total Orders</Text>
-                          <Text variant="bodyMd" fontWeight="semibold">{totalOrders}</Text>
-                        </InlineStack>
-                      </BlockStack>
-                    </Card>
-
-                    {/* Keepa API Status */}
-                    <KeepaStatusCard />
-
-                    {/* Recent Activity */}
-                    <InvictaActivityFeed
-                      events={recentActivity}
-                      limit={5}
-                      title="Recent Activity"
-                    />
-                  </BlockStack>
-                </Layout.Section>
-              </Layout>
-            </BlockStack>
-          )}
-
-          {selectedTab === 1 && (
-            <BlockStack gap="600">
-              {/* Performance Metrics */}
-              {analyticsData ? (
-                <>
-                  <Layout>
-                    <Layout.Section variant="oneQuarter">
-                      <Card>
-                        <BlockStack gap="200">
-                          <Text variant="bodySm" tone="subdued">Total Revenue (7d)</Text>
-                          <Text variant="heading2xl" fontWeight="bold" tone="success">
-                            {formatPrice(analyticsData.total_revenue || 0)}
-                          </Text>
-                        </BlockStack>
-                      </Card>
-                    </Layout.Section>
-                    <Layout.Section variant="oneQuarter">
-                      <Card>
-                        <BlockStack gap="200">
-                          <Text variant="bodySm" tone="subdued">Gross Profit (7d)</Text>
-                          <Text variant="heading2xl" fontWeight="bold">
-                            {formatPrice(analyticsData.total_profit || 0)}
-                          </Text>
-                          <Badge tone={parseFloat(analyticsData.gross_margin_pct) >= 30 ? 'success' : 'warning'}>
-                            {analyticsData.gross_margin_pct}% margin
-                          </Badge>
-                        </BlockStack>
-                      </Card>
-                    </Layout.Section>
-                    <Layout.Section variant="oneQuarter">
-                      <Card>
-                        <BlockStack gap="200">
-                          <Text variant="bodySm" tone="subdued">Orders (7d)</Text>
-                          <Text variant="heading2xl" fontWeight="bold">
-                            {analyticsData.total_orders || 0}
-                          </Text>
-                        </BlockStack>
-                      </Card>
-                    </Layout.Section>
-                    <Layout.Section variant="oneQuarter">
-                      <Card>
-                        <BlockStack gap="200">
-                          <Text variant="bodySm" tone="subdued">Avg Order Value</Text>
-                          <Text variant="heading2xl" fontWeight="bold">
-                            {formatPrice(analyticsData.avg_order_value || 0)}
-                          </Text>
-                        </BlockStack>
-                      </Card>
-                    </Layout.Section>
-                  </Layout>
-
-                  {/* Weekly Trend */}
-                  {analyticsData.daily_trend && Object.keys(analyticsData.daily_trend).length > 0 && (
-                    <Card>
-                      <BlockStack gap="300">
-                        <Text variant="headingSm">Daily Trend (Last 7 Days)</Text>
-                        <MiniChart
-                          data={Object.entries(analyticsData.daily_trend).map(([date, d]) => ({
-                            date,
-                            revenue: d.revenue,
-                            orders: d.orders,
-                          }))}
-                          valueKey="revenue"
-                          color="#008060"
-                        />
-                        <InlineStack align="space-between">
-                          {Object.entries(analyticsData.daily_trend).slice(0, 7).map(([date, d]) => (
-                            <BlockStack key={date} gap="100" inlineAlign="center">
-                              <Text variant="bodySm" tone="subdued">
-                                {new Date(date).toLocaleDateString('en-GB', { weekday: 'short' })}
-                              </Text>
-                              <Text variant="bodySm" fontWeight="semibold">{d.orders}</Text>
-                            </BlockStack>
-                          ))}
-                        </InlineStack>
-                      </BlockStack>
-                    </Card>
-                  )}
-
-                  {/* Status Breakdown */}
-                  {analyticsData.orders_by_status && (
-                    <Card>
-                      <BlockStack gap="300">
-                        <Text variant="headingSm">Orders by Status</Text>
-                        <Divider />
-                        <InlineGrid columns={4} gap="400">
-                          {Object.entries(analyticsData.orders_by_status).map(([status, count]) => (
-                            <BlockStack key={status} gap="100">
-                              <Badge tone={
-                                status === 'DISPATCHED' ? 'success' :
-                                status === 'CANCELLED' ? 'critical' :
-                                status === 'NEEDS_REVIEW' ? 'warning' : 'info'
-                              }>
-                                {status}
-                              </Badge>
-                              <Text variant="headingMd" fontWeight="bold">{count}</Text>
-                            </BlockStack>
-                          ))}
-                        </InlineGrid>
-                      </BlockStack>
-                    </Card>
-                  )}
-                </>
-              ) : (
+              {/* Top Products This Month */}
+              {amazonStats?.top_products?.length > 0 && (
                 <Card>
-                  <BlockStack gap="200" inlineAlign="center">
-                    <Text variant="headingMd">No analytics data available</Text>
-                    <Text tone="subdued">Import orders and process them to see performance metrics.</Text>
-                    <InvictaButton onClick={() => navigate('/profit')}>
-                      View Full Analytics
-                    </InvictaButton>
+                  <BlockStack gap="300">
+                    <Text variant="headingMd" fontWeight="bold">Top Products (30d)</Text>
+                    <Divider />
+                    {amazonStats.top_products.slice(0, 5).map((product, i) => (
+                      <InlineStack key={i} align="space-between" blockAlign="center">
+                        <BlockStack gap="050">
+                          <Text variant="bodySm" fontWeight="medium">
+                            {product.title?.substring(0, 30) || product.asin}
+                            {product.title?.length > 30 && '...'}
+                          </Text>
+                          <Text variant="bodySm" tone="subdued">{product.asin}</Text>
+                        </BlockStack>
+                        <Badge>{product.quantity} sold</Badge>
+                      </InlineStack>
+                    ))}
+                  </BlockStack>
+                </Card>
+              )}
+
+              {/* Quick Actions */}
+              <Card>
+                <BlockStack gap="300">
+                  <Text variant="headingMd" fontWeight="bold">Quick Actions</Text>
+                  <Divider />
+                  <BlockStack gap="200">
+                    <Button fullWidth onClick={() => navigate('/orders')}>
+                      View All Orders
+                    </Button>
+                    <Button fullWidth variant="secondary" onClick={() => navigate('/components')}>
+                      Manage Inventory
+                    </Button>
+                    <Button fullWidth variant="secondary" onClick={() => navigate('/bundles')}>
+                      Product Catalog
+                    </Button>
+                    <Button fullWidth variant="secondary" onClick={() => navigate('/profit')}>
+                      View Analytics
+                    </Button>
+                  </BlockStack>
+                </BlockStack>
+              </Card>
+
+              {/* Recent Activity */}
+              {recentActivity.length > 0 && (
+                <Card>
+                  <BlockStack gap="300">
+                    <Text variant="headingMd" fontWeight="bold">Recent Activity</Text>
+                    <Divider />
+                    {recentActivity.slice(0, 5).map((event, i) => (
+                      <BlockStack key={i} gap="050">
+                        <Text variant="bodySm" fontWeight="medium">
+                          {event.description || event.event_type}
+                        </Text>
+                        <Text variant="bodySm" tone="subdued">
+                          {formatRelativeTime(event.created_at)}
+                        </Text>
+                      </BlockStack>
+                    ))}
+                    <Button variant="plain" onClick={() => navigate('/audit')}>
+                      View all activity
+                    </Button>
                   </BlockStack>
                 </Card>
               )}
             </BlockStack>
-          )}
-        </Tabs>
+          </Layout.Section>
+        </Layout>
       </BlockStack>
     </Page>
-  );
-}
-
-/**
- * OrderRow - Single order row for list display
- */
-function OrderRow({ order, onClick }) {
-  const orderDate = order.order_date ? new Date(order.order_date) : null;
-  const isToday = orderDate && orderDate.toDateString() === new Date().toDateString();
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '10px 12px',
-        backgroundColor: isToday ? '#F0FDF4' : '#FAFAFA',
-        borderRadius: '6px',
-        cursor: 'pointer',
-        transition: 'background-color 0.15s ease',
-      }}
-      onClick={onClick}
-      onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#F1F1F1'}
-      onMouseOut={(e) => e.currentTarget.style.backgroundColor = isToday ? '#F0FDF4' : '#FAFAFA'}
-    >
-      <BlockStack gap="100">
-        <InlineStack gap="200" blockAlign="center">
-          <Text variant="bodyMd" fontWeight="semibold">
-            {order.external_order_id}
-          </Text>
-          {isToday && <Badge tone="success" size="small">Today</Badge>}
-        </InlineStack>
-        <Text variant="bodySm" tone="subdued">
-          {order.customer_name || order.customer_email || 'Unknown customer'}
-        </Text>
-      </BlockStack>
-      <InlineStack gap="300" blockAlign="center">
-        <BlockStack gap="100" inlineAlign="end">
-          <Text variant="bodySm" tone="subdued">
-            {order.order_lines?.length || 0} items
-          </Text>
-          {order.total_price_pence && (
-            <Text variant="bodySm" fontWeight="semibold">
-              £{(order.total_price_pence / 100).toFixed(2)}
-            </Text>
-          )}
-        </BlockStack>
-        <InvictaBadge status={order.status} size="small" />
-      </InlineStack>
-    </div>
-  );
-}
-
-/**
- * BottleneckRow - Stock bottleneck item
- */
-function BottleneckRow({ item }) {
-  const severity = item.available <= 0 ? 'critical' : item.available < 5 ? 'high' : 'medium';
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '10px 12px',
-        backgroundColor: severity === 'critical' ? '#FEF2F2' : severity === 'high' ? '#FFFBEB' : '#FEF9C3',
-        borderRadius: '6px',
-        borderLeft: `4px solid ${severity === 'critical' ? '#DC2626' : severity === 'high' ? '#D97706' : '#CA8A04'}`,
-      }}
-    >
-      <BlockStack gap="100">
-        <Text variant="bodyMd" fontWeight="semibold">
-          {item.internal_sku}
-        </Text>
-        <Text variant="bodySm" tone="subdued">
-          {item.description?.substring(0, 40)}{item.description?.length > 40 ? '...' : ''}
-        </Text>
-      </BlockStack>
-      <InlineStack gap="300" blockAlign="center">
-        <BlockStack gap="100" inlineAlign="end">
-          <Text variant="bodySm" fontWeight="semibold">
-            {item.available} available
-          </Text>
-          {item.blocked_orders > 0 && (
-            <Text variant="bodySm" tone="critical">
-              Blocks {item.blocked_orders} order{item.blocked_orders > 1 ? 's' : ''}
-            </Text>
-          )}
-        </BlockStack>
-        <Badge tone={severity === 'critical' ? 'critical' : 'warning'}>
-          {item.available <= 0 ? 'Out of Stock' : 'Low Stock'}
-        </Badge>
-      </InlineStack>
-    </div>
-  );
-}
-
-/**
- * ReviewRow - Review queue item
- */
-function ReviewRow({ item }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '10px 12px',
-        backgroundColor: '#FFFBEB',
-        borderRadius: '6px',
-        borderLeft: '4px solid #D97706',
-      }}
-    >
-      <BlockStack gap="100">
-        <Text variant="bodyMd" fontWeight="semibold">
-          {item.title?.substring(0, 45) || item.asin || item.sku || 'Unknown'}
-          {item.title?.length > 45 && '...'}
-        </Text>
-        <InlineStack gap="200">
-          {item.asin && (
-            <Text variant="bodySm" tone="subdued">ASIN: {item.asin}</Text>
-          )}
-          {item.sku && (
-            <Text variant="bodySm" tone="subdued">SKU: {item.sku}</Text>
-          )}
-        </InlineStack>
-      </BlockStack>
-      <Badge tone="warning">{item.reason || 'Pending'}</Badge>
-    </div>
   );
 }

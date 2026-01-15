@@ -376,19 +376,24 @@ export default function OrdersPage() {
     { label: 'Cancelled', value: 'CANCELLED' },
   ];
 
+  // Calculate quick stats for subtitle
+  const pendingCount = orders.filter(o => o.status === 'READY_TO_PICK').length;
+  const reviewCount = orders.filter(o => o.status === 'NEEDS_REVIEW').length;
+
   return (
     <Page
       title="Orders"
+      subtitle={`${pendingCount} pending shipment${reviewCount > 0 ? ` • ${reviewCount} needs review` : ''}`}
       primaryAction={{
-        content: 'Import from Shopify',
-        loading: importing,
-        onAction: handleImport,
+        content: syncingAmazon ? 'Syncing...' : 'Sync Amazon Orders',
+        loading: syncingAmazon,
+        onAction: handleSyncAmazon,
       }}
       secondaryActions={[
         { content: 'Refresh', onAction: loadOrders },
-        { content: syncingAmazon ? 'Syncing...' : 'Sync Amazon', onAction: handleSyncAmazon, loading: syncingAmazon },
+        { content: importing ? 'Importing...' : 'Import Shopify', onAction: handleImport, disabled: importing },
         ...(isAdmin
-          ? [{ content: 'Import Historical', onAction: () => setHistoricalModal(true) }]
+          ? [{ content: 'Historical Import', onAction: () => setHistoricalModal(true) }]
           : []),
       ]}
     >
@@ -527,7 +532,10 @@ export default function OrdersPage() {
             <div style={{ padding: '40px', textAlign: 'center' }}>
               <BlockStack gap="200" inlineAlign="center">
                 <Text variant="headingMd">No orders yet</Text>
-                <Text tone="subdued">Click "Import from Shopify" to fetch your unfulfilled orders.</Text>
+                <Text tone="subdued">Click "Sync Amazon Orders" to import your pending orders from Amazon.</Text>
+                <Button onClick={handleSyncAmazon} loading={syncingAmazon}>
+                  Sync Amazon Orders
+                </Button>
               </BlockStack>
             </div>
           ) : filteredOrders.length === 0 ? (

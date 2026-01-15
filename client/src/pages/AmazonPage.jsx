@@ -375,8 +375,8 @@ export default function AmazonPage() {
 
   return (
     <Page
-      title="Amazon Integration"
-      subtitle="Manage Amazon orders, shipping, and fees"
+      title="Amazon Settings"
+      subtitle="Configure SP-API connection, sync orders, and manage shipping"
       primaryAction={{
         content: syncing && syncType === 'orders' ? 'Syncing...' : 'Sync Orders',
         onAction: handleSyncOrders,
