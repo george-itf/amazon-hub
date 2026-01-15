@@ -7,7 +7,9 @@ import spApiClient from '../services/spApi.js';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
 import { requireAdmin } from '../middleware/auth.js';
-import { auditLog, getAuditContext } from '../services/audit.js';
+import { recordSystemEvent } from '../services/audit.js';
+import { resolveListing } from '../utils/memoryResolution.js';
+import { normalizeAsin, normalizeSku, fingerprintTitle } from '../utils/identityNormalization.js';
 
 const router = express.Router();
 
@@ -95,12 +97,17 @@ router.post('/sync/orders', requireAdmin, async (req, res) => {
       }
     }
 
-    await auditLog({
-      entityType: 'SYSTEM',
-      entityId: 'amazon-sync',
-      action: 'SYNC_ORDERS',
-      changesSummary: `Synced ${results.total} Amazon orders: ${results.created} created, ${results.updated} updated, ${results.skipped} skipped`,
-      ...getAuditContext(req),
+    await recordSystemEvent({
+      eventType: 'AMAZON_SYNC',
+      description: `Synced ${results.total} Amazon orders: ${results.created} created, ${results.updated} updated, ${results.skipped} skipped`,
+      metadata: {
+        total: results.total,
+        created: results.created,
+        updated: results.updated,
+        skipped: results.skipped,
+        errors: results.errors.length,
+      },
+      severity: results.errors.length > 0 ? 'WARN' : 'INFO',
     });
 
     sendSuccess(res, results);
@@ -122,19 +129,19 @@ async function processAmazonOrder(amazonOrder, results) {
     .select('id, status')
     .eq('external_order_id', amazonOrderId)
     .eq('channel', 'AMAZON')
-    .single();
+    .maybeSingle();
 
   // Map Amazon status to our status
   const statusMap = {
-    'Pending': 'PENDING',
+    'Pending': 'IMPORTED',
     'Unshipped': 'READY_TO_PICK',
-    'PartiallyShipped': 'IN_PROGRESS',
+    'PartiallyShipped': 'PICKED',
     'Shipped': 'DISPATCHED',
     'Canceled': 'CANCELLED',
     'Unfulfillable': 'CANCELLED',
   };
 
-  const ourStatus = statusMap[amazonOrder.OrderStatus] || 'NEEDS_REVIEW';
+  const amazonStatus = statusMap[amazonOrder.OrderStatus] || 'NEEDS_REVIEW';
 
   // Parse order total
   const orderTotalPence = amazonOrder.OrderTotal
@@ -142,12 +149,31 @@ async function processAmazonOrder(amazonOrder, results) {
     : 0;
 
   if (existing) {
-    // Update existing order if status changed
-    if (existing.status !== ourStatus) {
+    // Update existing order if status changed (only if not already further in pipeline)
+    const statusPriority = {
+      'IMPORTED': 0,
+      'NEEDS_REVIEW': 1,
+      'READY_TO_PICK': 2,
+      'PICKED': 3,
+      'DISPATCHED': 4,
+      'CANCELLED': 5,
+    };
+
+    // Only update if Amazon status indicates a later stage
+    if (amazonStatus === 'DISPATCHED' && existing.status !== 'DISPATCHED') {
       await supabase
         .from('orders')
         .update({
-          status: ourStatus,
+          status: 'DISPATCHED',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+      results.updated++;
+    } else if (amazonStatus === 'CANCELLED' && existing.status !== 'CANCELLED') {
+      await supabase
+        .from('orders')
+        .update({
+          status: 'CANCELLED',
           updated_at: new Date().toISOString(),
         })
         .eq('id', existing.id);
@@ -163,31 +189,78 @@ async function processAmazonOrder(amazonOrder, results) {
   const items = orderItems.OrderItems || [];
 
   // Parse shipping address for customer info
-  const shippingAddress = amazonOrder.ShippingAddress || {};
-  const customerName = shippingAddress.Name || amazonOrder.BuyerInfo?.BuyerName || null;
+  const amazonShippingAddress = amazonOrder.ShippingAddress || {};
+  const customerName = amazonShippingAddress.Name || amazonOrder.BuyerInfo?.BuyerName || null;
   const customerEmail = amazonOrder.BuyerInfo?.BuyerEmail || null;
 
-  // Create the order
+  // Build shipping address as jsonb
+  const shippingAddress = amazonShippingAddress.AddressLine1 ? {
+    name: amazonShippingAddress.Name,
+    address1: amazonShippingAddress.AddressLine1,
+    address2: amazonShippingAddress.AddressLine2 || null,
+    city: amazonShippingAddress.City,
+    province: amazonShippingAddress.StateOrRegion || null,
+    zip: amazonShippingAddress.PostalCode,
+    country: amazonShippingAddress.CountryCode,
+    phone: amazonShippingAddress.Phone || null,
+  } : null;
+
+  // Pre-process line items to determine resolution status BEFORE inserting order
+  const processedLines = [];
+  let allLinesResolved = true;
+
+  for (const item of items) {
+    const asin = normalizeAsin(item.ASIN);
+    const sku = normalizeSku(item.SellerSKU);
+    const title = item.Title || '';
+    const fingerprint = fingerprintTitle(title);
+
+    // Attempt to resolve listing using the standard resolution flow
+    const resolution = await resolveListing(asin, sku, title);
+    const isResolved = resolution !== null && resolution.bom_id !== null;
+
+    if (!isResolved) {
+      allLinesResolved = false;
+    }
+
+    processedLines.push({
+      item,
+      asin,
+      sku,
+      title,
+      fingerprint,
+      resolution,
+      isResolved,
+    });
+  }
+
+  // Determine final status based on Amazon status and resolution
+  let finalStatus = amazonStatus;
+  if (amazonStatus === 'READY_TO_PICK' && !allLinesResolved) {
+    finalStatus = 'NEEDS_REVIEW';
+  } else if (amazonStatus === 'IMPORTED' && allLinesResolved) {
+    finalStatus = 'READY_TO_PICK';
+  } else if (amazonStatus === 'IMPORTED' && !allLinesResolved) {
+    finalStatus = 'NEEDS_REVIEW';
+  }
+
+  // Create the order with correct status
   const { data: newOrder, error: orderError } = await supabase
     .from('orders')
     .insert({
       external_order_id: amazonOrderId,
       order_number: amazonOrderId,
       channel: 'AMAZON',
-      status: ourStatus,
+      status: finalStatus,
       order_date: amazonOrder.PurchaseDate
         ? new Date(amazonOrder.PurchaseDate).toISOString().split('T')[0]
         : new Date().toISOString().split('T')[0],
       customer_name: customerName,
       customer_email: customerEmail,
-      shipping_address_line1: shippingAddress.AddressLine1,
-      shipping_address_line2: shippingAddress.AddressLine2,
-      shipping_city: shippingAddress.City,
-      shipping_postal_code: shippingAddress.PostalCode,
-      shipping_country: shippingAddress.CountryCode,
-      order_total_pence: orderTotalPence,
+      shipping_address: shippingAddress,
+      raw_payload: amazonOrder,
+      total_price_pence: orderTotalPence,
       currency: amazonOrder.OrderTotal?.CurrencyCode || 'GBP',
-      amazon_data: amazonOrder, // Store raw data for reference
     })
     .select()
     .single();
@@ -197,59 +270,50 @@ async function processAmazonOrder(amazonOrder, results) {
   }
 
   // Create order lines
-  for (const item of items) {
-    const asin = item.ASIN;
-    const sku = item.SellerSKU;
-    const title = item.Title;
+  for (const processed of processedLines) {
+    const { item, asin, sku, title, fingerprint, resolution, isResolved } = processed;
     const quantity = item.QuantityOrdered || 1;
     const pricePerUnit = item.ItemPrice
       ? Math.round(parseFloat(item.ItemPrice.Amount) / quantity * 100)
       : 0;
 
-    // Try to find or create listing memory
-    let listingId = null;
-
-    // First try to match by ASIN
-    if (asin) {
-      const { data: listing } = await supabase
-        .from('listing_memory')
-        .select('id')
-        .eq('asin', asin)
-        .eq('is_active', true)
-        .single();
-
-      if (listing) {
-        listingId = listing.id;
-      }
-    }
-
-    // If no ASIN match, try SKU
-    if (!listingId && sku) {
-      const { data: listing } = await supabase
-        .from('listing_memory')
-        .select('id')
-        .eq('sku', sku)
-        .eq('is_active', true)
-        .single();
-
-      if (listing) {
-        listingId = listing.id;
-      }
-    }
-
-    // Create the order line
-    await supabase
+    // Insert order line
+    const { error: lineError } = await supabase
       .from('order_lines')
       .insert({
         order_id: newOrder.id,
-        listing_id: listingId,
-        quantity: quantity,
-        title: title,
+        external_line_id: item.OrderItemId || null,
         asin: asin,
         sku: sku,
+        title: title,
+        title_fingerprint: fingerprint,
+        quantity: quantity,
         unit_price_pence: pricePerUnit,
-        line_total_pence: pricePerUnit * quantity,
+        listing_memory_id: resolution?.id || null,
+        bom_id: resolution?.bom_id || null,
+        resolution_source: resolution ? 'MEMORY' : null,
+        is_resolved: isResolved,
+        parse_intent: null,
       });
+
+    if (lineError) {
+      console.error('Order line insert error:', lineError);
+    }
+
+    // If not resolved, create review queue entry
+    if (!isResolved) {
+      await supabase.from('review_queue').insert({
+        order_id: newOrder.id,
+        order_line_id: null,
+        external_id: `${amazonOrderId}-${item.OrderItemId || item.ASIN}`,
+        asin: asin,
+        sku: sku,
+        title: title,
+        title_fingerprint: fingerprint,
+        reason: resolution ? 'BOM_NOT_SET' : 'UNKNOWN_LISTING',
+        status: 'PENDING',
+      });
+    }
   }
 
   results.created++;
