@@ -240,6 +240,232 @@ function StatusBadge({ status }) {
 }
 
 /**
+ * Pulse Ticker Component - Revenue + Estimated Profit
+ */
+function PulseTicker({ data, loading }) {
+  if (loading) {
+    return (
+      <Card>
+        <BlockStack gap="400">
+          <Text variant="headingMd" fontWeight="bold">Pulse</Text>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
+            <Spinner size="small" />
+          </div>
+        </BlockStack>
+      </Card>
+    );
+  }
+
+  if (!data) return null;
+
+  const { revenue, estimated_profit, orders } = data;
+
+  return (
+    <Card>
+      <BlockStack gap="400">
+        <InlineStack align="space-between">
+          <Text variant="headingMd" fontWeight="bold">Pulse</Text>
+          <Badge tone="info">Live</Badge>
+        </InlineStack>
+
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          gap: '16px',
+        }}>
+          {/* Today */}
+          <div style={{
+            padding: '16px',
+            backgroundColor: '#F0FDF4',
+            borderRadius: '8px',
+            textAlign: 'center',
+          }}>
+            <BlockStack gap="200" inlineAlign="center">
+              <Text variant="bodySm" tone="subdued">Today</Text>
+              <Text variant="headingLg" fontWeight="bold">
+                {formatPrice(revenue?.today || 0)}
+              </Text>
+              <InlineStack gap="100" blockAlign="center">
+                <Text variant="bodySm" tone="success">
+                  +{formatPrice(estimated_profit?.today || 0)} profit
+                </Text>
+              </InlineStack>
+              <Text variant="bodySm" tone="subdued">{orders?.today || 0} orders</Text>
+            </BlockStack>
+          </div>
+
+          {/* This Week */}
+          <div style={{
+            padding: '16px',
+            backgroundColor: '#EFF6FF',
+            borderRadius: '8px',
+            textAlign: 'center',
+          }}>
+            <BlockStack gap="200" inlineAlign="center">
+              <Text variant="bodySm" tone="subdued">This Week</Text>
+              <Text variant="headingLg" fontWeight="bold">
+                {formatPrice(revenue?.week || 0)}
+              </Text>
+              <InlineStack gap="100" blockAlign="center">
+                <Text variant="bodySm" tone="success">
+                  +{formatPrice(estimated_profit?.week || 0)} profit
+                </Text>
+              </InlineStack>
+              <Text variant="bodySm" tone="subdued">{orders?.week || 0} orders</Text>
+            </BlockStack>
+          </div>
+
+          {/* This Month */}
+          <div style={{
+            padding: '16px',
+            backgroundColor: '#FEF3C7',
+            borderRadius: '8px',
+            textAlign: 'center',
+          }}>
+            <BlockStack gap="200" inlineAlign="center">
+              <Text variant="bodySm" tone="subdued">This Month</Text>
+              <Text variant="headingLg" fontWeight="bold">
+                {formatPrice(revenue?.month || 0)}
+              </Text>
+              <InlineStack gap="100" blockAlign="center">
+                <Text variant="bodySm" tone="success">
+                  +{formatPrice(estimated_profit?.month || 0)} profit
+                </Text>
+              </InlineStack>
+              <Text variant="bodySm" tone="subdued">{orders?.month || 0} orders</Text>
+            </BlockStack>
+          </div>
+        </div>
+      </BlockStack>
+    </Card>
+  );
+}
+
+/**
+ * Stock Heatmap Component - 10x10 grid showing days of coverage
+ */
+function StockHeatmap({ data, loading, onClick }) {
+  if (loading) {
+    return (
+      <Card>
+        <BlockStack gap="400">
+          <Text variant="headingMd" fontWeight="bold">Stock Heatmap</Text>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+            <Spinner size="small" />
+          </div>
+        </BlockStack>
+      </Card>
+    );
+  }
+
+  if (!data || !data.components) return null;
+
+  const { components, buckets, summary } = data;
+
+  // Get bucket color
+  const getBucketColor = (bucket) => {
+    switch (bucket) {
+      case 'critical': return '#DC2626'; // Red
+      case 'low': return '#F59E0B';      // Orange
+      case 'medium': return '#3B82F6';   // Blue
+      case 'healthy': return '#10B981';  // Green
+      default: return '#9CA3AF';
+    }
+  };
+
+  // Create 10x10 grid cells (max 100 items)
+  const gridItems = components.slice(0, 100);
+
+  // Pad to 100 items if needed for consistent grid
+  while (gridItems.length < 100 && gridItems.length > 0) {
+    gridItems.push({ bucket: 'empty', component_id: `empty-${gridItems.length}` });
+  }
+
+  return (
+    <Card>
+      <BlockStack gap="400">
+        <InlineStack align="space-between">
+          <Text variant="headingMd" fontWeight="bold">Stock Heatmap</Text>
+          <InlineStack gap="200">
+            <Tooltip content="0-7 days">
+              <Badge tone="critical">{buckets?.critical || 0}</Badge>
+            </Tooltip>
+            <Tooltip content="7-14 days">
+              <Badge tone="warning">{buckets?.low || 0}</Badge>
+            </Tooltip>
+            <Tooltip content="14-30 days">
+              <Badge tone="info">{buckets?.medium || 0}</Badge>
+            </Tooltip>
+            <Tooltip content="30+ days">
+              <Badge tone="success">{buckets?.healthy || 0}</Badge>
+            </Tooltip>
+          </InlineStack>
+        </InlineStack>
+
+        {/* 10x10 Grid */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(10, 1fr)',
+          gap: '3px',
+          aspectRatio: '1',
+        }}>
+          {gridItems.map((item, index) => (
+            <Tooltip
+              key={item.component_id || index}
+              content={item.bucket !== 'empty'
+                ? `${item.internal_sku}: ${item.days_of_coverage}d (${item.on_hand} units)`
+                : ''
+              }
+            >
+              <div
+                onClick={() => item.bucket !== 'empty' && onClick?.(item)}
+                style={{
+                  backgroundColor: item.bucket === 'empty' ? '#F3F4F6' : getBucketColor(item.bucket),
+                  borderRadius: '2px',
+                  cursor: item.bucket !== 'empty' ? 'pointer' : 'default',
+                  aspectRatio: '1',
+                  opacity: item.bucket === 'empty' ? 0.3 : 1,
+                  transition: 'transform 0.1s ease',
+                }}
+                onMouseOver={(e) => item.bucket !== 'empty' && (e.currentTarget.style.transform = 'scale(1.1)')}
+                onMouseOut={(e) => e.currentTarget.style.transform = 'scale(1)'}
+              />
+            </Tooltip>
+          ))}
+        </div>
+
+        {/* Legend */}
+        <InlineStack gap="400" align="center">
+          <InlineStack gap="100" blockAlign="center">
+            <div style={{ width: '12px', height: '12px', backgroundColor: '#DC2626', borderRadius: '2px' }} />
+            <Text variant="bodySm">0-7d</Text>
+          </InlineStack>
+          <InlineStack gap="100" blockAlign="center">
+            <div style={{ width: '12px', height: '12px', backgroundColor: '#F59E0B', borderRadius: '2px' }} />
+            <Text variant="bodySm">7-14d</Text>
+          </InlineStack>
+          <InlineStack gap="100" blockAlign="center">
+            <div style={{ width: '12px', height: '12px', backgroundColor: '#3B82F6', borderRadius: '2px' }} />
+            <Text variant="bodySm">14-30d</Text>
+          </InlineStack>
+          <InlineStack gap="100" blockAlign="center">
+            <div style={{ width: '12px', height: '12px', backgroundColor: '#10B981', borderRadius: '2px' }} />
+            <Text variant="bodySm">30+d</Text>
+          </InlineStack>
+        </InlineStack>
+
+        {/* Summary */}
+        {summary?.critical_count > 0 && (
+          <Banner tone="warning">
+            <p>{summary.critical_count} component(s) need restocking within 7 days</p>
+          </Banner>
+        )}
+      </BlockStack>
+    </Card>
+  );
+}
+
+/**
  * Dashboard - Amazon Seller Command Center
  */
 export default function Dashboard() {
@@ -253,6 +479,12 @@ export default function Dashboard() {
   const [amazonStats, setAmazonStats] = useState(null);
   const [amazonStatus, setAmazonStatus] = useState(null);
 
+  // Pulse and Heatmap state
+  const [pulseData, setPulseData] = useState(null);
+  const [pulseLoading, setPulseLoading] = useState(true);
+  const [heatmapData, setHeatmapData] = useState(null);
+  const [heatmapLoading, setHeatmapLoading] = useState(true);
+
   // Sync state
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
@@ -263,6 +495,7 @@ export default function Dashboard() {
       else setLoading(true);
       setError(null);
 
+      // Load core dashboard data
       const [dashboardData, amzStats, amzStatus] = await Promise.all([
         api.getDashboard(),
         api.getAmazonStats().catch(() => null),
@@ -272,6 +505,18 @@ export default function Dashboard() {
       setData(dashboardData);
       setAmazonStats(amzStats);
       setAmazonStatus(amzStatus);
+
+      // Load pulse and heatmap in parallel (non-blocking)
+      api.getDashboardPulse()
+        .then(setPulseData)
+        .catch(err => console.warn('Pulse load error:', err))
+        .finally(() => setPulseLoading(false));
+
+      api.getStockHeatmap()
+        .then(setHeatmapData)
+        .catch(err => console.warn('Heatmap load error:', err))
+        .finally(() => setHeatmapLoading(false));
+
     } catch (err) {
       console.error('Dashboard load error:', err);
       setError(err.message || 'Failed to load dashboard');
@@ -413,6 +658,9 @@ export default function Dashboard() {
             <p>{syncResult.error}</p>
           </Banner>
         )}
+
+        {/* Pulse Ticker - Revenue + Estimated Profit */}
+        <PulseTicker data={pulseData} loading={pulseLoading} />
 
         {/* Alerts Section */}
         {alerts.length > 0 && (
@@ -570,6 +818,13 @@ export default function Dashboard() {
           {/* Sidebar */}
           <Layout.Section variant="oneThird">
             <BlockStack gap="400">
+              {/* Stock Heatmap - Days of Coverage */}
+              <StockHeatmap
+                data={heatmapData}
+                loading={heatmapLoading}
+                onClick={(item) => navigate(`/components?id=${item.component_id}`)}
+              />
+
               {/* Account Health */}
               <Card>
                 <BlockStack gap="300">

@@ -149,6 +149,14 @@ export async function getDashboardStats() {
   return request('/dashboard/stats');
 }
 
+export async function getDashboardPulse() {
+  return request('/dashboard/pulse');
+}
+
+export async function getStockHeatmap() {
+  return request('/dashboard/stock-heatmap');
+}
+
 // ============ Components API ============
 
 export async function getComponents(params = {}) {
