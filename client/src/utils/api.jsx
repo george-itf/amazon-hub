@@ -702,54 +702,6 @@ export async function confirmAmazonShipment(orderId, carrierCode, trackingNumber
   });
 }
 
-// ============ Shipping / Royal Mail ============
-
-export async function getShippingStatus() {
-  return request('/shipping/status');
-}
-
-export async function getShippingServices() {
-  return request('/shipping/services');
-}
-
-export async function getReadyToShipOrders() {
-  return request('/shipping/orders/ready');
-}
-
-export async function createShippingLabel(orderId, serviceCode = 'TPN') {
-  return request('/shipping/label/create', {
-    method: 'POST',
-    body: { orderId, serviceCode },
-  });
-}
-
-export async function syncShippingTracking(daysBack = 7, autoConfirmAmazon = true) {
-  return request('/shipping/sync-tracking', {
-    method: 'POST',
-    body: { daysBack, autoConfirmAmazon },
-    timeout: 120000,
-  });
-}
-
-export async function confirmShipment(orderId, trackingNumber, carrierCode = 'Royal Mail', confirmOnAmazon = true) {
-  return request(`/shipping/confirm/${orderId}`, {
-    method: 'POST',
-    body: { trackingNumber, carrierCode, confirmOnAmazon },
-  });
-}
-
-export async function getOrderTracking(orderId) {
-  return request(`/shipping/tracking/${orderId}`);
-}
-
-export async function confirmBulkShipments(shipments, confirmOnAmazon = true) {
-  return request('/shipping/confirm-bulk', {
-    method: 'POST',
-    body: { shipments, confirmOnAmazon },
-    timeout: 180000, // 3 minute timeout for bulk
-  });
-}
-
 // ============ Amazon Catalog & Listings ============
 
 export async function syncAmazonCatalog(asins, daysBack = 30) {
@@ -1032,6 +984,19 @@ export async function confirmShipment(orderId, trackingNumber, options = {}) {
       carrierCode: options.carrierCode || 'Royal Mail',
       confirmOnAmazon: options.confirmOnAmazon !== false,
     },
+  });
+}
+
+/**
+ * Confirm multiple shipments in bulk
+ * @param {Array} shipments - Array of { orderId, trackingNumber, carrierCode }
+ * @param {boolean} confirmOnAmazon - Whether to confirm on Amazon
+ */
+export async function confirmBulkShipments(shipments, confirmOnAmazon = true) {
+  return request('/shipping/confirm-bulk', {
+    method: 'POST',
+    body: { shipments, confirmOnAmazon },
+    timeout: 180000, // 3 minute timeout for bulk
   });
 }
 
