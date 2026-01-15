@@ -51,6 +51,13 @@ router.get('/', async (req, res) => {
             location,
             on_hand,
             reserved
+          ),
+          bom_components (
+            bom_id,
+            boms!inner (
+              id,
+              is_active
+            )
           )
         `)
         .order('internal_sku', { ascending: true })
@@ -79,15 +86,23 @@ router.get('/', async (req, res) => {
     // Apply requested offset/limit
     const slicedData = allData.slice(requestedOffset, requestedOffset + requestedLimit);
 
-    // Add computed available stock
+    // Add computed available stock and active BOM count
     const componentsWithAvailable = slicedData.map(c => {
       const totalOnHand = (c.component_stock || []).reduce((sum, s) => sum + s.on_hand, 0);
       const totalReserved = (c.component_stock || []).reduce((sum, s) => sum + s.reserved, 0);
+      // Count unique active BOMs this component is used in
+      const activeBomIds = new Set(
+        (c.bom_components || [])
+          .filter(bc => bc.boms?.is_active)
+          .map(bc => bc.bom_id)
+      );
       return {
         ...c,
         total_on_hand: totalOnHand,
         total_reserved: totalReserved,
-        total_available: totalOnHand - totalReserved
+        total_available: totalOnHand - totalReserved,
+        active_bom_count: activeBomIds.size,
+        bom_components: undefined // Don't send the raw join data
       };
     });
 

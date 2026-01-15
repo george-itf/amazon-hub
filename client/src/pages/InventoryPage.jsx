@@ -53,6 +53,7 @@ export default function InventoryPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [stockFilter, setStockFilter] = useState('all');
   const [sortBy, setSortBy] = useState('sku');
+  const [usageFilter, setUsageFilter] = useState('all'); // 'all', 'active', 'unassigned'
 
   // User preferences for cross-device sync
   const { getPreference, setPreference, loading: prefsLoading } = useUserPreferences();
@@ -183,6 +184,13 @@ export default function InventoryPage() {
   const filteredComponents = useMemo(() => {
     let result = components;
 
+    // Apply usage filter (Active = in BOM, Unassigned = not in any BOM)
+    if (usageFilter === 'active') {
+      result = result.filter(c => c.active_bom_count > 0);
+    } else if (usageFilter === 'unassigned') {
+      result = result.filter(c => !c.active_bom_count || c.active_bom_count === 0);
+    }
+
     // Apply tab filter
     if (selectedTabIndex > 0 && customTabs[selectedTabIndex - 1]) {
       const tab = customTabs[selectedTabIndex - 1];
@@ -223,7 +231,7 @@ export default function InventoryPage() {
     });
 
     return result;
-  }, [components, selectedTabIndex, customTabs, searchQuery, stockFilter, sortBy]);
+  }, [components, selectedTabIndex, customTabs, searchQuery, stockFilter, sortBy, usageFilter]);
 
   // Stats for current view
   const stats = useMemo(() => {
@@ -239,6 +247,13 @@ export default function InventoryPage() {
     }, 0);
     return { total, inStock, lowStock, outOfStock, totalValue };
   }, [filteredComponents]);
+
+  // Global usage stats (not affected by filters)
+  const usageStats = useMemo(() => {
+    const activeCount = components.filter(c => c.active_bom_count > 0).length;
+    const unassignedCount = components.filter(c => !c.active_bom_count || c.active_bom_count === 0).length;
+    return { activeCount, unassignedCount };
+  }, [components]);
 
   // Tab management
   const handleAddTab = () => {
@@ -366,6 +381,11 @@ export default function InventoryPage() {
       {c.description?.length > 40 && '...'}
     </Text>,
     c.brand || '-',
+    c.active_bom_count > 0 ? (
+      <Badge key={`bom-${c.id}`} tone="success">{c.active_bom_count} BOM{c.active_bom_count !== 1 ? 's' : ''}</Badge>
+    ) : (
+      <Badge key={`bom-${c.id}`} tone="info">Unassigned</Badge>
+    ),
     <InlineStack gap="100" key={`cost-${c.id}`} blockAlign="center">
       <Text variant="bodyMd" fontWeight="medium">{formatPrice(c.cost_ex_vat_pence)}</Text>
       <Button size="micro" variant="plain" onClick={() => openEditCost(c)} icon={EditIcon} />
@@ -468,6 +488,43 @@ export default function InventoryPage() {
           </BlockStack>
         </Card>
 
+        {/* Usage Filter Tabs (Active vs Unassigned) */}
+        <Card>
+          <BlockStack gap="200">
+            <Text variant="headingSm">Filter by Usage</Text>
+            <InlineStack gap="200">
+              <Button
+                variant={usageFilter === 'all' ? 'primary' : 'secondary'}
+                onClick={() => setUsageFilter('all')}
+                size="slim"
+              >
+                All ({components.length})
+              </Button>
+              <Button
+                variant={usageFilter === 'active' ? 'primary' : 'secondary'}
+                onClick={() => setUsageFilter('active')}
+                size="slim"
+              >
+                Active in BOMs ({usageStats.activeCount})
+              </Button>
+              <Button
+                variant={usageFilter === 'unassigned' ? 'primary' : 'secondary'}
+                onClick={() => setUsageFilter('unassigned')}
+                size="slim"
+              >
+                Unassigned ({usageStats.unassignedCount})
+              </Button>
+            </InlineStack>
+            <Text variant="bodySm" tone="subdued">
+              {usageFilter === 'active'
+                ? 'Components currently used in active listing BOMs'
+                : usageFilter === 'unassigned'
+                  ? 'Components not assigned to any BOM - available for new listings'
+                  : 'Showing all components'}
+            </Text>
+          </BlockStack>
+        </Card>
+
         {/* Search and Filters */}
         <Card>
           <InlineStack gap="400" wrap={false}>
@@ -535,8 +592,8 @@ export default function InventoryPage() {
             </div>
           ) : (
             <DataTable
-              columnContentTypes={['text', 'text', 'text', 'numeric', 'text']}
-              headings={['SKU', 'Description', 'Brand', 'Cost', 'Stock']}
+              columnContentTypes={['text', 'text', 'text', 'text', 'numeric', 'text']}
+              headings={['SKU', 'Description', 'Brand', 'Usage', 'Cost', 'Stock']}
               rows={rows}
               footerContent={`${filteredComponents.length} item(s)`}
             />

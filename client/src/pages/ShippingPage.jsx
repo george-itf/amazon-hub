@@ -54,7 +54,6 @@ export default function ShippingPage() {
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
-  const [channelFilter, setChannelFilter] = useState('all');
 
   // Sync tracking loading
   const [syncing, setSyncing] = useState(false);
@@ -93,12 +92,6 @@ export default function ShippingPage() {
   // Filter orders
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
-      // Channel filter (Amazon-focused, but kept for future multi-channel)
-      if (channelFilter !== 'all') {
-        const channel = order.channel?.toLowerCase() || '';
-        if (channelFilter === 'amazon' && channel !== 'amazon') return false;
-      }
-
       // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
@@ -113,7 +106,7 @@ export default function ShippingPage() {
 
       return true;
     });
-  }, [orders, channelFilter, searchQuery]);
+  }, [orders, searchQuery]);
 
   // Selection handlers
   const handleSelectOrder = (orderId) => {
@@ -134,16 +127,6 @@ export default function ShippingPage() {
     } else {
       setSelectedOrderIds(new Set(filteredOrders.map((o) => o.id)));
     }
-  };
-
-  // Channel badge (Amazon-focused)
-  const getChannelBadge = (channel) => {
-    const channelMap = {
-      AMAZON: { tone: 'warning', label: 'Amazon' },
-      EBAY: { tone: 'info', label: 'eBay' },
-    };
-    const config = channelMap[channel?.toUpperCase()] || { tone: 'default', label: channel || 'Amazon' };
-    return <Badge tone={config.tone}>{config.label}</Badge>;
   };
 
   // Format address
@@ -170,7 +153,6 @@ export default function ShippingPage() {
         labelHidden
       />,
       order.order_number || order.external_order_id || '-',
-      getChannelBadge(order.channel),
       formatCustomerName(order),
       formatPostcode(order.shipping_address),
       order.order_lines?.length || 0,
@@ -309,31 +291,17 @@ export default function ShippingPage() {
                 </InlineStack>
               </InlineStack>
 
-              {/* Filters */}
-              <InlineStack gap="300" wrap={false}>
-                <div style={{ flex: 1 }}>
-                  <TextField
-                    label="Search"
-                    labelHidden
-                    placeholder="Search by order #, customer, postcode..."
-                    value={searchQuery}
-                    onChange={setSearchQuery}
-                    clearButton
-                    onClearButtonClick={() => setSearchQuery('')}
-                    autoComplete="off"
-                  />
-                </div>
-                <Select
-                  label="Channel"
-                  labelHidden
-                  options={[
-                    { label: 'All channels', value: 'all' },
-                    { label: 'Amazon', value: 'amazon' },
-                  ]}
-                  value={channelFilter}
-                  onChange={setChannelFilter}
-                />
-              </InlineStack>
+              {/* Search Filter */}
+              <TextField
+                label="Search"
+                labelHidden
+                placeholder="Search by order #, customer, postcode..."
+                value={searchQuery}
+                onChange={setSearchQuery}
+                clearButton
+                onClearButtonClick={() => setSearchQuery('')}
+                autoComplete="off"
+              />
 
               {/* Actions Bar */}
               <InlineStack gap="200">
@@ -378,7 +346,7 @@ export default function ShippingPage() {
                 </div>
               ) : (
                 <DataTable
-                  columnContentTypes={['text', 'text', 'text', 'text', 'text', 'numeric', 'numeric']}
+                  columnContentTypes={['text', 'text', 'text', 'text', 'numeric', 'numeric']}
                   headings={[
                     <Checkbox
                       key="select-all"
@@ -388,7 +356,6 @@ export default function ShippingPage() {
                       labelHidden
                     />,
                     'Order #',
-                    'Channel',
                     'Customer',
                     'Postcode',
                     'Items',

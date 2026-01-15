@@ -20,12 +20,17 @@ import {
   ProgressBar,
   Checkbox,
   Tag,
+  Thumbnail,
+  Icon,
+  Box,
+  Tooltip,
 } from '@shopify/polaris';
-import { PlusIcon, RefreshIcon, SettingsIcon } from '@shopify/polaris-icons';
+import { PlusIcon, RefreshIcon, SettingsIcon, ImageIcon, EditIcon, ExternalIcon } from '@shopify/polaris-icons';
 import {
   getListings,
   getBoms,
   createListing,
+  updateListing,
   getListingSettings,
   updateListingSettings,
   getShippingOptions,
@@ -41,15 +46,40 @@ function formatPrice(pence) {
 }
 
 /**
+ * Generate Amazon product image URL from ASIN
+ */
+function getAmazonImageUrl(asin, size = 'small') {
+  if (!asin) return null;
+  // Amazon's standard image URL pattern
+  const sizeMap = {
+    small: 'SL75',    // 75px
+    medium: 'SL160',  // 160px
+    large: 'SL320',   // 320px
+  };
+  const sizeCode = sizeMap[size] || 'SL75';
+  return `https://images-na.ssl-images-amazon.com/images/P/${asin}.01._${sizeCode}_.jpg`;
+}
+
+/**
+ * Truncate text with ellipsis
+ */
+function truncate(str, maxLength) {
+  if (!str) return '';
+  if (str.length <= maxLength) return str;
+  return str.substring(0, maxLength - 3) + '...';
+}
+
+/**
  * AmazonListingsPage - Manage all Amazon listings
  *
  * Features:
- * - View all Amazon listings with custom tabs
- * - Assign BOMs to listings
+ * - View all Amazon listings with images and titles
+ * - Click any listing to view/edit details
+ * - Assign BOMs to listings directly
  * - Set sell-out price overrides
  * - Override quantities
  * - Assign shipping rules
- * - Filter by brand, product type, status
+ * - Filter by brand, product type, status with custom tabs
  */
 export default function AmazonListingsPage() {
   const [loading, setLoading] = useState(true);
@@ -64,14 +94,13 @@ export default function AmazonListingsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [bomFilter, setBomFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('asin');
+  const [sortBy, setSortBy] = useState('title');
 
   // User preferences for cross-device sync
   const { getPreference, setPreference, loading: prefsLoading } = useUserPreferences();
 
   // Custom tabs state - synced via user preferences
   const [customTabs, setCustomTabs] = useState(() => {
-    // Initial load from localStorage while preferences are loading
     try {
       const saved = localStorage.getItem('listings_custom_tabs');
       return saved ? JSON.parse(saved) : [];
@@ -95,9 +124,10 @@ export default function AmazonListingsPage() {
   const [tabModalOpen, setTabModalOpen] = useState(false);
   const [tabForm, setTabForm] = useState({ name: '', filterType: 'brand', filterValue: '' });
 
-  // Listing settings modal
-  const [settingsModal, setSettingsModal] = useState({ open: false, listing: null });
-  const [settingsForm, setSettingsForm] = useState({
+  // Listing detail modal (main new feature)
+  const [detailModal, setDetailModal] = useState({ open: false, listing: null });
+  const [detailForm, setDetailForm] = useState({
+    bom_id: '',
     price_override_pence: '',
     quantity_override: '',
     quantity_cap: '',
@@ -106,7 +136,7 @@ export default function AmazonListingsPage() {
     shipping_rule: '',
     tags: [],
   });
-  const [savingSettings, setSavingSettings] = useState(false);
+  const [savingDetail, setSavingDetail] = useState(false);
 
   // Create mapping rule modal
   const [createModal, setCreateModal] = useState(false);
@@ -117,9 +147,8 @@ export default function AmazonListingsPage() {
   // Bulk selection
   const [selectedListings, setSelectedListings] = useState(new Set());
 
-  // Save custom tabs to user preferences (syncs to server if logged in)
+  // Save custom tabs to user preferences
   useEffect(() => {
-    // Skip initial render to avoid overwriting server data before it loads
     if (!prefsLoading) {
       setPreference('listings_custom_tabs', customTabs);
     }
@@ -186,11 +215,13 @@ export default function AmazonListingsPage() {
     const allCount = listings.length;
     const withBomCount = listings.filter(l => l.bom_id).length;
     const noBomCount = listings.filter(l => !l.bom_id).length;
+    const activeCount = listings.filter(l => l.is_active).length;
 
     const baseTabs = [
       { id: 'all', content: `All (${allCount})` },
       { id: 'with-bom', content: `With BOM (${withBomCount})`, filter: l => l.bom_id },
-      { id: 'no-bom', content: `No BOM (${noBomCount})`, filter: l => !l.bom_id },
+      { id: 'no-bom', content: `Needs BOM (${noBomCount})`, filter: l => !l.bom_id },
+      { id: 'active', content: `Active (${activeCount})`, filter: l => l.is_active },
     ];
 
     const customTabItems = customTabs.map((tab, index) => {
@@ -220,9 +251,9 @@ export default function AmazonListingsPage() {
     const currentTab = tabs[selectedTabIndex];
     if (currentTab?.filter) {
       result = result.filter(currentTab.filter);
-    } else if (selectedTabIndex >= 3) {
-      // Custom tab
-      const customTab = customTabs[selectedTabIndex - 3];
+    } else if (selectedTabIndex >= 4) {
+      // Custom tab (after 4 base tabs)
+      const customTab = customTabs[selectedTabIndex - 4];
       if (customTab) {
         result = result.filter(l => {
           const bom = boms.find(b => b.id === l.bom_id);
@@ -264,6 +295,7 @@ export default function AmazonListingsPage() {
 
     // Sort
     result.sort((a, b) => {
+      if (sortBy === 'title') return (a.title_fingerprint || a.asin || '').localeCompare(b.title_fingerprint || b.asin || '');
       if (sortBy === 'asin') return (a.asin || '').localeCompare(b.asin || '');
       if (sortBy === 'sku') return (a.sku || '').localeCompare(b.sku || '');
       if (sortBy === 'created') return new Date(b.created_at || 0) - new Date(a.created_at || 0);
@@ -294,9 +326,9 @@ export default function AmazonListingsPage() {
 
   const handleRemoveTab = (index) => {
     setCustomTabs(prev => prev.filter((_, i) => i !== index));
-    if (selectedTabIndex > index + 3) {
+    if (selectedTabIndex > index + 4) {
       setSelectedTabIndex(selectedTabIndex - 1);
-    } else if (selectedTabIndex === index + 3) {
+    } else if (selectedTabIndex === index + 4) {
       setSelectedTabIndex(0);
     }
   };
@@ -309,10 +341,11 @@ export default function AmazonListingsPage() {
     return <Badge tone="success">{bom.bundle_sku}</Badge>;
   }
 
-  // Open settings modal
-  function openSettingsModal(listing) {
+  // Open listing detail modal
+  function openDetailModal(listing) {
     const settings = listingSettingsMap[listing.id] || {};
-    setSettingsForm({
+    setDetailForm({
+      bom_id: listing.bom_id || '',
       price_override_pence: settings.price_override_pence ? (settings.price_override_pence / 100).toFixed(2) : '',
       quantity_override: settings.quantity_override?.toString() || '',
       quantity_cap: settings.quantity_cap?.toString() || '',
@@ -321,49 +354,63 @@ export default function AmazonListingsPage() {
       shipping_rule: settings.shipping_rule || '',
       tags: settings.tags || [],
     });
-    setSettingsModal({ open: true, listing });
+    setDetailModal({ open: true, listing });
   }
 
-  // Save listing settings
-  async function handleSaveSettings() {
-    if (!settingsModal.listing) return;
-    setSavingSettings(true);
+  // Save listing detail (BOM + settings)
+  async function handleSaveDetail() {
+    if (!detailModal.listing) return;
+    setSavingDetail(true);
     try {
-      const payload = {
-        listing_memory_id: settingsModal.listing.id,
-        price_override_pence: settingsForm.price_override_pence
-          ? Math.round(parseFloat(settingsForm.price_override_pence) * 100)
+      const listing = detailModal.listing;
+
+      // Update BOM if changed
+      if (detailForm.bom_id !== (listing.bom_id || '')) {
+        await updateListing(listing.id, {
+          bom_id: detailForm.bom_id || null,
+        });
+        // Update local state
+        setListings(prev => prev.map(l =>
+          l.id === listing.id ? { ...l, bom_id: detailForm.bom_id || null } : l
+        ));
+      }
+
+      // Update settings
+      const settingsPayload = {
+        listing_memory_id: listing.id,
+        price_override_pence: detailForm.price_override_pence
+          ? Math.round(parseFloat(detailForm.price_override_pence) * 100)
           : null,
-        quantity_override: settingsForm.quantity_override
-          ? parseInt(settingsForm.quantity_override)
+        quantity_override: detailForm.quantity_override
+          ? parseInt(detailForm.quantity_override)
           : null,
-        quantity_cap: settingsForm.quantity_cap
-          ? parseInt(settingsForm.quantity_cap)
+        quantity_cap: detailForm.quantity_cap
+          ? parseInt(detailForm.quantity_cap)
           : null,
-        min_margin_override: settingsForm.min_margin_override
-          ? parseFloat(settingsForm.min_margin_override)
+        min_margin_override: detailForm.min_margin_override
+          ? parseFloat(detailForm.min_margin_override)
           : null,
-        target_margin_override: settingsForm.target_margin_override
-          ? parseFloat(settingsForm.target_margin_override)
+        target_margin_override: detailForm.target_margin_override
+          ? parseFloat(detailForm.target_margin_override)
           : null,
-        shipping_rule: settingsForm.shipping_rule || null,
-        tags: settingsForm.tags.length > 0 ? settingsForm.tags : null,
+        shipping_rule: detailForm.shipping_rule || null,
+        tags: detailForm.tags.length > 0 ? detailForm.tags : null,
       };
 
-      const result = await updateListingSettings(payload);
+      const result = await updateListingSettings(settingsPayload);
 
       // Update local state
       setListingSettingsMap(prev => ({
         ...prev,
-        [settingsModal.listing.id]: result,
+        [listing.id]: result,
       }));
 
-      setSuccessMessage(`Settings updated for ${settingsModal.listing.asin || settingsModal.listing.sku}`);
-      setSettingsModal({ open: false, listing: null });
+      setSuccessMessage(`Updated ${listing.title_fingerprint || listing.asin || listing.sku}`);
+      setDetailModal({ open: false, listing: null });
     } catch (err) {
-      setError(err?.message || 'Failed to save settings');
+      setError(err?.message || 'Failed to save listing');
     } finally {
-      setSavingSettings(false);
+      setSavingDetail(false);
     }
   }
 
@@ -420,11 +467,20 @@ export default function AmazonListingsPage() {
     );
   }
 
-  // Table rows - memoized to avoid expensive re-computation on every render
+  // Get display title for listing
+  function getDisplayTitle(listing) {
+    return listing.title_fingerprint || listing.sku || listing.asin || 'Unknown';
+  }
+
+  // Table rows - with images and clickable titles
   const rows = useMemo(() => {
     return filteredListings.map(l => {
       const settings = listingSettingsMap[l.id] || {};
+      const bom = boms.find(b => b.id === l.bom_id);
+      const imageUrl = getAmazonImageUrl(l.asin);
+
       return [
+        // Checkbox
         <Checkbox
           key={`check-${l.id}`}
           label=""
@@ -432,18 +488,70 @@ export default function AmazonListingsPage() {
           checked={selectedListings.has(l.id)}
           onChange={() => toggleSelection(l.id)}
         />,
-        <Text variant="bodyMd" fontWeight="semibold" key={`asin-${l.id}`}>
-          {l.asin || '-'}
-        </Text>,
-        <Text variant="bodySm" key={`sku-${l.id}`} tone="subdued">
-          {l.sku || '-'}
-        </Text>,
-        getBomDisplay(l.bom_id),
+        // Image
+        <div key={`img-${l.id}`} style={{ width: 50, height: 50 }}>
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt={l.asin || 'Product'}
+              style={{
+                width: 50,
+                height: 50,
+                objectFit: 'contain',
+                borderRadius: 4,
+                border: '1px solid #e1e3e5',
+                background: '#fff',
+              }}
+              onError={(e) => {
+                e.target.style.display = 'none';
+                if (e.target.nextSibling) e.target.nextSibling.style.display = 'flex';
+              }}
+            />
+          ) : null}
+          <div
+            style={{
+              width: 50,
+              height: 50,
+              background: '#f6f6f7',
+              borderRadius: 4,
+              display: imageUrl ? 'none' : 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#8c9196',
+            }}
+          >
+            <Icon source={ImageIcon} />
+          </div>
+        </div>,
+        // Title (clickable)
+        <div
+          key={`title-${l.id}`}
+          onClick={() => openDetailModal(l)}
+          style={{ cursor: 'pointer' }}
+        >
+          <BlockStack gap="050">
+            <Text variant="bodyMd" fontWeight="semibold" truncate>
+              {truncate(getDisplayTitle(l), 60)}
+            </Text>
+            <InlineStack gap="100">
+              <Text variant="bodySm" tone="subdued">{l.asin || '-'}</Text>
+              {l.sku && l.sku !== l.asin && (
+                <Text variant="bodySm" tone="subdued">• {l.sku}</Text>
+              )}
+            </InlineStack>
+          </BlockStack>
+        </div>,
+        // BOM
+        <div key={`bom-${l.id}`} onClick={() => openDetailModal(l)} style={{ cursor: 'pointer' }}>
+          {getBomDisplay(l.bom_id)}
+        </div>,
+        // Price Override
         <Text variant="bodyMd" key={`price-${l.id}`}>
           {settings.price_override_pence
             ? formatPrice(settings.price_override_pence)
             : <span style={{ color: '#9CA3AF' }}>Auto</span>}
         </Text>,
+        // Qty
         <Text variant="bodyMd" key={`qty-${l.id}`}>
           {settings.quantity_override != null
             ? settings.quantity_override
@@ -451,18 +559,18 @@ export default function AmazonListingsPage() {
               ? `Cap: ${settings.quantity_cap}`
               : <span style={{ color: '#9CA3AF' }}>Auto</span>}
         </Text>,
-        <Text variant="bodySm" key={`ship-${l.id}`}>
-          {settings.shipping_rule || <span style={{ color: '#9CA3AF' }}>Default</span>}
-        </Text>,
+        // Status
         l.is_active
           ? <Badge tone="success" key={`status-${l.id}`}>Active</Badge>
           : <Badge tone="default" key={`status-${l.id}`}>Inactive</Badge>,
+        // Edit button
         <Button
-          key={`settings-${l.id}`}
-          icon={SettingsIcon}
-          variant={hasSettings(l.id) ? 'primary' : 'tertiary'}
+          key={`edit-${l.id}`}
+          icon={EditIcon}
+          variant={hasSettings(l.id) || l.bom_id ? 'primary' : 'tertiary'}
           size="slim"
-          onClick={() => openSettingsModal(l)}
+          onClick={() => openDetailModal(l)}
+          accessibilityLabel="Edit listing"
         />,
       ];
     });
@@ -470,9 +578,15 @@ export default function AmazonListingsPage() {
 
   // BOM options for selects
   const bomOptions = [
-    { label: '— Select BOM —', value: '' },
-    ...boms.map(b => ({ label: `${b.bundle_sku} - ${b.description || ''}`, value: b.id })),
+    { label: '— No BOM —', value: '' },
+    ...boms.map(b => ({ label: `${b.bundle_sku} - ${truncate(b.description || '', 40)}`, value: b.id })),
   ];
+
+  // Get BOM details for display in modal
+  const selectedBom = useMemo(() => {
+    if (!detailModal.listing || !detailForm.bom_id) return null;
+    return boms.find(b => b.id === detailForm.bom_id);
+  }, [detailModal.listing, detailForm.bom_id, boms]);
 
   return (
     <Page
@@ -513,6 +627,7 @@ export default function AmazonListingsPage() {
             <BlockStack gap="200">
               <Text variant="bodySm" tone="subdued">With BOM</Text>
               <Text variant="headingLg" fontWeight="bold" tone="success">{stats.withBom}</Text>
+              <ProgressBar progress={stats.total ? (stats.withBom / stats.total) * 100 : 0} tone="success" size="small" />
             </BlockStack>
           </Card>
           <Card>
@@ -566,7 +681,7 @@ export default function AmazonListingsPage() {
               <TextField
                 label="Search"
                 labelHidden
-                placeholder="Search by ASIN, SKU, title, BOM..."
+                placeholder="Search by title, ASIN, SKU, BOM..."
                 value={searchQuery}
                 onChange={setSearchQuery}
                 clearButton
@@ -600,6 +715,7 @@ export default function AmazonListingsPage() {
               label="Sort"
               labelHidden
               options={[
+                { label: 'Sort by Title', value: 'title' },
                 { label: 'Sort by ASIN', value: 'asin' },
                 { label: 'Sort by SKU', value: 'sku' },
                 { label: 'Newest first', value: 'created' },
@@ -648,8 +764,8 @@ export default function AmazonListingsPage() {
             </div>
           ) : (
             <DataTable
-              columnContentTypes={['text', 'text', 'text', 'text', 'numeric', 'numeric', 'text', 'text', 'text']}
-              headings={['', 'ASIN', 'SKU', 'BOM', 'Price', 'Qty', 'Shipping', 'Status', 'Settings']}
+              columnContentTypes={['text', 'text', 'text', 'text', 'numeric', 'numeric', 'text', 'text']}
+              headings={['', 'Image', 'Title / ASIN', 'BOM', 'Price', 'Qty', 'Status', '']}
               rows={rows}
               footerContent={`${filteredListings.length} listing(s)`}
             />
@@ -764,39 +880,108 @@ export default function AmazonListingsPage() {
         </Modal.Section>
       </Modal>
 
-      {/* Listing Settings Modal */}
-      {settingsModal.open && (
+      {/* Listing Detail Modal */}
+      {detailModal.open && detailModal.listing && (
         <Modal
-          open={settingsModal.open}
-          onClose={() => setSettingsModal({ open: false, listing: null })}
-          title={`Settings: ${settingsModal.listing?.asin || settingsModal.listing?.sku}`}
+          open={detailModal.open}
+          onClose={() => setDetailModal({ open: false, listing: null })}
+          title="Listing Details"
           primaryAction={{
-            content: 'Save Settings',
-            onAction: handleSaveSettings,
-            loading: savingSettings,
+            content: 'Save Changes',
+            onAction: handleSaveDetail,
+            loading: savingDetail,
           }}
-          secondaryActions={[{ content: 'Cancel', onAction: () => setSettingsModal({ open: false, listing: null }) }]}
+          secondaryActions={[
+            { content: 'Cancel', onAction: () => setDetailModal({ open: false, listing: null }) },
+            detailModal.listing.asin && {
+              content: 'View on Amazon',
+              icon: ExternalIcon,
+              url: `https://www.amazon.co.uk/dp/${detailModal.listing.asin}`,
+              external: true,
+            },
+          ].filter(Boolean)}
           large
         >
           <Modal.Section>
             <BlockStack gap="600">
-              {/* Listing Info */}
-              <Card>
-                <InlineStack gap="800">
-                  <BlockStack gap="100">
-                    <Text variant="bodySm" tone="subdued">ASIN</Text>
-                    <Text variant="bodyMd" fontWeight="semibold">{settingsModal.listing?.asin || '-'}</Text>
-                  </BlockStack>
-                  <BlockStack gap="100">
-                    <Text variant="bodySm" tone="subdued">SKU</Text>
-                    <Text variant="bodyMd">{settingsModal.listing?.sku || '-'}</Text>
-                  </BlockStack>
-                  <BlockStack gap="100">
-                    <Text variant="bodySm" tone="subdued">BOM</Text>
-                    {getBomDisplay(settingsModal.listing?.bom_id)}
-                  </BlockStack>
-                </InlineStack>
-              </Card>
+              {/* Product Header with Image */}
+              <InlineStack gap="400" blockAlign="start">
+                <div style={{
+                  width: 120,
+                  height: 120,
+                  background: '#f6f6f7',
+                  borderRadius: 8,
+                  overflow: 'hidden',
+                  flexShrink: 0,
+                  border: '1px solid #e1e3e5',
+                }}>
+                  {detailModal.listing.asin ? (
+                    <img
+                      src={getAmazonImageUrl(detailModal.listing.asin, 'medium')}
+                      alt={detailModal.listing.asin}
+                      style={{ width: '100%', height: '100%', objectFit: 'contain' }}
+                      onError={(e) => { e.target.style.display = 'none'; }}
+                    />
+                  ) : (
+                    <div style={{
+                      width: '100%',
+                      height: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#8c9196',
+                    }}>
+                      <Icon source={ImageIcon} />
+                    </div>
+                  )}
+                </div>
+                <BlockStack gap="200">
+                  <Text variant="headingMd" fontWeight="bold">
+                    {detailModal.listing.title_fingerprint || 'Untitled Product'}
+                  </Text>
+                  <InlineStack gap="200">
+                    {detailModal.listing.asin && (
+                      <Badge tone="info">ASIN: {detailModal.listing.asin}</Badge>
+                    )}
+                    {detailModal.listing.sku && (
+                      <Badge>SKU: {detailModal.listing.sku}</Badge>
+                    )}
+                    {detailModal.listing.is_active ? (
+                      <Badge tone="success">Active</Badge>
+                    ) : (
+                      <Badge tone="default">Inactive</Badge>
+                    )}
+                  </InlineStack>
+                </BlockStack>
+              </InlineStack>
+
+              <Divider />
+
+              {/* BOM Selection */}
+              <BlockStack gap="400">
+                <Text variant="headingSm">Bill of Materials (BOM)</Text>
+                <Select
+                  label="Assigned BOM"
+                  options={bomOptions}
+                  value={detailForm.bom_id}
+                  onChange={(v) => setDetailForm(f => ({ ...f, bom_id: v }))}
+                  helpText="Select the BOM that defines the components for this listing"
+                />
+                {selectedBom && (
+                  <Card>
+                    <BlockStack gap="200">
+                      <InlineStack gap="200" blockAlign="center">
+                        <Text variant="bodyMd" fontWeight="semibold">{selectedBom.bundle_sku}</Text>
+                        {selectedBom.review_status === 'APPROVED' && <Badge tone="success">Approved</Badge>}
+                        {selectedBom.review_status === 'PENDING_REVIEW' && <Badge tone="warning">Pending</Badge>}
+                      </InlineStack>
+                      {selectedBom.description && (
+                        <Text variant="bodySm" tone="subdued">{selectedBom.description}</Text>
+                      )}
+                    </BlockStack>
+                  </Card>
+                )}
+              </BlockStack>
 
               <Divider />
 
@@ -807,9 +992,9 @@ export default function AmazonListingsPage() {
                   <FormLayout.Group>
                     <TextField
                       label="Sell Price Override (£)"
-                      value={settingsForm.price_override_pence}
+                      value={detailForm.price_override_pence}
                       type="number"
-                      onChange={(v) => setSettingsForm(f => ({ ...f, price_override_pence: v }))}
+                      onChange={(v) => setDetailForm(f => ({ ...f, price_override_pence: v }))}
                       prefix="£"
                       step="0.01"
                       placeholder="Auto"
@@ -817,18 +1002,18 @@ export default function AmazonListingsPage() {
                     />
                     <TextField
                       label="Quantity Override"
-                      value={settingsForm.quantity_override}
+                      value={detailForm.quantity_override}
                       type="number"
-                      onChange={(v) => setSettingsForm(f => ({ ...f, quantity_override: v }))}
+                      onChange={(v) => setDetailForm(f => ({ ...f, quantity_override: v }))}
                       placeholder="Auto"
                       helpText="Override calculated stock quantity"
                     />
                   </FormLayout.Group>
                   <TextField
                     label="Quantity Cap"
-                    value={settingsForm.quantity_cap}
+                    value={detailForm.quantity_cap}
                     type="number"
-                    onChange={(v) => setSettingsForm(f => ({ ...f, quantity_cap: v }))}
+                    onChange={(v) => setDetailForm(f => ({ ...f, quantity_cap: v }))}
                     placeholder="No limit"
                     helpText="Maximum quantity to show on Amazon"
                   />
@@ -844,18 +1029,18 @@ export default function AmazonListingsPage() {
                   <FormLayout.Group>
                     <TextField
                       label="Minimum Margin (%)"
-                      value={settingsForm.min_margin_override}
+                      value={detailForm.min_margin_override}
                       type="number"
-                      onChange={(v) => setSettingsForm(f => ({ ...f, min_margin_override: v }))}
+                      onChange={(v) => setDetailForm(f => ({ ...f, min_margin_override: v }))}
                       placeholder="10 (default)"
                       suffix="%"
                       helpText="Minimum acceptable margin (default: 10%)"
                     />
                     <TextField
                       label="Target Margin (%)"
-                      value={settingsForm.target_margin_override}
+                      value={detailForm.target_margin_override}
                       type="number"
-                      onChange={(v) => setSettingsForm(f => ({ ...f, target_margin_override: v }))}
+                      onChange={(v) => setDetailForm(f => ({ ...f, target_margin_override: v }))}
                       placeholder="15 (default)"
                       suffix="%"
                       helpText="Target margin for pricing"
@@ -879,8 +1064,8 @@ export default function AmazonListingsPage() {
                     { label: 'Heavy Item', value: 'heavy_item' },
                     ...shippingOptions.map(o => ({ label: o.name, value: o.id })),
                   ]}
-                  value={settingsForm.shipping_rule}
-                  onChange={(v) => setSettingsForm(f => ({ ...f, shipping_rule: v }))}
+                  value={detailForm.shipping_rule}
+                  onChange={(v) => setDetailForm(f => ({ ...f, shipping_rule: v }))}
                   helpText="Shipping method for this listing"
                 />
               </BlockStack>
@@ -892,17 +1077,17 @@ export default function AmazonListingsPage() {
                 <Text variant="headingSm">Tags</Text>
                 <TextField
                   label="Tags"
-                  value={settingsForm.tags.join(', ')}
-                  onChange={(v) => setSettingsForm(f => ({
+                  value={detailForm.tags.join(', ')}
+                  onChange={(v) => setDetailForm(f => ({
                     ...f,
                     tags: v.split(',').map(t => t.trim()).filter(Boolean)
                   }))}
                   placeholder="tag1, tag2, tag3"
                   helpText="Comma-separated tags for organization and filtering"
                 />
-                {settingsForm.tags.length > 0 && (
+                {detailForm.tags.length > 0 && (
                   <InlineStack gap="200">
-                    {settingsForm.tags.map((tag, i) => (
+                    {detailForm.tags.map((tag, i) => (
                       <Tag key={i}>{tag}</Tag>
                     ))}
                   </InlineStack>
