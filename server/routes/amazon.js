@@ -683,6 +683,18 @@ router.get('/listings', requireAdmin, async (req, res) => {
 
     const { data: catalogItems, count, error } = await query;
 
+    // Handle missing table gracefully (migration not run yet)
+    if (error?.code === 'PGRST205' || error?.message?.includes('amazon_catalog')) {
+      console.warn('amazon_catalog table not found - returning empty listings');
+      return sendSuccess(res, {
+        listings: [],
+        total: 0,
+        mapped_count: 0,
+        unmapped_count: 0,
+        migration_needed: true,
+      });
+    }
+
     if (error) throw error;
 
     // Enrich with listing memory info
