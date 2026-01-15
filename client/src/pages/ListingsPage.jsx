@@ -19,7 +19,7 @@ import {
   ProgressBar,
   Tabs,
 } from '@shopify/polaris';
-import { getListings, createListing, getBoms } from '../utils/api.jsx';
+import { getListings, createListing, getBoms, getListingInventory, getSharedComponents } from '../utils/api.jsx';
 
 /**
  * ListingsPage lists all entries in the listing memory and allows
@@ -49,6 +49,13 @@ export default function ListingsPage() {
   // Tabs
   const [selectedTab, setSelectedTab] = useState(0);
 
+  // Inventory state
+  const [inventoryData, setInventoryData] = useState(null);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [sharedComponents, setSharedComponents] = useState(null);
+  const [inventoryFilter, setInventoryFilter] = useState('all');
+  const [selectedInventoryListing, setSelectedInventoryListing] = useState(null);
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -67,6 +74,30 @@ export default function ListingsPage() {
   useEffect(() => {
     load();
   }, []);
+
+  // Load inventory data when tab switches to inventory
+  async function loadInventory() {
+    setInventoryLoading(true);
+    try {
+      const [invData, sharedData] = await Promise.all([
+        getListingInventory(),
+        getSharedComponents()
+      ]);
+      setInventoryData(invData);
+      setSharedComponents(sharedData);
+    } catch (err) {
+      console.error('Failed to load inventory:', err);
+      setError(err.message || 'Failed to load inventory data');
+    } finally {
+      setInventoryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (selectedTab === 2 && !inventoryData && !inventoryLoading) {
+      loadInventory();
+    }
+  }, [selectedTab, inventoryData, inventoryLoading]);
 
   // Calculate stats
   const stats = useMemo(() => {
@@ -247,6 +278,7 @@ export default function ListingsPage() {
   const tabs = [
     { id: 'listings', content: `Listings (${filteredListings.length})`, accessibilityLabel: 'Listing Rules' },
     { id: 'stats', content: 'Statistics', accessibilityLabel: 'Statistics' },
+    { id: 'inventory', content: 'Inventory', accessibilityLabel: 'Inventory Availability' },
   ];
 
   const statsContent = (
@@ -575,13 +607,100 @@ export default function ListingsPage() {
                     )}
                   </Card>
                 </BlockStack>
-              ) : (
+              ) : selectedTab === 1 ? (
                 statsContent
+              ) : (
+                <InventoryContent
+                  inventoryData={inventoryData}
+                  inventoryLoading={inventoryLoading}
+                  sharedComponents={sharedComponents}
+                  inventoryFilter={inventoryFilter}
+                  setInventoryFilter={setInventoryFilter}
+                  onRefresh={loadInventory}
+                  onSelectListing={setSelectedInventoryListing}
+                />
               )}
             </Tabs>
           </BlockStack>
         </Layout.Section>
       </Layout>
+
+      {/* Inventory Listing Detail Modal */}
+      {selectedInventoryListing && (
+        <Modal
+          open={!!selectedInventoryListing}
+          onClose={() => setSelectedInventoryListing(null)}
+          title="Listing Inventory Details"
+          large
+        >
+          <Modal.Section>
+            <BlockStack gap="400">
+              <InlineStack gap="800">
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">ASIN</Text>
+                  <Text variant="bodyMd" fontWeight="semibold">
+                    {selectedInventoryListing.asin || '-'}
+                  </Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">SKU</Text>
+                  <Text variant="bodyMd" fontWeight="semibold">
+                    {selectedInventoryListing.sku || '-'}
+                  </Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">BOM</Text>
+                  <Badge tone="info">{selectedInventoryListing.bundle_sku}</Badge>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Max Sellable</Text>
+                  <Text
+                    variant="headingMd"
+                    fontWeight="bold"
+                    tone={selectedInventoryListing.max_sellable === 0 ? 'critical' : selectedInventoryListing.max_sellable <= 3 ? 'caution' : undefined}
+                  >
+                    {selectedInventoryListing.max_sellable}
+                  </Text>
+                </BlockStack>
+              </InlineStack>
+
+              <Divider />
+
+              <BlockStack gap="200">
+                <Text variant="headingSm">Component Availability</Text>
+                <DataTable
+                  columnContentTypes={['text', 'numeric', 'numeric', 'numeric', 'numeric', 'text']}
+                  headings={['Component', 'Required', 'On Hand', 'Reserved', 'Available', 'Status']}
+                  rows={(selectedInventoryListing.components || []).map((c) => [
+                    <BlockStack gap="100" key={c.component_id}>
+                      <Text variant="bodyMd" fontWeight="semibold">{c.internal_sku}</Text>
+                      <Text variant="bodySm" tone="subdued">{c.description || ''}</Text>
+                    </BlockStack>,
+                    c.qty_required,
+                    c.on_hand,
+                    c.reserved,
+                    c.available,
+                    c.is_constraint ? (
+                      <Badge tone="critical">Constraint</Badge>
+                    ) : (
+                      <Badge tone="success">OK</Badge>
+                    ),
+                  ])}
+                />
+              </BlockStack>
+
+              {selectedInventoryListing.constraint_internal_sku && (
+                <Banner tone="warning">
+                  <p>
+                    <strong>{selectedInventoryListing.constraint_internal_sku}</strong> is the constraining component
+                    limiting sales of this listing to {selectedInventoryListing.max_sellable} units.
+                  </p>
+                </Banner>
+              )}
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
+      )}
 
       {/* Listing Detail Modal */}
       {selectedListing && (
@@ -715,5 +834,231 @@ export default function ListingsPage() {
         </Modal>
       )}
     </Page>
+  );
+}
+
+/**
+ * InventoryContent - Sub-component displaying inventory availability data
+ */
+function InventoryContent({
+  inventoryData,
+  inventoryLoading,
+  sharedComponents,
+  inventoryFilter,
+  setInventoryFilter,
+  onRefresh,
+  onSelectListing,
+}) {
+  // Get stock status badge
+  function getStockStatusBadge(status) {
+    const statusMap = {
+      OUT_OF_STOCK: { tone: 'critical', label: 'Out of Stock' },
+      LOW_STOCK: { tone: 'warning', label: 'Low Stock' },
+      MODERATE_STOCK: { tone: 'attention', label: 'Moderate' },
+      IN_STOCK: { tone: 'success', label: 'In Stock' },
+    };
+    const config = statusMap[status] || { tone: 'default', label: status };
+    return <Badge tone={config.tone}>{config.label}</Badge>;
+  }
+
+  // Get risk level badge
+  function getRiskBadge(level) {
+    const riskMap = {
+      CRITICAL: { tone: 'critical', label: 'Critical' },
+      HIGH: { tone: 'warning', label: 'High Risk' },
+      MEDIUM: { tone: 'attention', label: 'Medium' },
+      LOW: { tone: 'success', label: 'Low' },
+    };
+    const config = riskMap[level] || { tone: 'default', label: level };
+    return <Badge tone={config.tone}>{config.label}</Badge>;
+  }
+
+  // Filter listings
+  const filteredInventory = useMemo(() => {
+    if (!inventoryData?.listings) return [];
+    if (inventoryFilter === 'all') return inventoryData.listings;
+    return inventoryData.listings.filter((l) => l.stock_status === inventoryFilter);
+  }, [inventoryData, inventoryFilter]);
+
+  if (inventoryLoading) {
+    return (
+      <div style={{ padding: '60px', textAlign: 'center' }}>
+        <Spinner accessibilityLabel="Loading inventory" size="large" />
+        <Text variant="bodySm" tone="subdued">Loading inventory availability...</Text>
+      </div>
+    );
+  }
+
+  if (!inventoryData) {
+    return (
+      <Card>
+        <BlockStack gap="200" inlineAlign="center">
+          <Text variant="headingMd">No inventory data</Text>
+          <Text tone="subdued">Click refresh to load inventory availability data.</Text>
+          <Button onClick={onRefresh}>Load Inventory</Button>
+        </BlockStack>
+      </Card>
+    );
+  }
+
+  return (
+    <BlockStack gap="400">
+      {/* Summary Cards */}
+      <Layout>
+        <Layout.Section variant="oneQuarter">
+          <Card>
+            <BlockStack gap="200">
+              <Text variant="bodySm" tone="subdued">Total Listings</Text>
+              <Text variant="headingLg" fontWeight="bold">{inventoryData.total || 0}</Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+        <Layout.Section variant="oneQuarter">
+          <Card>
+            <BlockStack gap="200">
+              <Text variant="bodySm" tone="subdued">Out of Stock</Text>
+              <Text
+                variant="headingLg"
+                fontWeight="bold"
+                tone={inventoryData.out_of_stock_count > 0 ? 'critical' : undefined}
+              >
+                {inventoryData.out_of_stock_count || 0}
+              </Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+        <Layout.Section variant="oneQuarter">
+          <Card>
+            <BlockStack gap="200">
+              <Text variant="bodySm" tone="subdued">Low Stock</Text>
+              <Text
+                variant="headingLg"
+                fontWeight="bold"
+                tone={inventoryData.low_stock_count > 0 ? 'caution' : undefined}
+              >
+                {inventoryData.low_stock_count || 0}
+              </Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+        <Layout.Section variant="oneQuarter">
+          <Card>
+            <BlockStack gap="200">
+              <Text variant="bodySm" tone="subdued">Location</Text>
+              <Text variant="headingLg" fontWeight="bold">{inventoryData.location || 'Warehouse'}</Text>
+            </BlockStack>
+          </Card>
+        </Layout.Section>
+      </Layout>
+
+      {/* Shared Components Warning */}
+      {sharedComponents?.shared_components?.length > 0 && (
+        <Card>
+          <BlockStack gap="300">
+            <InlineStack align="space-between">
+              <Text variant="headingMd">Shared Components ({sharedComponents.total})</Text>
+              {(sharedComponents.critical_count > 0 || sharedComponents.high_risk_count > 0) && (
+                <Badge tone="warning">
+                  {sharedComponents.critical_count + sharedComponents.high_risk_count} at risk
+                </Badge>
+              )}
+            </InlineStack>
+            <Banner tone="info">
+              <p>
+                These components are used in multiple BOMs. Low stock can affect multiple listings simultaneously.
+              </p>
+            </Banner>
+            <DataTable
+              columnContentTypes={['text', 'numeric', 'numeric', 'numeric', 'text']}
+              headings={['Component', 'BOMs', 'Listings', 'Available', 'Risk']}
+              rows={sharedComponents.shared_components.slice(0, 10).map((c) => [
+                <BlockStack gap="100" key={c.component_id}>
+                  <Text variant="bodyMd" fontWeight="semibold">{c.internal_sku}</Text>
+                  <Text variant="bodySm" tone="subdued">{c.description || ''}</Text>
+                </BlockStack>,
+                c.bom_count,
+                c.listing_count,
+                c.available,
+                getRiskBadge(c.risk_level),
+              ])}
+            />
+            {sharedComponents.shared_components.length > 10 && (
+              <Text variant="bodySm" tone="subdued">
+                Showing 10 of {sharedComponents.shared_components.length} shared components
+              </Text>
+            )}
+          </BlockStack>
+        </Card>
+      )}
+
+      {/* Filter and Listing Table */}
+      <Card>
+        <BlockStack gap="300">
+          <InlineStack align="space-between">
+            <InlineStack gap="400">
+              <Select
+                label="Filter by stock status"
+                labelHidden
+                options={[
+                  { label: 'All listings', value: 'all' },
+                  { label: 'Out of Stock', value: 'OUT_OF_STOCK' },
+                  { label: 'Low Stock', value: 'LOW_STOCK' },
+                  { label: 'Moderate Stock', value: 'MODERATE_STOCK' },
+                  { label: 'In Stock', value: 'IN_STOCK' },
+                ]}
+                value={inventoryFilter}
+                onChange={setInventoryFilter}
+              />
+              <Text variant="bodySm" tone="subdued">
+                {filteredInventory.length} listing{filteredInventory.length !== 1 ? 's' : ''}
+              </Text>
+            </InlineStack>
+            <Button onClick={onRefresh}>Refresh</Button>
+          </InlineStack>
+
+          {filteredInventory.length === 0 ? (
+            <div style={{ padding: '40px', textAlign: 'center' }}>
+              <Text tone="subdued">No listings match the selected filter.</Text>
+            </div>
+          ) : (
+            <DataTable
+              columnContentTypes={['text', 'text', 'text', 'numeric', 'text', 'text']}
+              headings={['ASIN', 'SKU', 'BOM', 'Max Sellable', 'Constraint', 'Status']}
+              rows={filteredInventory.map((l) => [
+                <Text
+                  variant="bodyMd"
+                  fontWeight="semibold"
+                  key={`asin-${l.listing_id}`}
+                  as="button"
+                  onClick={() => onSelectListing(l)}
+                  style={{ cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  {l.asin || '-'}
+                </Text>,
+                l.sku || '-',
+                <Badge tone="info" key={`bom-${l.listing_id}`}>{l.bundle_sku}</Badge>,
+                <Text
+                  variant="bodyMd"
+                  fontWeight="bold"
+                  key={`qty-${l.listing_id}`}
+                  tone={l.max_sellable === 0 ? 'critical' : l.max_sellable <= 3 ? 'caution' : undefined}
+                >
+                  {l.max_sellable}
+                </Text>,
+                l.constraint_internal_sku ? (
+                  <Text variant="bodySm" tone="subdued" key={`constraint-${l.listing_id}`}>
+                    {l.constraint_internal_sku}
+                  </Text>
+                ) : (
+                  '-'
+                ),
+                getStockStatusBadge(l.stock_status),
+              ])}
+              footerContent={`${filteredInventory.length} listing(s)`}
+            />
+          )}
+        </BlockStack>
+      </Card>
+    </BlockStack>
   );
 }

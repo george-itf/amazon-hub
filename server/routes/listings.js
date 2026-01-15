@@ -24,6 +24,355 @@ function sanitizeSearchInput(input) {
 }
 
 /**
+ * GET /listings/inventory
+ * Returns all listings with BOM-based inventory availability
+ * Shows max sellable quantity per listing and constraint info
+ */
+router.get('/inventory', async (req, res) => {
+  const { location = 'Warehouse', include_inactive = 'false' } = req.query;
+
+  try {
+    const { data: result, error } = await supabase.rpc('rpc_get_listing_inventory', {
+      p_location: location,
+      p_include_inactive: include_inactive === 'true'
+    });
+
+    if (error) {
+      // If RPC doesn't exist yet, fall back to manual calculation
+      if (error.message?.includes('function') || error.code === '42883') {
+        console.warn('rpc_get_listing_inventory not found - using fallback calculation');
+        return await calculateListingInventoryFallback(req, res, location, include_inactive === 'true');
+      }
+      console.error('Listing inventory fetch error:', error);
+      return errors.internal(res, `Failed to fetch listing inventory: ${error.message}`);
+    }
+
+    // Handle RPC result format
+    if (result?.ok === false) {
+      return errors.internal(res, result.error?.message || 'Failed to fetch listing inventory');
+    }
+
+    sendSuccess(res, result?.data || result);
+  } catch (err) {
+    console.error('Listing inventory fetch error:', err);
+    errors.internal(res, `Failed to fetch listing inventory: ${err.message}`);
+  }
+});
+
+/**
+ * Fallback calculation when RPC is not available
+ */
+async function calculateListingInventoryFallback(req, res, location, includeInactive) {
+  try {
+    // Get all active listings with BOMs
+    let listingQuery = supabase
+      .from('listing_memory')
+      .select(`
+        id,
+        asin,
+        sku,
+        title_fingerprint,
+        is_active,
+        bom_id,
+        boms (
+          id,
+          bundle_sku,
+          description,
+          is_active,
+          bom_components (
+            component_id,
+            qty_required,
+            components (
+              id,
+              internal_sku,
+              description
+            )
+          )
+        )
+      `)
+      .not('bom_id', 'is', null);
+
+    if (!includeInactive) {
+      listingQuery = listingQuery.eq('is_active', true);
+    }
+
+    const { data: listings, error: listingsError } = await listingQuery;
+
+    if (listingsError) {
+      console.error('Fallback listings fetch error:', listingsError);
+      return errors.internal(res, 'Failed to fetch listings');
+    }
+
+    // Get all stock for location
+    const { data: allStock, error: stockError } = await supabase
+      .from('component_stock')
+      .select('component_id, on_hand, reserved')
+      .eq('location', location);
+
+    if (stockError) {
+      console.error('Fallback stock fetch error:', stockError);
+      return errors.internal(res, 'Failed to fetch stock');
+    }
+
+    const stockMap = new Map(
+      (allStock || []).map(s => [s.component_id, {
+        on_hand: s.on_hand || 0,
+        reserved: s.reserved || 0,
+        available: (s.on_hand || 0) - (s.reserved || 0)
+      }])
+    );
+
+    // Calculate availability for each listing
+    const results = [];
+    let outOfStockCount = 0;
+    let lowStockCount = 0;
+
+    for (const listing of listings || []) {
+      if (!listing.boms || (!includeInactive && !listing.boms.is_active)) continue;
+
+      let minBuildable = Infinity;
+      let constraintComponentId = null;
+      let constraintInternalSku = null;
+      const components = [];
+
+      for (const bc of listing.boms.bom_components || []) {
+        const stock = stockMap.get(bc.component_id) || { on_hand: 0, reserved: 0, available: 0 };
+        const available = Math.max(0, stock.available);
+        const buildable = Math.floor(available / bc.qty_required);
+
+        components.push({
+          component_id: bc.component_id,
+          internal_sku: bc.components?.internal_sku,
+          description: bc.components?.description,
+          qty_required: bc.qty_required,
+          on_hand: stock.on_hand,
+          reserved: stock.reserved,
+          available,
+          buildable,
+          is_constraint: false
+        });
+
+        if (buildable < minBuildable) {
+          minBuildable = buildable;
+          constraintComponentId = bc.component_id;
+          constraintInternalSku = bc.components?.internal_sku;
+        }
+      }
+
+      // Mark constraint components
+      components.forEach(c => {
+        if (c.component_id === constraintComponentId) {
+          c.is_constraint = true;
+        }
+      });
+
+      if (minBuildable === Infinity) minBuildable = 0;
+
+      const stockStatus = minBuildable === 0 ? 'OUT_OF_STOCK'
+        : minBuildable <= 3 ? 'LOW_STOCK'
+        : minBuildable <= 10 ? 'MODERATE_STOCK'
+        : 'IN_STOCK';
+
+      if (stockStatus === 'OUT_OF_STOCK') outOfStockCount++;
+      if (stockStatus === 'LOW_STOCK') lowStockCount++;
+
+      results.push({
+        listing_id: listing.id,
+        asin: listing.asin,
+        sku: listing.sku,
+        title_fingerprint: listing.title_fingerprint,
+        is_active: listing.is_active,
+        bom_id: listing.bom_id,
+        bundle_sku: listing.boms.bundle_sku,
+        bom_description: listing.boms.description,
+        bom_is_active: listing.boms.is_active,
+        max_sellable: minBuildable,
+        constraint_component_id: constraintComponentId,
+        constraint_internal_sku: constraintInternalSku,
+        components,
+        stock_status: stockStatus
+      });
+    }
+
+    sendSuccess(res, {
+      listings: results,
+      location,
+      total: results.length,
+      out_of_stock_count: outOfStockCount,
+      low_stock_count: lowStockCount
+    });
+  } catch (err) {
+    console.error('Fallback calculation error:', err);
+    errors.internal(res, `Failed to calculate listing inventory: ${err.message}`);
+  }
+}
+
+/**
+ * GET /listings/shared-components
+ * Returns components shared across multiple BOMs/listings
+ * Useful for identifying overselling risks
+ */
+router.get('/shared-components', async (req, res) => {
+  const { location = 'Warehouse' } = req.query;
+
+  try {
+    const { data: result, error } = await supabase.rpc('rpc_get_shared_components_report', {
+      p_location: location
+    });
+
+    if (error) {
+      // Fall back to manual calculation if RPC doesn't exist
+      if (error.message?.includes('function') || error.code === '42883') {
+        console.warn('rpc_get_shared_components_report not found - using fallback');
+        return await calculateSharedComponentsFallback(req, res, location);
+      }
+      console.error('Shared components fetch error:', error);
+      return errors.internal(res, `Failed to fetch shared components: ${error.message}`);
+    }
+
+    if (result?.ok === false) {
+      return errors.internal(res, result.error?.message || 'Failed to fetch shared components');
+    }
+
+    sendSuccess(res, result?.data || result);
+  } catch (err) {
+    console.error('Shared components fetch error:', err);
+    errors.internal(res, `Failed to fetch shared components: ${err.message}`);
+  }
+});
+
+/**
+ * Fallback for shared components when RPC not available
+ */
+async function calculateSharedComponentsFallback(req, res, location) {
+  try {
+    // Get components used in multiple BOMs
+    const { data: bomComponents, error: bcError } = await supabase
+      .from('bom_components')
+      .select(`
+        component_id,
+        qty_required,
+        bom_id,
+        components (
+          id,
+          internal_sku,
+          description,
+          brand,
+          is_active
+        ),
+        boms (
+          id,
+          is_active
+        )
+      `);
+
+    if (bcError) {
+      return errors.internal(res, 'Failed to fetch BOM components');
+    }
+
+    // Group by component
+    const componentUsage = new Map();
+    for (const bc of bomComponents || []) {
+      if (!bc.boms?.is_active || !bc.components?.is_active) continue;
+
+      if (!componentUsage.has(bc.component_id)) {
+        componentUsage.set(bc.component_id, {
+          component: bc.components,
+          bom_ids: new Set()
+        });
+      }
+      componentUsage.get(bc.component_id).bom_ids.add(bc.bom_id);
+    }
+
+    // Filter to components in multiple BOMs
+    const sharedComponents = Array.from(componentUsage.entries())
+      .filter(([_, data]) => data.bom_ids.size > 1)
+      .map(([componentId, data]) => ({
+        component_id: componentId,
+        internal_sku: data.component.internal_sku,
+        description: data.component.description,
+        brand: data.component.brand,
+        bom_count: data.bom_ids.size
+      }));
+
+    // Get stock for these components
+    const componentIds = sharedComponents.map(c => c.component_id);
+    const { data: stock } = await supabase
+      .from('component_stock')
+      .select('component_id, on_hand, reserved')
+      .in('component_id', componentIds)
+      .eq('location', location);
+
+    const stockMap = new Map(
+      (stock || []).map(s => [s.component_id, s])
+    );
+
+    // Get listing counts
+    const { data: listings } = await supabase
+      .from('listing_memory')
+      .select('id, bom_id')
+      .eq('is_active', true);
+
+    const bomListingCount = new Map();
+    for (const listing of listings || []) {
+      if (listing.bom_id) {
+        bomListingCount.set(listing.bom_id, (bomListingCount.get(listing.bom_id) || 0) + 1);
+      }
+    }
+
+    let criticalCount = 0;
+    let highRiskCount = 0;
+
+    const results = sharedComponents.map(c => {
+      const s = stockMap.get(c.component_id);
+      const onHand = s?.on_hand || 0;
+      const reserved = s?.reserved || 0;
+      const available = Math.max(0, onHand - reserved);
+
+      // Count listings using this component
+      const usage = componentUsage.get(c.component_id);
+      let listingCount = 0;
+      for (const bomId of usage.bom_ids) {
+        listingCount += bomListingCount.get(bomId) || 0;
+      }
+
+      const riskLevel = available === 0 ? 'CRITICAL'
+        : available < c.bom_count * 2 ? 'HIGH'
+        : available < c.bom_count * 5 ? 'MEDIUM'
+        : 'LOW';
+
+      if (riskLevel === 'CRITICAL') criticalCount++;
+      if (riskLevel === 'HIGH') highRiskCount++;
+
+      return {
+        ...c,
+        on_hand: onHand,
+        reserved,
+        available,
+        listing_count: listingCount,
+        risk_level: riskLevel
+      };
+    });
+
+    results.sort((a, b) => {
+      const riskOrder = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3 };
+      return (riskOrder[a.risk_level] || 4) - (riskOrder[b.risk_level] || 4);
+    });
+
+    sendSuccess(res, {
+      shared_components: results,
+      location,
+      total: results.length,
+      critical_count: criticalCount,
+      high_risk_count: highRiskCount
+    });
+  } catch (err) {
+    console.error('Shared components fallback error:', err);
+    errors.internal(res, `Failed to calculate shared components: ${err.message}`);
+  }
+}
+
+/**
  * GET /listings
  * Returns all listing memory entries
  */
