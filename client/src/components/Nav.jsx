@@ -17,7 +17,7 @@ import {
   KeyboardIcon,
   SearchIcon,
   CheckIcon,
-  StoreMajor,
+  StoreIcon,
   DeliveryIcon,
 } from '@shopify/polaris-icons';
 import { useAuth } from '../context/AuthContext.jsx';
@@ -55,7 +55,7 @@ export default function Nav() {
   ];
 
   const integrationsItems = [
-    { label: 'Amazon', url: '/amazon', icon: StoreMajor },
+    { label: 'Amazon', url: '/amazon', icon: StoreIcon },
   ];
 
   return (

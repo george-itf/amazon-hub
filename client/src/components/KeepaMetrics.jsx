@@ -11,7 +11,45 @@ import {
   Divider,
   ProgressBar,
 } from '@shopify/polaris';
-import { getKeepaProduct, getKeepaMetrics } from '../utils/api.jsx';
+import { getKeepaProduct, getKeepaMetrics, getKeepaStatus } from '../utils/api.jsx';
+
+/**
+ * Extract current value from Keepa CSV array
+ * CSV arrays contain alternating [time, value, time, value, ...]
+ */
+function extractLatestFromCsv(csvArray) {
+  if (!csvArray || !Array.isArray(csvArray) || csvArray.length < 2) return null;
+  const value = csvArray[csvArray.length - 1];
+  // -1 and -2 are Keepa's markers for "no data"
+  if (value === -1 || value === -2) return null;
+  return value;
+}
+
+/**
+ * Transform raw Keepa product data to usable format
+ * Keepa CSV indices: 0=Amazon, 1=New, 2=Used, 3=SalesRank, 11=OfferCount, 16=Rating, 17=Reviews, 18=BuyBox
+ */
+function transformKeepaData(rawData) {
+  if (!rawData) return null;
+
+  const csv = rawData.csv || [];
+
+  return {
+    title: rawData.title || null,
+    brand: rawData.brand || null,
+    category: rawData.categoryTree?.[0]?.name || null,
+    buybox_price_pence: extractLatestFromCsv(csv[18]) || extractLatestFromCsv(csv[0]),
+    amazon_price_pence: extractLatestFromCsv(csv[0]),
+    new_price_pence: extractLatestFromCsv(csv[1]),
+    sales_rank: extractLatestFromCsv(csv[3]),
+    offer_count: extractLatestFromCsv(csv[11]),
+    rating: extractLatestFromCsv(csv[16]) ? extractLatestFromCsv(csv[16]) / 10 : null,
+    review_count: extractLatestFromCsv(csv[17]),
+    image_url: rawData.imagesCSV
+      ? `https://images-na.ssl-images-amazon.com/images/I/${rawData.imagesCSV.split(',')[0]}`
+      : null,
+  };
+}
 
 /**
  * Format price from pence to pounds
@@ -244,9 +282,10 @@ export function KeepaMetricsCompact({ asin, showPrice = true, showRank = true, s
   }, [asin]);
 
   if (loading) return <Spinner size="small" />;
-  if (error || !data) return <Text variant="bodySm" tone="subdued">-</Text>;
+  if (error || !data?.data) return <Text variant="bodySm" tone="subdued">-</Text>;
 
-  const payload = data.payload;
+  // Transform raw Keepa data to usable format
+  const payload = transformKeepaData(data.data);
   if (!payload) return <Text variant="bodySm" tone="subdued">-</Text>;
 
   return (
@@ -340,7 +379,7 @@ export default function KeepaMetrics({ asin, showCharts = true, compact = false 
     );
   }
 
-  if (!product?.payload) {
+  if (!product?.data) {
     return (
       <Card>
         <BlockStack gap="200">
@@ -358,7 +397,8 @@ export default function KeepaMetrics({ asin, showCharts = true, compact = false 
     );
   }
 
-  const payload = product.payload;
+  // Transform raw Keepa data to usable format
+  const payload = transformKeepaData(product.data);
   const fromCache = product.from_cache;
   const fetchedAt = product.fetched_at ? new Date(product.fetched_at) : null;
 
@@ -378,7 +418,7 @@ export default function KeepaMetrics({ asin, showCharts = true, compact = false 
             <Text variant="headingSm">Market Data</Text>
             <InlineStack gap="100" blockAlign="center">
               {fromCache && (
-                <Badge tone="info" size="small">Cached</Badge>
+                <Badge tone="info">Cached</Badge>
               )}
               <Button size="slim" onClick={handleRefresh} loading={refreshing}>
                 Refresh
@@ -564,7 +604,6 @@ export function KeepaStatusCard() {
   useEffect(() => {
     async function loadStatus() {
       try {
-        const { getKeepaStatus } = await import('../utils/api.jsx');
         const data = await getKeepaStatus();
         setStatus(data);
       } catch (err) {
@@ -650,11 +689,13 @@ export function KeepaStatusCard() {
           <InlineStack gap="300">
             <BlockStack gap="050">
               <Text variant="bodySm" tone="subdued">Cached</Text>
-              <Text variant="bodyMd" fontWeight="semibold">{status.cache.total || 0}</Text>
+              <Text variant="bodyMd" fontWeight="semibold">{status.cache.total_products || 0}</Text>
             </BlockStack>
             <BlockStack gap="050">
               <Text variant="bodySm" tone="subdued">Fresh</Text>
-              <Text variant="bodyMd" fontWeight="semibold">{status.cache.fresh || 0}</Text>
+              <Text variant="bodyMd" fontWeight="semibold">
+                {(status.cache.total_products || 0) - (status.cache.stale_products || 0)}
+              </Text>
             </BlockStack>
           </InlineStack>
         )}
