@@ -459,8 +459,8 @@ export default function BundlesPage() {
 
   return (
     <Page
-      title="BOMs / Bundles"
-      subtitle={`${stats.total} bundles · ${stats.inStock} in stock · ${stats.outOfStock} unavailable`}
+      title="Product Catalog"
+      subtitle={`${stats.total} products · ${stats.inStock} available · ${stats.outOfStock} out of stock`}
       secondaryActions={[{ content: 'Refresh', onAction: load }]}
     >
       <Layout>
@@ -469,7 +469,7 @@ export default function BundlesPage() {
             {/* Stats Card */}
             <Card>
               <BlockStack gap="300">
-                <Text variant="headingMd">Bundle Availability</Text>
+                <Text variant="headingMd">Product Availability</Text>
                 <InlineStack gap="400">
                   <BlockStack gap="100">
                     <Text variant="bodySm" tone="subdued">Available</Text>

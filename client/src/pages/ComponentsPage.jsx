@@ -251,10 +251,15 @@ export default function ComponentsPage() {
     </InlineStack>,
   ]);
 
+  // Calculate alert message
+  const alertCount = stats.lowStock + stats.outOfStock;
+
   return (
     <Page
-      title="Components"
-      subtitle={`${stats.total} components · £${(stats.totalValue / 100).toFixed(2)} total value`}
+      title="Inventory"
+      subtitle={alertCount > 0
+        ? `${alertCount} item${alertCount > 1 ? 's' : ''} need attention • ${stats.total} total SKUs`
+        : `${stats.total} SKUs • £${(stats.totalValue / 100).toFixed(2)} total value`}
       secondaryActions={[{ content: 'Refresh', onAction: load }]}
     >
       <Layout>
@@ -263,7 +268,7 @@ export default function ComponentsPage() {
             {/* Stats Cards */}
             <Card>
               <BlockStack gap="300">
-                <Text variant="headingMd">Inventory Status</Text>
+                <Text variant="headingMd">Stock Health</Text>
                 <InlineStack gap="400">
                   <BlockStack gap="100">
                     <Text variant="bodySm" tone="subdued">In Stock</Text>
@@ -293,10 +298,10 @@ export default function ComponentsPage() {
               </BlockStack>
             </Card>
 
-            {/* Add Component Form */}
+            {/* Add Inventory Item Form */}
             <Card>
               <BlockStack gap="400">
-                <Text variant="headingMd">Add Component</Text>
+                <Text variant="headingMd">Add Inventory Item</Text>
 
                 {createError && (
                   <Banner tone="critical" onDismiss={() => setCreateError(null)}>
