@@ -33,6 +33,7 @@ router.get('/status', async (req, res) => {
     sendSuccess(res, {
       connected: true,
       configured: true,
+      applicationId: spApiClient.applicationId,
       marketplaceId: spApiClient.marketplaceId,
       message: 'Connected to Amazon SP-API',
     });

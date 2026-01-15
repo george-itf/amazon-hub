@@ -22,9 +22,14 @@ const UK_MARKETPLACE_ID = 'A1F83G8C2ARO7P';
  */
 class SpApiClient {
   constructor() {
+    // LWA (Login With Amazon) credentials for OAuth
     this.clientId = process.env.SP_API_CLIENT_ID;
     this.clientSecret = process.env.SP_API_CLIENT_SECRET;
     this.refreshToken = process.env.SP_API_REFRESH_TOKEN;
+
+    // SP-API Application ID (for identification)
+    this.applicationId = process.env.SP_API_APPLICATION_ID;
+
     this.endpoint = ENDPOINTS.EU; // UK is in EU region
     this.marketplaceId = process.env.SP_API_MARKETPLACE_ID || UK_MARKETPLACE_ID;
 
