@@ -46,7 +46,6 @@ export default function Nav() {
         { label: 'Pending Shipment', url: '/orders?status=READY_TO_PICK' },
         { label: 'Needs Review', url: '/review' },
         { label: 'Pick Lists', url: '/picklists' },
-        { label: 'Shipping', url: '/shipping' },
       ],
     },
     {
@@ -59,17 +58,22 @@ export default function Nav() {
         { label: 'Returns', url: '/returns' },
       ],
     },
+    {
+      label: 'Shipping',
+      url: '/shipping',
+      icon: DeliveryIcon,
+    },
   ];
 
   // Catalog management
   const catalogItems = [
     {
-      label: 'Products',
-      url: '/bundles',
+      label: 'Listings',
+      url: '/listings',
       icon: ProductIcon,
       subNavigationItems: [
+        { label: 'All Listings', url: '/listings', exactMatch: true },
         { label: 'BOMs & Bundles', url: '/bundles' },
-        { label: 'Listings', url: '/listings' },
         { label: 'BOM Review', url: '/bom-review' },
       ],
     },
@@ -96,6 +100,11 @@ export default function Nav() {
 
   // Settings & configuration
   const settingsItems = [
+    {
+      label: 'System Health',
+      url: '/settings',
+      icon: AlertCircleIcon,
+    },
     {
       label: 'Amazon Settings',
       url: '/amazon',
