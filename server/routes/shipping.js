@@ -952,6 +952,145 @@ router.get('/today-cost', requireStaff, async (req, res) => {
   }
 });
 
+// ============================================================================
+// SHIPPING RULES CRUD
+// ============================================================================
+
+/**
+ * GET /shipping/rules - List all shipping rules
+ */
+router.get('/rules', async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('shipping_rules')
+      .select('*')
+      .order('name', { ascending: true });
+
+    if (error) throw error;
+
+    res.json({ rules: data || [] });
+  } catch (err) {
+    console.error('Failed to get shipping rules:', err);
+    errors.internal(res, 'Failed to get shipping rules');
+  }
+});
+
+/**
+ * POST /shipping/rules - Create a shipping rule
+ */
+router.post('/rules', async (req, res) => {
+  try {
+    const {
+      name,
+      description,
+      service_code,
+      max_weight_grams,
+      max_length_cm,
+      max_width_cm,
+      max_height_cm,
+      base_cost_pence,
+      is_active
+    } = req.body;
+
+    if (!name) {
+      return errors.badRequest(res, 'Rule name is required');
+    }
+
+    const { data, error } = await supabase
+      .from('shipping_rules')
+      .insert({
+        name,
+        description: description || null,
+        service_code: service_code || 'CRL1',
+        max_weight_grams: max_weight_grams || null,
+        max_length_cm: max_length_cm || null,
+        max_width_cm: max_width_cm || null,
+        max_height_cm: max_height_cm || null,
+        base_cost_pence: base_cost_pence || null,
+        is_active: is_active !== false
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    res.status(201).json({ rule: data });
+  } catch (err) {
+    console.error('Failed to create shipping rule:', err);
+    errors.internal(res, 'Failed to create shipping rule');
+  }
+});
+
+/**
+ * PUT /shipping/rules/:id - Update a shipping rule
+ */
+router.put('/rules/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      name,
+      description,
+      service_code,
+      max_weight_grams,
+      max_length_cm,
+      max_width_cm,
+      max_height_cm,
+      base_cost_pence,
+      is_active
+    } = req.body;
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (service_code !== undefined) updateData.service_code = service_code;
+    if (max_weight_grams !== undefined) updateData.max_weight_grams = max_weight_grams;
+    if (max_length_cm !== undefined) updateData.max_length_cm = max_length_cm;
+    if (max_width_cm !== undefined) updateData.max_width_cm = max_width_cm;
+    if (max_height_cm !== undefined) updateData.max_height_cm = max_height_cm;
+    if (base_cost_pence !== undefined) updateData.base_cost_pence = base_cost_pence;
+    if (is_active !== undefined) updateData.is_active = is_active;
+
+    const { data, error } = await supabase
+      .from('shipping_rules')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    if (!data) {
+      return errors.notFound(res, 'Shipping rule not found');
+    }
+
+    res.json({ rule: data });
+  } catch (err) {
+    console.error('Failed to update shipping rule:', err);
+    errors.internal(res, 'Failed to update shipping rule');
+  }
+});
+
+/**
+ * DELETE /shipping/rules/:id - Delete a shipping rule
+ */
+router.delete('/rules/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { error } = await supabase
+      .from('shipping_rules')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
+    res.json({ success: true, message: 'Shipping rule deleted' });
+  } catch (err) {
+    console.error('Failed to delete shipping rule:', err);
+    errors.internal(res, 'Failed to delete shipping rule');
+  }
+});
+
 /**
  * Estimate label cost based on service code
  * Used for dry-run simulations
