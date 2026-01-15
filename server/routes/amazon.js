@@ -1068,6 +1068,235 @@ router.post('/scheduler/settings', requireAdmin, async (req, res) => {
 });
 
 /**
+ * POST /amazon/inventory/push
+ * Push safe allocated quantities to Amazon FBM listings
+ * Requires ADMIN and Idempotency-Key header
+ */
+router.post('/inventory/push', requireAdmin, async (req, res) => {
+  const {
+    location = 'Warehouse',
+    dry_run = true,
+    only_mapped = true,
+    limit = 50,
+  } = req.body;
+
+  // Require idempotency key for safety
+  const idempotencyKey = req.headers['idempotency-key'];
+  if (!idempotencyKey) {
+    return errors.badRequest(res, 'Idempotency-Key header is required for inventory push');
+  }
+
+  // Safety cap
+  const maxUpdates = Math.min(limit || 50, 200);
+
+  try {
+    // Import the allocation algorithm
+    const { allocatePool, computeRecommendations } = await import('../utils/poolAllocation.js');
+
+    // Step 1: Get pool allocation data
+    const { data: poolResult, error: poolError } = await supabase
+      .rpc('rpc_get_pool_allocation_data', { p_location: location });
+
+    if (poolError) {
+      console.warn('Pool RPC not available, using fallback:', poolError.message);
+    }
+
+    // Step 2: Get non-pooled BOMs data
+    const { data: nonPooledResult, error: nonPooledError } = await supabase
+      .rpc('rpc_get_non_pooled_boms', { p_location: location });
+
+    if (nonPooledError) {
+      console.warn('Non-pooled RPC not available, using fallback:', nonPooledError.message);
+    }
+
+    // Parse RPC results
+    const poolData = poolResult?.ok ? poolResult.data : { pools: [] };
+    const nonPooledData = nonPooledResult?.ok ? nonPooledResult.data : { boms: [] };
+
+    // Step 3: Compute recommendations using allocation algorithm
+    const recommendations = computeRecommendations(poolData, nonPooledData);
+
+    // Create a map of bom_id -> recommended_qty
+    const bomRecommendations = new Map();
+    for (const rec of recommendations) {
+      bomRecommendations.set(rec.bom_id, rec);
+    }
+
+    // Step 4: Get listing_memory entries with SKU and BOM mapping
+    // These represent Amazon seller SKUs we control
+    let listingQuery = supabase
+      .from('listing_memory')
+      .select(`
+        id,
+        asin,
+        sku,
+        bom_id,
+        boms (
+          id,
+          bundle_sku,
+          description
+        )
+      `)
+      .eq('is_active', true)
+      .not('bom_id', 'is', null);
+
+    if (only_mapped) {
+      listingQuery = listingQuery.not('sku', 'is', null);
+    }
+
+    const { data: listings, error: listingError } = await listingQuery;
+
+    if (listingError) {
+      throw listingError;
+    }
+
+    // Step 5: Build the update plan
+    const updates = [];
+    const skipped = [];
+
+    for (const listing of listings || []) {
+      // Must have a seller SKU to update Amazon
+      if (!listing.sku) {
+        skipped.push({
+          asin: listing.asin,
+          reason: 'No seller SKU',
+        });
+        continue;
+      }
+
+      // Get recommendation for this BOM
+      const rec = bomRecommendations.get(listing.bom_id);
+      if (!rec) {
+        skipped.push({
+          asin: listing.asin,
+          sku: listing.sku,
+          reason: 'BOM not found in recommendations',
+        });
+        continue;
+      }
+
+      updates.push({
+        listing_memory_id: listing.id,
+        asin: listing.asin,
+        sku: listing.sku,
+        bom_id: listing.bom_id,
+        bundle_sku: listing.boms?.bundle_sku,
+        bom_description: listing.boms?.description,
+        new_qty: rec.recommended_qty,
+        buildable: rec.buildable,
+        pool_name: rec.pool_name || null,
+        constraint_sku: rec.constraint_internal_sku || null,
+      });
+    }
+
+    // Apply limit
+    const limitedUpdates = updates.slice(0, maxUpdates);
+    const truncated = updates.length > maxUpdates;
+
+    // Step 6: If dry run, return the plan
+    if (dry_run) {
+      return sendSuccess(res, {
+        dry_run: true,
+        location,
+        planned_updates: limitedUpdates.length,
+        total_eligible: updates.length,
+        truncated,
+        max_limit: maxUpdates,
+        skipped_count: skipped.length,
+        updates: limitedUpdates,
+        skipped: skipped.slice(0, 20), // Limit skipped list size
+      });
+    }
+
+    // Step 7: Execute live push
+    if (!spApiClient.isConfigured()) {
+      return errors.badRequest(res, 'SP-API credentials not configured');
+    }
+
+    const results = {
+      total: limitedUpdates.length,
+      success: 0,
+      failed: 0,
+      errors: [],
+    };
+
+    const startedAt = new Date().toISOString();
+
+    // Process updates sequentially with rate limiting
+    for (const update of limitedUpdates) {
+      try {
+        await spApiClient.updateListingQuantity(update.sku, update.new_qty);
+        results.success++;
+
+        console.log(`[SP-API] Updated ${update.sku} quantity to ${update.new_qty}`);
+
+        // Small delay between requests (rate limiting is also handled by spApiClient)
+        await new Promise(r => setTimeout(r, 100));
+      } catch (err) {
+        results.failed++;
+        results.errors.push({
+          sku: update.sku,
+          asin: update.asin,
+          new_qty: update.new_qty,
+          error: err.message,
+        });
+        console.error(`[SP-API] Failed to update ${update.sku}:`, err.message);
+      }
+    }
+
+    const completedAt = new Date().toISOString();
+
+    // Step 8: Log to amazon_sync_log
+    try {
+      await supabase.from('amazon_sync_log').insert({
+        sync_type: 'INVENTORY_PUSH',
+        started_at: startedAt,
+        completed_at: completedAt,
+        status: results.failed === 0 ? 'SUCCESS' : (results.success > 0 ? 'PARTIAL' : 'FAILED'),
+        items_processed: results.total,
+        items_created: results.success,
+        items_updated: 0,
+        items_failed: results.failed,
+        error_details: results.errors.length > 0 ? results.errors : null,
+        metadata: {
+          location,
+          idempotency_key: idempotencyKey,
+          dry_run: false,
+          truncated,
+          skipped_count: skipped.length,
+        },
+      });
+    } catch (logErr) {
+      console.error('Failed to log inventory push:', logErr.message);
+    }
+
+    // Record audit event
+    await recordSystemEvent({
+      eventType: 'AMAZON_INVENTORY_PUSH',
+      description: `Pushed inventory to ${results.success} of ${results.total} Amazon listings`,
+      metadata: {
+        location,
+        success: results.success,
+        failed: results.failed,
+        idempotency_key: idempotencyKey,
+      },
+      severity: results.failed > 0 ? 'WARN' : 'INFO',
+    });
+
+    sendSuccess(res, {
+      dry_run: false,
+      location,
+      ...results,
+      skipped_count: skipped.length,
+      truncated,
+    });
+  } catch (err) {
+    console.error('Inventory push failed:', err);
+    errors.internal(res, `Inventory push failed: ${err.message}`);
+  }
+});
+
+/**
  * GET /amazon/stats
  * Get Amazon-specific statistics including sales dashboard data
  */
