@@ -414,12 +414,37 @@ router.post('/', requireAdmin, async (req, res) => {
   }
 
   try {
-    // Create BOM
+    // Validate all component IDs exist and are active
+    const componentIds = components.map(c => c.component_id);
+    const { data: existingComponents, error: compCheckError } = await supabase
+      .from('components')
+      .select('id, internal_sku, is_active')
+      .in('id', componentIds);
+
+    if (compCheckError) {
+      console.error('Component validation error:', compCheckError);
+      return errors.internal(res, 'Failed to validate components');
+    }
+
+    const existingIds = new Set((existingComponents || []).map(c => c.id));
+    const inactiveComponents = (existingComponents || []).filter(c => !c.is_active);
+    const missingIds = componentIds.filter(id => !existingIds.has(id));
+
+    if (missingIds.length > 0) {
+      return errors.badRequest(res, `Component IDs not found: ${missingIds.join(', ')}`);
+    }
+
+    if (inactiveComponents.length > 0) {
+      return errors.badRequest(res, `Components are inactive: ${inactiveComponents.map(c => c.internal_sku).join(', ')}`);
+    }
+
+    // Create BOM with PENDING_REVIEW status (requires admin approval)
     const { data: bom, error: bomError } = await supabase
       .from('boms')
       .insert({
         bundle_sku: bundle_sku.toUpperCase().trim(),
-        description
+        description,
+        review_status: 'PENDING_REVIEW'
       })
       .select()
       .single();
@@ -532,6 +557,18 @@ router.put('/:id', requireAdmin, async (req, res) => {
         console.error('BOM update error:', updateError);
         return errors.internal(res, 'Failed to update BOM');
       }
+
+      // CASCADE: If deactivating BOM, also deactivate linked listings
+      if (is_active === false && current.is_active === true) {
+        const { error: cascadeError } = await supabase
+          .from('listing_memory')
+          .update({ is_active: false })
+          .eq('bom_id', id);
+
+        if (cascadeError) {
+          console.warn('Failed to cascade BOM deactivation to listings:', cascadeError);
+        }
+      }
     }
 
     // Update components if provided
@@ -626,25 +663,64 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
       throw fetchError;
     }
 
+    // Determine which components to use (provided or existing)
+    const componentsToValidate = components && Array.isArray(components) && components.length > 0
+      ? components
+      : (current.bom_components || []).map(bc => ({
+          component_id: bc.component_id,
+          qty_required: bc.qty_required
+        }));
+
+    if (componentsToValidate.length === 0) {
+      return errors.badRequest(res, 'Cannot approve BOM with no components');
+    }
+
+    // Validate all component IDs exist and are active
+    const componentIds = componentsToValidate.map(c => c.component_id);
+    const { data: existingComponents, error: compCheckError } = await supabase
+      .from('components')
+      .select('id, internal_sku, is_active, cost_ex_vat_pence')
+      .in('id', componentIds);
+
+    if (compCheckError) {
+      console.error('Component validation error:', compCheckError);
+      return errors.internal(res, 'Failed to validate components');
+    }
+
+    const existingIds = new Set((existingComponents || []).map(c => c.id));
+    const inactiveComponents = (existingComponents || []).filter(c => !c.is_active);
+    const missingIds = componentIds.filter(id => !existingIds.has(id));
+    const missingCostComponents = (existingComponents || []).filter(c => !c.cost_ex_vat_pence || c.cost_ex_vat_pence <= 0);
+
+    if (missingIds.length > 0) {
+      return errors.badRequest(res, `Cannot approve: component IDs not found: ${missingIds.join(', ')}`);
+    }
+
+    if (inactiveComponents.length > 0) {
+      return errors.badRequest(res, `Cannot approve: components are inactive: ${inactiveComponents.map(c => c.internal_sku).join(', ')}`);
+    }
+
+    if (missingCostComponents.length > 0) {
+      return errors.badRequest(res, `Cannot approve: components missing cost data: ${missingCostComponents.map(c => c.internal_sku).join(', ')}`);
+    }
+
     // Update components if provided (user edited them)
-    if (components && Array.isArray(components)) {
+    if (components && Array.isArray(components) && components.length > 0) {
       // Delete existing components
       await supabase.from('bom_components').delete().eq('bom_id', id);
 
       // Insert new components
-      if (components.length > 0) {
-        const { error: linesError } = await supabase
-          .from('bom_components')
-          .insert(components.map(c => ({
-            bom_id: id,
-            component_id: c.component_id,
-            qty_required: c.qty_required
-          })));
+      const { error: linesError } = await supabase
+        .from('bom_components')
+        .insert(components.map(c => ({
+          bom_id: id,
+          component_id: c.component_id,
+          qty_required: c.qty_required
+        })));
 
-        if (linesError) {
-          console.error('BOM components update error:', linesError);
-          return errors.internal(res, 'Failed to update BOM components');
-        }
+      if (linesError) {
+        console.error('BOM components update error:', linesError);
+        return errors.internal(res, 'Failed to update BOM components');
       }
     }
 

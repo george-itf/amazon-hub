@@ -299,12 +299,18 @@ router.get('/bottlenecks', async (req, res) => {
       );
     }
 
-    // Sort by most constraining
+    // Sort by most constraining (with deterministic tiebreaker)
     const sorted = Object.values(bottlenecks).sort((a, b) => {
+      // Primary: lowest bundles possible first (most constraining)
       if (a.min_bundles_constrained !== b.min_bundles_constrained) {
         return a.min_bundles_constrained - b.min_bundles_constrained;
       }
-      return b.boms_affected.length - a.boms_affected.length;
+      // Secondary: most BOMs affected first
+      if (b.boms_affected.length !== a.boms_affected.length) {
+        return b.boms_affected.length - a.boms_affected.length;
+      }
+      // Tertiary: deterministic tiebreaker by internal_sku for stable ordering
+      return (a.internal_sku || '').localeCompare(b.internal_sku || '');
     });
 
     sendSuccess(res, {

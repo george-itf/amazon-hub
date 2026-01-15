@@ -690,7 +690,11 @@ export async function buildAllocationPreview({
       // Score: demand * margin_multiplier / (allocated + 1) for diminishing returns
       const effectiveScore = candidate.score / (candidate.recommended_qty + 1);
 
-      if (effectiveScore > bestScore) {
+      // Use effective score with deterministic tiebreaker for equal scores
+      // Tiebreaker: prefer by bundle_sku alphabetically for stable, reproducible allocation
+      if (effectiveScore > bestScore ||
+          (effectiveScore === bestScore && bestCandidate &&
+           (candidate.bundle_sku || '').localeCompare(bestCandidate.bundle_sku || '') < 0)) {
         bestScore = effectiveScore;
         bestCandidate = candidate;
       }
@@ -752,7 +756,12 @@ export async function buildAllocationPreview({
       buffer_units: bufferUnits,
       allocatable_units: allocatableUnits,
     },
-    candidates: cleanCandidates.sort((a, b) => b.score - a.score),
+    candidates: cleanCandidates.sort((a, b) => {
+      // Primary: highest score first
+      if (b.score !== a.score) return b.score - a.score;
+      // Tiebreaker: by bundle_sku for stable ordering
+      return (a.bundle_sku || '').localeCompare(b.bundle_sku || '');
+    }),
     summary: {
       candidate_count: cleanCandidates.length,
       eligible_count: eligibleCandidates.length,
@@ -873,8 +882,13 @@ export async function getPoolCandidates(location = 'Warehouse', minBoms = 2) {
   }
 
   // Sort by bom_count desc, then available asc (most constrained first)
+  // With deterministic tiebreaker by internal_sku for stable ordering
   return poolCandidates.sort((a, b) => {
+    // Primary: most BOMs first
     if (b.bom_count !== a.bom_count) return b.bom_count - a.bom_count;
-    return a.available - b.available;
+    // Secondary: lowest availability first (most constrained)
+    if (a.available !== b.available) return a.available - b.available;
+    // Tertiary: deterministic tiebreaker by internal_sku
+    return (a.internal_sku || '').localeCompare(b.internal_sku || '');
   });
 }
