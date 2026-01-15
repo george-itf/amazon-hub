@@ -96,6 +96,10 @@ export default function AmazonPage() {
   });
   const [savingScheduler, setSavingScheduler] = useState(false);
 
+  // Inventory allocation state
+  const [inventoryRecommendations, setInventoryRecommendations] = useState(null);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -205,6 +209,26 @@ export default function AmazonPage() {
       loadSchedulerStatus();
     }
   }, [selectedTab, loadSchedulerStatus]);
+
+  // Load inventory recommendations when tab changes
+  const loadInventoryRecommendations = useCallback(async () => {
+    try {
+      setInventoryLoading(true);
+      const result = await api.getInventoryRecommendations({ location: 'Warehouse' });
+      setInventoryRecommendations(result);
+    } catch (err) {
+      console.error('Failed to load inventory recommendations:', err);
+      setError(err.message);
+    } finally {
+      setInventoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedTab === 4) {
+      loadInventoryRecommendations();
+    }
+  }, [selectedTab, loadInventoryRecommendations]);
 
   const handleSaveSchedulerSettings = async () => {
     try {
@@ -371,6 +395,7 @@ export default function AmazonPage() {
     { id: 'shipments', content: `Pending Shipments (${pendingShipments.length})` },
     { id: 'sync', content: 'Sync & Settings' },
     { id: 'listings', content: 'Listings' },
+    { id: 'inventory', content: 'Inventory Allocation' },
   ];
 
   return (
@@ -1029,6 +1054,165 @@ export default function AmazonPage() {
                   )}
                 </BlockStack>
               </Card>
+            </BlockStack>
+          )}
+
+          {/* Inventory Allocation Tab */}
+          {selectedTab === 4 && (
+            <BlockStack gap="400">
+              <Banner tone="info">
+                <p>
+                  Inventory allocation prevents overselling when multiple BOMs share the same component (e.g., tool cores).
+                  Recommended quantities are calculated to ensure the total across all BOMs does not exceed available stock.
+                </p>
+              </Banner>
+
+              {inventoryLoading ? (
+                <InvictaLoading message="Calculating inventory recommendations..." />
+              ) : inventoryRecommendations ? (
+                <>
+                  {/* Summary Stats */}
+                  <Layout>
+                    <Layout.Section variant="oneQuarter">
+                      <Card>
+                        <BlockStack gap="200">
+                          <Text variant="bodySm" tone="subdued">Total BOMs</Text>
+                          <Text variant="heading2xl" fontWeight="bold">
+                            {inventoryRecommendations.total || 0}
+                          </Text>
+                        </BlockStack>
+                      </Card>
+                    </Layout.Section>
+                    <Layout.Section variant="oneQuarter">
+                      <Card>
+                        <BlockStack gap="200">
+                          <Text variant="bodySm" tone="subdued">Pooled BOMs</Text>
+                          <Text variant="heading2xl" fontWeight="bold" tone="warning">
+                            {inventoryRecommendations.pooled || 0}
+                          </Text>
+                        </BlockStack>
+                      </Card>
+                    </Layout.Section>
+                    <Layout.Section variant="oneQuarter">
+                      <Card>
+                        <BlockStack gap="200">
+                          <Text variant="bodySm" tone="subdued">Non-Pooled BOMs</Text>
+                          <Text variant="heading2xl" fontWeight="bold" tone="success">
+                            {inventoryRecommendations.non_pooled || 0}
+                          </Text>
+                        </BlockStack>
+                      </Card>
+                    </Layout.Section>
+                    <Layout.Section variant="oneQuarter">
+                      <Card>
+                        <BlockStack gap="200">
+                          <Text variant="bodySm" tone="subdued">Active Pools</Text>
+                          <Text variant="heading2xl" fontWeight="bold">
+                            {inventoryRecommendations.pools?.length || 0}
+                          </Text>
+                        </BlockStack>
+                      </Card>
+                    </Layout.Section>
+                  </Layout>
+
+                  {/* Pool Summaries */}
+                  {inventoryRecommendations.pools && inventoryRecommendations.pools.length > 0 && (
+                    <Card>
+                      <BlockStack gap="400">
+                        <Text variant="headingSm">Inventory Pools</Text>
+                        <Divider />
+                        <BlockStack gap="300">
+                          {inventoryRecommendations.pools.map(pool => (
+                            <Card key={pool.pool_id} background="bg-surface-secondary">
+                              <BlockStack gap="200">
+                                <InlineStack align="space-between">
+                                  <BlockStack gap="100">
+                                    <Text variant="headingSm">{pool.pool_name}</Text>
+                                    <Text variant="bodySm" tone="subdued">
+                                      Shared component: {pool.pool_component_sku}
+                                    </Text>
+                                  </BlockStack>
+                                  <InlineStack gap="200">
+                                    <Badge tone="info">{pool.pool_available} available</Badge>
+                                    <Badge>{pool.member_count} BOMs</Badge>
+                                  </InlineStack>
+                                </InlineStack>
+                                <ProgressBar
+                                  progress={pool.pool_available > 0 ? Math.min(100, (pool.total_allocated / pool.pool_available) * 100) : 0}
+                                  size="small"
+                                  tone={pool.total_allocated > pool.pool_available ? 'critical' : 'highlight'}
+                                />
+                                <Text variant="bodySm" tone="subdued">
+                                  {pool.total_allocated || 0} of {pool.pool_available} units allocated across pool members
+                                </Text>
+                              </BlockStack>
+                            </Card>
+                          ))}
+                        </BlockStack>
+                      </BlockStack>
+                    </Card>
+                  )}
+
+                  {/* Recommendations Table */}
+                  <Card>
+                    <BlockStack gap="400">
+                      <InlineStack align="space-between">
+                        <Text variant="headingSm">Recommended Quantities per BOM</Text>
+                        <InvictaButton
+                          size="slim"
+                          variant="secondary"
+                          onClick={loadInventoryRecommendations}
+                          loading={inventoryLoading}
+                        >
+                          Refresh
+                        </InvictaButton>
+                      </InlineStack>
+                      <Divider />
+                      {inventoryRecommendations.recommendations && inventoryRecommendations.recommendations.length > 0 ? (
+                        <DataTable
+                          columnContentTypes={['text', 'text', 'numeric', 'numeric', 'text', 'text']}
+                          headings={['Bundle SKU', 'Description', 'Buildable', 'Recommended', 'Constraint', 'Pool']}
+                          rows={inventoryRecommendations.recommendations.map(rec => [
+                            <Text key={`sku-${rec.bom_id}`} variant="bodyMd" fontWeight="semibold">
+                              {rec.bundle_sku}
+                            </Text>,
+                            <Text key={`desc-${rec.bom_id}`} variant="bodySm" truncate>
+                              {rec.bom_description || '-'}
+                            </Text>,
+                            rec.buildable,
+                            <Text
+                              key={`qty-${rec.bom_id}`}
+                              variant="bodyMd"
+                              fontWeight="bold"
+                              tone={rec.recommended_qty < rec.buildable ? 'caution' : 'success'}
+                            >
+                              {rec.recommended_qty}
+                            </Text>,
+                            rec.constraint_internal_sku ? (
+                              <Badge key={`constraint-${rec.bom_id}`} tone="attention">
+                                {rec.constraint_internal_sku}
+                              </Badge>
+                            ) : '-',
+                            rec.pool_name ? (
+                              <Badge key={`pool-${rec.bom_id}`} tone="info">
+                                {rec.pool_name}
+                              </Badge>
+                            ) : (
+                              <Text key={`nopool-${rec.bom_id}`} variant="bodySm" tone="subdued">-</Text>
+                            ),
+                          ])}
+                        />
+                      ) : (
+                        <Text tone="subdued">No BOMs found. Create BOMs to see inventory recommendations.</Text>
+                      )}
+                    </BlockStack>
+                  </Card>
+                </>
+              ) : (
+                <Card>
+                  <Text tone="subdued">Unable to load inventory recommendations.</Text>
+                </Card>
+              )}
             </BlockStack>
           )}
         </Tabs>
