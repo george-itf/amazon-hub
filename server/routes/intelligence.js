@@ -1,6 +1,7 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
+import { buildAllocationPreview, getPoolCandidates } from '../services/allocationEngine.js';
 
 const router = express.Router();
 
@@ -360,6 +361,114 @@ router.get('/fulfillment-readiness', async (req, res) => {
   } catch (err) {
     console.error('Fulfillment readiness error:', err);
     errors.internal(res, 'Failed to fetch fulfillment readiness');
+  }
+});
+
+// ============================================================================
+// ALLOCATION ENGINE ROUTES
+// ============================================================================
+
+/**
+ * GET /intelligence/allocation/pools
+ * Get components that appear in multiple active BOMs (pool candidates)
+ * These are shared components where allocation decisions matter
+ *
+ * Query params:
+ * - location (default: 'Warehouse')
+ * - min_boms (default: 2) - minimum number of BOMs to be considered a pool
+ */
+router.get('/allocation/pools', async (req, res) => {
+  try {
+    const location = req.query.location || 'Warehouse';
+    const minBoms = parseInt(req.query.min_boms, 10) || 2;
+
+    if (minBoms < 1) {
+      return errors.badRequest(res, 'min_boms must be at least 1');
+    }
+
+    console.log(`[Allocation] Fetching pool candidates: location=${location}, min_boms=${minBoms}`);
+
+    const pools = await getPoolCandidates(location, minBoms);
+
+    sendSuccess(res, {
+      location,
+      min_boms: minBoms,
+      pools,
+      summary: {
+        total_pools: pools.length,
+        total_boms_covered: [...new Set(pools.flatMap(p => p.boms.map(b => b.bom_id)))].length,
+        zero_available: pools.filter(p => p.available === 0).length,
+      },
+    });
+  } catch (err) {
+    console.error('Allocation pools error:', err);
+    errors.internal(res, `Failed to fetch allocation pools: ${err.message}`);
+  }
+});
+
+/**
+ * GET /intelligence/allocation/preview
+ * Build allocation preview for a specific pool component
+ *
+ * Query params:
+ * - pool_component_id (required) - UUID of the shared component
+ * - location (default: 'Warehouse')
+ * - min_margin (default: 10) - minimum margin % to be eligible
+ * - target_margin (default: 15) - target margin % for bonus multiplier
+ * - buffer_units (default: 1) - units to hold back from allocation
+ * - lookback_days (default: 30) - days to look back for ASP calculation
+ */
+router.get('/allocation/preview', async (req, res) => {
+  try {
+    const poolComponentId = req.query.pool_component_id;
+
+    if (!poolComponentId) {
+      return errors.badRequest(res, 'pool_component_id is required');
+    }
+
+    // Validate UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(poolComponentId)) {
+      return errors.badRequest(res, 'pool_component_id must be a valid UUID');
+    }
+
+    const location = req.query.location || 'Warehouse';
+    const minMarginPercent = parseFloat(req.query.min_margin) || 10;
+    const targetMarginPercent = parseFloat(req.query.target_margin) || 15;
+    const bufferUnits = parseInt(req.query.buffer_units, 10) || 1;
+    const lookbackDays = parseInt(req.query.lookback_days, 10) || 30;
+
+    // Validate parameters
+    if (minMarginPercent < 0 || minMarginPercent > 100) {
+      return errors.badRequest(res, 'min_margin must be between 0 and 100');
+    }
+    if (targetMarginPercent < minMarginPercent) {
+      return errors.badRequest(res, 'target_margin must be >= min_margin');
+    }
+    if (bufferUnits < 0) {
+      return errors.badRequest(res, 'buffer_units must be >= 0');
+    }
+
+    console.log(`[Allocation] Building preview: component=${poolComponentId}, location=${location}, min_margin=${minMarginPercent}%, target=${targetMarginPercent}%, buffer=${bufferUnits}`);
+
+    const result = await buildAllocationPreview({
+      poolComponentId,
+      location,
+      lookbackDays,
+      minMarginPercent,
+      targetMarginPercent,
+      bufferUnits,
+    });
+
+    sendSuccess(res, result);
+  } catch (err) {
+    console.error('Allocation preview error:', err);
+
+    if (err.message.includes('not found')) {
+      return errors.notFound(res, 'Component');
+    }
+
+    errors.internal(res, `Failed to build allocation preview: ${err.message}`);
   }
 });
 
