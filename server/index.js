@@ -31,6 +31,7 @@ import profitRoutes from './routes/profit.js';
 import amazonRoutes from './routes/amazon.js';
 import shippingRoutes from './routes/shipping.js';
 import inventoryRoutes from './routes/inventory.js';
+import viewsRoutes from './routes/views.js';
 import scheduler from './services/scheduler.js';
 
 // Create the Express app
@@ -206,6 +207,9 @@ app.use('/shipping', shippingRoutes);
 
 // Inventory routes (pool allocation, recommendations)
 app.use('/inventory', inventoryRoutes);
+
+// UI Views routes (saved filter views)
+app.use('/views', viewsRoutes);
 
 // 404 handler
 app.use((req, res) => {

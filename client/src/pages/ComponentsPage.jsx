@@ -20,6 +20,7 @@ import {
   ProgressBar,
 } from '@shopify/polaris';
 import { getComponents, createComponent, adjustStock, getStockMovements } from '../utils/api.jsx';
+import SavedViewsBar from '../components/SavedViewsBar.jsx';
 
 /**
  * Format price from pence to pounds
@@ -132,6 +133,20 @@ export default function ComponentsPage() {
     setStockFilter('all');
     setSortBy('sku');
   };
+
+  // Handler for SavedViewsBar filter changes
+  const handleViewFilterChange = useCallback((filters) => {
+    if (filters.searchQuery !== undefined) setSearchQuery(filters.searchQuery);
+    if (filters.stockFilter !== undefined) setStockFilter(filters.stockFilter);
+    if (filters.sortBy !== undefined) setSortBy(filters.sortBy);
+  }, []);
+
+  // Current filters for SavedViewsBar
+  const currentFilters = useMemo(() => ({
+    searchQuery,
+    stockFilter,
+    sortBy,
+  }), [searchQuery, stockFilter, sortBy]);
 
   const hasFilters = searchQuery || stockFilter !== 'all' || sortBy !== 'sku';
 
@@ -367,6 +382,16 @@ export default function ComponentsPage() {
                 <p>{error}</p>
               </Banner>
             )}
+
+            {/* Saved Views Bar */}
+            <Card>
+              <SavedViewsBar
+                context="components"
+                currentFilters={currentFilters}
+                onFilterChange={handleViewFilterChange}
+                filterKeys={['searchQuery', 'stockFilter', 'sortBy']}
+              />
+            </Card>
 
             {/* Search and Filter */}
             <Card>
