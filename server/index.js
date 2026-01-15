@@ -29,6 +29,7 @@ import brainRoutes from './routes/brain.js';
 import analyticsRoutes from './routes/analytics.js';
 import profitRoutes from './routes/profit.js';
 import amazonRoutes from './routes/amazon.js';
+import shippingRoutes from './routes/shipping.js';
 
 // Create the Express app
 const app = express();
@@ -197,6 +198,9 @@ app.use('/profit', profitRoutes);
 
 // Amazon SP-API integration
 app.use('/amazon', amazonRoutes);
+
+// Shipping routes (Royal Mail Click & Drop)
+app.use('/shipping', shippingRoutes);
 
 // 404 handler
 app.use((req, res) => {

@@ -24,6 +24,7 @@ const ReturnsPage = lazy(() => import('./pages/ReturnsPage.jsx'));
 const AuditPage = lazy(() => import('./pages/AuditPage.jsx'));
 const AsinAnalyzerPage = lazy(() => import('./pages/AsinAnalyzerPage.jsx'));
 const BomReviewPage = lazy(() => import('./pages/BomReviewPage.jsx'));
+const AmazonPage = lazy(() => import('./pages/AmazonPage.jsx'));
 
 /**
  * Loading fallback for lazy-loaded pages
@@ -120,6 +121,7 @@ export default function App() {
             <Route path="/returns" element={<ReturnsPage />} />
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/analyzer" element={<AsinAnalyzerPage />} />
+            <Route path="/amazon" element={<AmazonPage />} />
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </Suspense>

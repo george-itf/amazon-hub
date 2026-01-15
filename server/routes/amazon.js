@@ -442,23 +442,441 @@ router.get('/order/:orderId', requireAdmin, async (req, res) => {
 });
 
 /**
- * GET /amazon/inventory
- * Get inventory levels from Amazon FBA
+ * POST /amazon/shipment/confirm
+ * Confirm shipment for an FBM order (sends tracking to Amazon)
  */
-router.get('/inventory', requireAdmin, async (req, res) => {
+router.post('/shipment/confirm', requireAdmin, async (req, res) => {
+  const { orderId, carrierCode, carrierName, trackingNumber, shipDate } = req.body;
+
+  if (!orderId || !carrierCode || !trackingNumber) {
+    return errors.badRequest(res, 'orderId, carrierCode, and trackingNumber are required');
+  }
+
   if (!spApiClient.isConfigured()) {
     return errors.badRequest(res, 'SP-API credentials not configured');
   }
 
   try {
-    const inventory = await spApiClient.getInventorySummaries();
+    // Confirm shipment with Amazon
+    await spApiClient.confirmShipment(orderId, {
+      carrierCode,
+      carrierName,
+      trackingNumber,
+      shipDate: shipDate || new Date().toISOString(),
+    });
+
+    // Find and update our order
+    const { data: order } = await supabase
+      .from('orders')
+      .select('id')
+      .or(`external_order_id.eq.${orderId},amazon_order_id.eq.${orderId}`)
+      .eq('channel', 'AMAZON')
+      .maybeSingle();
+
+    if (order) {
+      // Record the shipment
+      await supabase.from('amazon_shipments').insert({
+        order_id: order.id,
+        amazon_order_id: orderId,
+        carrier_code: carrierCode,
+        carrier_name: carrierName || carrierCode,
+        tracking_number: trackingNumber,
+        ship_date: shipDate || new Date().toISOString(),
+        confirmed_at: new Date().toISOString(),
+      });
+
+      // Update order status to dispatched
+      await supabase
+        .from('orders')
+        .update({
+          status: 'DISPATCHED',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', order.id);
+    }
+
+    await recordSystemEvent({
+      eventType: 'AMAZON_SHIPMENT_CONFIRMED',
+      entityType: 'ORDER',
+      entityId: orderId,
+      description: `Shipment confirmed: ${carrierCode} ${trackingNumber}`,
+      metadata: { carrierCode, trackingNumber },
+    });
 
     sendSuccess(res, {
-      summaries: inventory.inventorySummaries || [],
+      message: 'Shipment confirmed with Amazon',
+      orderId,
+      trackingNumber,
     });
   } catch (err) {
-    console.error('Failed to fetch Amazon inventory:', err);
-    errors.internal(res, `Failed to fetch inventory: ${err.message}`);
+    console.error('Failed to confirm shipment:', err);
+    errors.internal(res, `Failed to confirm shipment: ${err.message}`);
+  }
+});
+
+/**
+ * GET /amazon/orders/pending-shipment
+ * Get Amazon orders that need shipment confirmation
+ */
+router.get('/orders/pending-shipment', requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select(`
+        id,
+        external_order_id,
+        amazon_order_id,
+        order_number,
+        order_date,
+        customer_name,
+        shipping_address,
+        status,
+        total_price_pence,
+        order_lines (
+          id,
+          title,
+          quantity,
+          asin,
+          sku
+        )
+      `)
+      .eq('channel', 'AMAZON')
+      .in('status', ['PICKED', 'READY_TO_PICK'])
+      .order('order_date', { ascending: true });
+
+    if (error) throw error;
+
+    // Filter out orders that already have shipment confirmation
+    const orderIds = data.map(o => o.id);
+    const { data: shipments } = await supabase
+      .from('amazon_shipments')
+      .select('order_id')
+      .in('order_id', orderIds);
+
+    const shippedOrderIds = new Set(shipments?.map(s => s.order_id) || []);
+    const pendingOrders = data.filter(o => !shippedOrderIds.has(o.id));
+
+    sendSuccess(res, {
+      count: pendingOrders.length,
+      orders: pendingOrders,
+    });
+  } catch (err) {
+    console.error('Failed to fetch pending shipment orders:', err);
+    errors.internal(res, `Failed to fetch orders: ${err.message}`);
+  }
+});
+
+/**
+ * POST /amazon/sync/fees
+ * Sync financial events (fees) from Amazon
+ */
+router.post('/sync/fees', requireAdmin, async (req, res) => {
+  const { daysBack = 30 } = req.body;
+
+  if (!spApiClient.isConfigured()) {
+    return errors.badRequest(res, 'SP-API credentials not configured');
+  }
+
+  try {
+    const postedAfter = new Date();
+    postedAfter.setDate(postedAfter.getDate() - daysBack);
+
+    console.log(`[SP-API] Fetching financial events from ${postedAfter.toISOString()}`);
+
+    const events = await spApiClient.getAllFinancialEvents({
+      postedAfter: postedAfter.toISOString(),
+    });
+
+    const results = {
+      processed: 0,
+      created: 0,
+      updated: 0,
+      errors: [],
+    };
+
+    // Process shipment events (order-level fees)
+    for (const event of events.ShipmentEventList || []) {
+      try {
+        const amazonOrderId = event.AmazonOrderId;
+        const postedDate = event.PostedDate;
+
+        for (const item of event.ShipmentItemList || []) {
+          results.processed++;
+
+          // Calculate fees from item charges
+          let referralFee = 0;
+          let itemPrice = 0;
+          let shippingCharge = 0;
+          let promotionDiscount = 0;
+
+          for (const charge of item.ItemChargeList || []) {
+            const amount = Math.round(parseFloat(charge.ChargeAmount?.Amount || 0) * 100);
+            if (charge.ChargeType === 'Principal') {
+              itemPrice = amount;
+            } else if (charge.ChargeType === 'Shipping') {
+              shippingCharge = amount;
+            }
+          }
+
+          for (const fee of item.ItemFeeList || []) {
+            const amount = Math.round(parseFloat(fee.FeeAmount?.Amount || 0) * 100);
+            if (fee.FeeType === 'Commission' || fee.FeeType === 'ReferralFee') {
+              referralFee = Math.abs(amount);
+            }
+          }
+
+          for (const promo of item.PromotionList || []) {
+            promotionDiscount += Math.round(parseFloat(promo.PromotionAmount?.Amount || 0) * 100);
+          }
+
+          const totalFees = referralFee;
+          const netProceeds = itemPrice + shippingCharge - totalFees + promotionDiscount;
+
+          // Upsert fee record
+          const { error } = await supabase
+            .from('amazon_fees')
+            .upsert({
+              amazon_order_id: amazonOrderId,
+              order_item_id: item.OrderItemId,
+              asin: item.ASIN || item.SellerSKU,
+              seller_sku: item.SellerSKU,
+              posted_date: postedDate,
+              referral_fee_pence: referralFee,
+              item_price_pence: itemPrice,
+              shipping_charge_pence: shippingCharge,
+              promotion_discount_pence: promotionDiscount,
+              total_fees_pence: totalFees,
+              net_proceeds_pence: netProceeds,
+              raw_data: item,
+            }, {
+              onConflict: 'amazon_order_id,order_item_id',
+            });
+
+          if (error) {
+            results.errors.push({ orderId: amazonOrderId, error: error.message });
+          } else {
+            results.created++;
+          }
+        }
+      } catch (err) {
+        console.error('Error processing financial event:', err);
+        results.errors.push({ error: err.message });
+      }
+    }
+
+    // Link fees to our orders
+    await supabase.rpc('link_amazon_fees_to_orders').catch(() => {
+      // RPC might not exist yet, that's ok
+    });
+
+    await recordSystemEvent({
+      eventType: 'AMAZON_FEES_SYNC',
+      description: `Synced ${results.created} fee records from ${events.ShipmentEventList?.length || 0} shipment events`,
+      metadata: results,
+    });
+
+    sendSuccess(res, results);
+  } catch (err) {
+    console.error('Amazon fees sync failed:', err);
+    errors.internal(res, `Sync failed: ${err.message}`);
+  }
+});
+
+/**
+ * GET /amazon/catalog/:asin
+ * Get catalog data for an ASIN
+ */
+router.get('/catalog/:asin', requireAdmin, async (req, res) => {
+  const { asin } = req.params;
+  const { refresh = false } = req.query;
+
+  if (!spApiClient.isConfigured()) {
+    return errors.badRequest(res, 'SP-API credentials not configured');
+  }
+
+  try {
+    // Check cache first
+    if (!refresh) {
+      const { data: cached } = await supabase
+        .from('amazon_catalog')
+        .select('*')
+        .eq('asin', asin)
+        .maybeSingle();
+
+      if (cached) {
+        return sendSuccess(res, cached);
+      }
+    }
+
+    // Fetch from Amazon
+    const catalogData = await spApiClient.getCatalogItem(asin);
+
+    // Extract relevant data
+    const summary = catalogData.summaries?.[0] || {};
+    const attributes = catalogData.attributes || {};
+    const salesRanks = catalogData.salesRanks?.[0] || {};
+    const images = catalogData.images?.[0]?.images || [];
+
+    const catalogRecord = {
+      asin,
+      title: summary.itemName || attributes.item_name?.[0]?.value,
+      brand: summary.brand || attributes.brand?.[0]?.value,
+      manufacturer: attributes.manufacturer?.[0]?.value,
+      model_number: attributes.model_number?.[0]?.value,
+      part_number: attributes.part_number?.[0]?.value,
+      color: attributes.color?.[0]?.value,
+      size: attributes.size?.[0]?.value,
+      product_type: summary.productType,
+      main_image_url: images.find(i => i.variant === 'MAIN')?.link,
+      images: images,
+      sales_rank: salesRanks.ranks?.[0]?.rank,
+      sales_rank_category: salesRanks.ranks?.[0]?.title,
+      raw_data: catalogData,
+      last_synced_at: new Date().toISOString(),
+    };
+
+    // Upsert to cache
+    await supabase
+      .from('amazon_catalog')
+      .upsert(catalogRecord, { onConflict: 'asin' });
+
+    sendSuccess(res, catalogRecord);
+  } catch (err) {
+    console.error(`Failed to fetch catalog for ${asin}:`, err);
+    errors.internal(res, `Failed to fetch catalog: ${err.message}`);
+  }
+});
+
+/**
+ * GET /amazon/settings
+ * Get Amazon integration settings
+ */
+router.get('/settings', requireAdmin, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('amazon_settings')
+      .select('*');
+
+    if (error) throw error;
+
+    // Convert to key-value object
+    const settings = {};
+    for (const row of data || []) {
+      settings[row.setting_key] = row.setting_value;
+    }
+
+    sendSuccess(res, settings);
+  } catch (err) {
+    console.error('Failed to fetch settings:', err);
+    errors.internal(res, 'Failed to fetch settings');
+  }
+});
+
+/**
+ * PUT /amazon/settings
+ * Update Amazon integration settings
+ */
+router.put('/settings', requireAdmin, async (req, res) => {
+  const updates = req.body;
+
+  try {
+    for (const [key, value] of Object.entries(updates)) {
+      await supabase
+        .from('amazon_settings')
+        .upsert({
+          setting_key: key,
+          setting_value: value,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'setting_key' });
+    }
+
+    sendSuccess(res, { message: 'Settings updated' });
+  } catch (err) {
+    console.error('Failed to update settings:', err);
+    errors.internal(res, 'Failed to update settings');
+  }
+});
+
+/**
+ * GET /amazon/sync/history
+ * Get sync history
+ */
+router.get('/sync/history', requireAdmin, async (req, res) => {
+  const { limit = 20 } = req.query;
+
+  try {
+    const { data, error } = await supabase
+      .from('amazon_sync_log')
+      .select('*')
+      .order('started_at', { ascending: false })
+      .limit(parseInt(limit));
+
+    if (error) throw error;
+
+    sendSuccess(res, data || []);
+  } catch (err) {
+    console.error('Failed to fetch sync history:', err);
+    errors.internal(res, 'Failed to fetch sync history');
+  }
+});
+
+/**
+ * GET /amazon/stats
+ * Get Amazon-specific statistics
+ */
+router.get('/stats', requireAdmin, async (req, res) => {
+  try {
+    // Get order counts by status
+    const { data: orderStats } = await supabase
+      .from('orders')
+      .select('status')
+      .eq('channel', 'AMAZON');
+
+    const statusCounts = {};
+    for (const order of orderStats || []) {
+      statusCounts[order.status] = (statusCounts[order.status] || 0) + 1;
+    }
+
+    // Get total Amazon revenue this month
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const { data: revenueData } = await supabase
+      .from('orders')
+      .select('total_price_pence')
+      .eq('channel', 'AMAZON')
+      .gte('order_date', startOfMonth.toISOString().split('T')[0])
+      .not('status', 'eq', 'CANCELLED');
+
+    const monthlyRevenue = revenueData?.reduce((sum, o) => sum + (o.total_price_pence || 0), 0) || 0;
+
+    // Get pending shipment count
+    const { count: pendingShipments } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact' })
+      .eq('channel', 'AMAZON')
+      .in('status', ['PICKED', 'READY_TO_PICK']);
+
+    // Get fees total this month
+    const { data: feesData } = await supabase
+      .from('amazon_fees')
+      .select('total_fees_pence')
+      .gte('posted_date', startOfMonth.toISOString());
+
+    const monthlyFees = feesData?.reduce((sum, f) => sum + (f.total_fees_pence || 0), 0) || 0;
+
+    sendSuccess(res, {
+      orders_by_status: statusCounts,
+      total_orders: orderStats?.length || 0,
+      monthly_revenue_pence: monthlyRevenue,
+      monthly_fees_pence: monthlyFees,
+      monthly_net_pence: monthlyRevenue - monthlyFees,
+      pending_shipments: pendingShipments || 0,
+    });
+  } catch (err) {
+    console.error('Failed to fetch Amazon stats:', err);
+    errors.internal(res, 'Failed to fetch stats');
   }
 });
 

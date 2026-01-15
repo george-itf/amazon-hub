@@ -625,3 +625,85 @@ export async function getAmazonOrderDetails(orderId) {
 export async function getAmazonInventory() {
   return request('/amazon/inventory');
 }
+
+export async function getAmazonStats() {
+  return request('/amazon/stats');
+}
+
+export async function getAmazonSettings() {
+  return request('/amazon/settings');
+}
+
+export async function updateAmazonSettings(settings) {
+  return request('/amazon/settings', {
+    method: 'PUT',
+    body: settings,
+  });
+}
+
+export async function syncAmazonFees(daysBack = 30) {
+  return request('/amazon/sync/fees', {
+    method: 'POST',
+    body: { daysBack },
+    timeout: 120000,
+  });
+}
+
+export async function getAmazonCatalog(asin, refresh = false) {
+  return request(`/amazon/catalog/${asin}?refresh=${refresh}`);
+}
+
+export async function getAmazonSyncHistory(limit = 20) {
+  return request(`/amazon/sync/history?limit=${limit}`);
+}
+
+export async function getAmazonPendingShipments() {
+  return request('/amazon/orders/pending-shipment');
+}
+
+export async function confirmAmazonShipment(orderId, carrierCode, trackingNumber) {
+  return request('/amazon/shipment/confirm', {
+    method: 'POST',
+    body: { orderId, carrierCode, trackingNumber },
+  });
+}
+
+// ============ Shipping / Royal Mail ============
+
+export async function getShippingStatus() {
+  return request('/shipping/status');
+}
+
+export async function getShippingServices() {
+  return request('/shipping/services');
+}
+
+export async function getReadyToShipOrders() {
+  return request('/shipping/orders/ready');
+}
+
+export async function createShippingLabel(orderId, serviceCode = 'TPN') {
+  return request('/shipping/label/create', {
+    method: 'POST',
+    body: { orderId, serviceCode },
+  });
+}
+
+export async function syncShippingTracking(daysBack = 7, autoConfirmAmazon = true) {
+  return request('/shipping/sync-tracking', {
+    method: 'POST',
+    body: { daysBack, autoConfirmAmazon },
+    timeout: 120000,
+  });
+}
+
+export async function confirmShipment(orderId, trackingNumber, carrierCode = 'Royal Mail', confirmOnAmazon = true) {
+  return request(`/shipping/confirm/${orderId}`, {
+    method: 'POST',
+    body: { trackingNumber, carrierCode, confirmOnAmazon },
+  });
+}
+
+export async function getOrderTracking(orderId) {
+  return request(`/shipping/tracking/${orderId}`);
+}
