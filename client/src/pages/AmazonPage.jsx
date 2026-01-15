@@ -100,6 +100,12 @@ export default function AmazonPage() {
   const [inventoryRecommendations, setInventoryRecommendations] = useState(null);
   const [inventoryLoading, setInventoryLoading] = useState(false);
 
+  // Inventory push state
+  const [pushModalOpen, setPushModalOpen] = useState(false);
+  const [pushDryRun, setPushDryRun] = useState(true);
+  const [pushResult, setPushResult] = useState(null);
+  const [pushing, setPushing] = useState(false);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -229,6 +235,29 @@ export default function AmazonPage() {
       loadInventoryRecommendations();
     }
   }, [selectedTab, loadInventoryRecommendations]);
+
+  // Handle inventory push to Amazon
+  const handlePushInventory = async () => {
+    try {
+      setPushing(true);
+      const result = await api.pushAmazonInventory({
+        location: 'Warehouse',
+        dry_run: pushDryRun,
+        only_mapped: true,
+        limit: 50,
+      });
+      setPushResult(result);
+
+      // If live push was successful, refresh recommendations
+      if (!pushDryRun && result.success > 0) {
+        await loadInventoryRecommendations();
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPushing(false);
+    }
+  };
 
   const handleSaveSchedulerSettings = async () => {
     try {
@@ -1153,6 +1182,51 @@ export default function AmazonPage() {
                     </Card>
                   )}
 
+                  {/* Push to Amazon Card */}
+                  <Card>
+                    <BlockStack gap="300">
+                      <InlineStack align="space-between">
+                        <BlockStack gap="100">
+                          <Text variant="headingSm">Push to Amazon</Text>
+                          <Text variant="bodySm" tone="subdued">
+                            Update FBM listing quantities on Amazon to match recommended allocations
+                          </Text>
+                        </BlockStack>
+                        <InlineStack gap="200">
+                          <InvictaButton
+                            size="slim"
+                            variant="secondary"
+                            onClick={() => {
+                              setPushDryRun(true);
+                              setPushResult(null);
+                              setPushModalOpen(true);
+                            }}
+                            disabled={!amazonStatus?.connected}
+                          >
+                            Preview Changes
+                          </InvictaButton>
+                          <InvictaButton
+                            size="slim"
+                            variant="primary"
+                            onClick={() => {
+                              setPushDryRun(false);
+                              setPushResult(null);
+                              setPushModalOpen(true);
+                            }}
+                            disabled={!amazonStatus?.connected}
+                          >
+                            Push Live
+                          </InvictaButton>
+                        </InlineStack>
+                      </InlineStack>
+                      {!amazonStatus?.connected && (
+                        <Text variant="bodySm" tone="critical">
+                          SP-API not connected. Configure credentials to enable inventory push.
+                        </Text>
+                      )}
+                    </BlockStack>
+                  </Card>
+
                   {/* Recommendations Table */}
                   <Card>
                     <BlockStack gap="400">
@@ -1396,6 +1470,109 @@ export default function AmazonPage() {
               <Text variant="bodySm" tone="subdued">
                 This mapping will be remembered for future orders with this ASIN.
               </Text>
+            </BlockStack>
+          </Modal.Section>
+        </Modal>
+
+        {/* Push Inventory Modal */}
+        <Modal
+          open={pushModalOpen}
+          onClose={() => !pushing && setPushModalOpen(false)}
+          title={pushDryRun ? 'Preview Inventory Push' : 'Push Inventory to Amazon'}
+          primaryAction={{
+            content: pushing ? 'Processing...' : (pushDryRun ? 'Run Preview' : 'Push to Amazon'),
+            onAction: handlePushInventory,
+            loading: pushing,
+            tone: pushDryRun ? undefined : 'critical',
+          }}
+          secondaryActions={[
+            { content: 'Close', onAction: () => setPushModalOpen(false), disabled: pushing },
+          ]}
+          large
+        >
+          <Modal.Section>
+            <BlockStack gap="400">
+              {pushDryRun ? (
+                <Banner tone="info">
+                  <p>
+                    This will show what changes would be made to Amazon without actually updating anything.
+                  </p>
+                </Banner>
+              ) : (
+                <Banner tone="warning">
+                  <p>
+                    This will update listing quantities on Amazon. Make sure you have reviewed the recommendations first.
+                  </p>
+                </Banner>
+              )}
+
+              {pushResult && (
+                <>
+                  {pushResult.dry_run ? (
+                    <Banner
+                      tone="info"
+                      title={`Preview: ${pushResult.planned_updates} listings would be updated`}
+                    >
+                      <p>
+                        {pushResult.total_eligible} eligible listings found
+                        {pushResult.truncated && ` (limited to ${pushResult.max_limit})`}
+                        {pushResult.skipped_count > 0 && `, ${pushResult.skipped_count} skipped`}
+                      </p>
+                    </Banner>
+                  ) : (
+                    <Banner
+                      tone={pushResult.failed > 0 ? 'warning' : 'success'}
+                      title={`${pushResult.success} of ${pushResult.total} listings updated`}
+                    >
+                      {pushResult.failed > 0 && (
+                        <p>{pushResult.failed} failed</p>
+                      )}
+                    </Banner>
+                  )}
+
+                  {pushResult.updates && pushResult.updates.length > 0 && (
+                    <Card>
+                      <BlockStack gap="200">
+                        <Text variant="headingSm">
+                          {pushResult.dry_run ? 'Planned Updates' : 'Completed Updates'}
+                        </Text>
+                        <Divider />
+                        <DataTable
+                          columnContentTypes={['text', 'text', 'text', 'numeric', 'text']}
+                          headings={['SKU', 'ASIN', 'Bundle', 'New Qty', 'Pool']}
+                          rows={pushResult.updates.slice(0, 20).map(u => [
+                            u.sku,
+                            u.asin || '-',
+                            u.bundle_sku || '-',
+                            u.new_qty,
+                            u.pool_name || '-',
+                          ])}
+                        />
+                        {pushResult.updates.length > 20 && (
+                          <Text variant="bodySm" tone="subdued">
+                            ...and {pushResult.updates.length - 20} more
+                          </Text>
+                        )}
+                      </BlockStack>
+                    </Card>
+                  )}
+
+                  {pushResult.errors && pushResult.errors.length > 0 && (
+                    <Card>
+                      <BlockStack gap="200">
+                        <Text variant="headingSm" tone="critical">Errors</Text>
+                        <Divider />
+                        {pushResult.errors.slice(0, 10).map((err, i) => (
+                          <InlineStack key={i} gap="200">
+                            <Badge tone="critical">{err.sku}</Badge>
+                            <Text variant="bodySm">{err.error}</Text>
+                          </InlineStack>
+                        ))}
+                      </BlockStack>
+                    </Card>
+                  )}
+                </>
+              )}
             </BlockStack>
           </Modal.Section>
         </Modal>

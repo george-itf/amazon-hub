@@ -827,3 +827,13 @@ export async function removePoolMember(poolId, memberId) {
     method: 'DELETE',
   });
 }
+
+export async function pushAmazonInventory(options = {}) {
+  const { location = 'Warehouse', dry_run = true, only_mapped = true, limit = 50 } = options;
+  return request('/amazon/inventory/push', {
+    method: 'POST',
+    body: { location, dry_run, only_mapped, limit },
+    idempotencyKey: generateIdempotencyKey(),
+    timeout: 180000, // 3 minutes for live push
+  });
+}
