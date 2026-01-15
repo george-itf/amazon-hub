@@ -233,7 +233,9 @@ export default function Dashboard() {
             onDismiss={() => setAmazonResult(null)}
           >
             <p>
-              {amazonResult.created} new orders imported, {amazonResult.updated} updated, {amazonResult.skipped} unchanged
+              {amazonResult.created} new orders imported
+              {amazonResult.linked > 0 && `, ${amazonResult.linked} linked to Shopify`}
+              , {amazonResult.updated} updated, {amazonResult.skipped} unchanged
               {amazonResult.errors?.length > 0 && ` (${amazonResult.errors.length} errors)`}
             </p>
           </Banner>

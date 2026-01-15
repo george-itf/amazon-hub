@@ -81,6 +81,7 @@ router.post('/sync/orders', requireAdmin, async (req, res) => {
       total: amazonOrders.length,
       created: 0,
       updated: 0,
+      linked: 0,
       skipped: 0,
       errors: [],
     };
@@ -99,10 +100,11 @@ router.post('/sync/orders', requireAdmin, async (req, res) => {
 
     await recordSystemEvent({
       eventType: 'AMAZON_SYNC',
-      description: `Synced ${results.total} Amazon orders: ${results.created} created, ${results.updated} updated, ${results.skipped} skipped`,
+      description: `Synced ${results.total} Amazon orders: ${results.created} created, ${results.linked} linked to Shopify, ${results.updated} updated, ${results.skipped} skipped`,
       metadata: {
         total: results.total,
         created: results.created,
+        linked: results.linked,
         updated: results.updated,
         skipped: results.skipped,
         errors: results.errors.length,
@@ -123,8 +125,8 @@ router.post('/sync/orders', requireAdmin, async (req, res) => {
 async function processAmazonOrder(amazonOrder, results) {
   const amazonOrderId = amazonOrder.AmazonOrderId;
 
-  // Check if order already exists
-  const { data: existing } = await supabase
+  // Check if this Amazon order already exists
+  const { data: existingAmazon } = await supabase
     .from('orders')
     .select('id, status')
     .eq('external_order_id', amazonOrderId)
@@ -148,39 +150,95 @@ async function processAmazonOrder(amazonOrder, results) {
     ? Math.round(parseFloat(amazonOrder.OrderTotal.Amount) * 100)
     : 0;
 
-  if (existing) {
-    // Update existing order if status changed (only if not already further in pipeline)
-    const statusPriority = {
-      'IMPORTED': 0,
-      'NEEDS_REVIEW': 1,
-      'READY_TO_PICK': 2,
-      'PICKED': 3,
-      'DISPATCHED': 4,
-      'CANCELLED': 5,
-    };
-
-    // Only update if Amazon status indicates a later stage
-    if (amazonStatus === 'DISPATCHED' && existing.status !== 'DISPATCHED') {
+  if (existingAmazon) {
+    // Update existing Amazon order if status changed
+    if (amazonStatus === 'DISPATCHED' && existingAmazon.status !== 'DISPATCHED') {
       await supabase
         .from('orders')
         .update({
           status: 'DISPATCHED',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', existing.id);
+        .eq('id', existingAmazon.id);
       results.updated++;
-    } else if (amazonStatus === 'CANCELLED' && existing.status !== 'CANCELLED') {
+    } else if (amazonStatus === 'CANCELLED' && existingAmazon.status !== 'CANCELLED') {
       await supabase
         .from('orders')
         .update({
           status: 'CANCELLED',
           updated_at: new Date().toISOString(),
         })
-        .eq('id', existing.id);
+        .eq('id', existingAmazon.id);
       results.updated++;
     } else {
       results.skipped++;
     }
+    return;
+  }
+
+  // Check if there's a matching Shopify order that has this Amazon order ID
+  // (Shopify orders from Amazon apps often store the Amazon order ID in order notes or metadata)
+  const { data: matchingShopify } = await supabase
+    .from('orders')
+    .select('id, status, external_order_id')
+    .eq('channel', 'shopify')
+    .eq('amazon_order_id', amazonOrderId)
+    .maybeSingle();
+
+  // Also check if Shopify order has Amazon order ID in raw_payload
+  let linkedShopifyOrder = matchingShopify;
+  if (!linkedShopifyOrder) {
+    // Search for Shopify orders that might have the Amazon order ID in their payload
+    const { data: shopifyOrders } = await supabase
+      .from('orders')
+      .select('id, status, external_order_id, raw_payload')
+      .eq('channel', 'shopify')
+      .is('amazon_order_id', null)
+      .limit(100);
+
+    if (shopifyOrders) {
+      for (const order of shopifyOrders) {
+        const payload = order.raw_payload;
+        if (!payload) continue;
+
+        // Check various places where Amazon order ID might be stored
+        const noteMatch = payload.note?.includes(amazonOrderId);
+        const tagMatch = payload.tags?.includes(amazonOrderId);
+        const nameMatch = payload.name?.includes(amazonOrderId);
+
+        // Check line item properties for ASIN/Amazon references
+        const lineItemMatch = payload.line_items?.some(li =>
+          li.properties?.some(p =>
+            p.value === amazonOrderId ||
+            (p.name?.toLowerCase().includes('amazon') && p.value?.includes(amazonOrderId))
+          )
+        );
+
+        if (noteMatch || tagMatch || nameMatch || lineItemMatch) {
+          linkedShopifyOrder = order;
+          break;
+        }
+      }
+    }
+  }
+
+  // If we found a matching Shopify order, link them
+  if (linkedShopifyOrder) {
+    await supabase
+      .from('orders')
+      .update({
+        amazon_order_id: amazonOrderId,
+        source_channel: 'AMAZON',
+        raw_payload: {
+          ...linkedShopifyOrder.raw_payload,
+          _amazon_data: amazonOrder,
+        },
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', linkedShopifyOrder.id);
+
+    console.log(`[SP-API] Linked Amazon order ${amazonOrderId} to Shopify order ${linkedShopifyOrder.external_order_id}`);
+    results.linked++;
     return;
   }
 

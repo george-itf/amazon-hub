@@ -10,6 +10,58 @@ import { normalizeAsin, normalizeSku, fingerprintTitle } from '../utils/identity
 const router = express.Router();
 
 /**
+ * Extract Amazon order ID from Shopify order data
+ * Amazon order IDs typically look like: 123-1234567-1234567
+ */
+function extractAmazonOrderId(shopifyOrder) {
+  const amazonOrderPattern = /\d{3}-\d{7}-\d{7}/;
+
+  // Check order notes
+  if (shopifyOrder.note) {
+    const match = shopifyOrder.note.match(amazonOrderPattern);
+    if (match) return match[0];
+  }
+
+  // Check tags
+  if (shopifyOrder.tags) {
+    const match = shopifyOrder.tags.match(amazonOrderPattern);
+    if (match) return match[0];
+  }
+
+  // Check order name (some apps put it here)
+  if (shopifyOrder.name) {
+    const match = shopifyOrder.name.match(amazonOrderPattern);
+    if (match) return match[0];
+  }
+
+  // Check line item properties
+  for (const lineItem of shopifyOrder.line_items || []) {
+    for (const prop of lineItem.properties || []) {
+      // Look for Amazon order ID property
+      if (prop.name?.toLowerCase().includes('amazon') && prop.name?.toLowerCase().includes('order')) {
+        const match = prop.value?.match(amazonOrderPattern);
+        if (match) return match[0];
+      }
+      // Direct pattern match in value
+      if (prop.value) {
+        const match = prop.value.match(amazonOrderPattern);
+        if (match) return match[0];
+      }
+    }
+  }
+
+  // Check note_attributes
+  for (const attr of shopifyOrder.note_attributes || []) {
+    if (attr.name?.toLowerCase().includes('amazon')) {
+      const match = attr.value?.match(amazonOrderPattern);
+      if (match) return match[0];
+    }
+  }
+
+  return null;
+}
+
+/**
  * POST /orders/import
  * Import orders from Shopify
  * Idempotent - will not duplicate orders
@@ -106,6 +158,9 @@ router.post('/import', requireStaff, async (req, res) => {
       // Determine final status BEFORE inserting order
       const finalStatus = allLinesResolved ? 'READY_TO_PICK' : 'NEEDS_REVIEW';
 
+      // Extract Amazon order ID if this order came from Amazon
+      const amazonOrderId = extractAmazonOrderId(shopifyOrder);
+
       // Insert order with correct final status (no race condition)
       const { data: newOrder, error: orderError } = await supabase
         .from('orders')
@@ -120,7 +175,10 @@ router.post('/import', requireStaff, async (req, res) => {
           shipping_address: shippingAddress,
           raw_payload: shopifyOrder,
           total_price_pence: totalPricePence,
-          currency: shopifyOrder.currency || 'GBP'
+          currency: shopifyOrder.currency || 'GBP',
+          amazon_order_id: amazonOrderId,
+          shopify_order_id: externalOrderId,
+          source_channel: amazonOrderId ? 'AMAZON' : 'SHOPIFY',
         })
         .select()
         .single();
@@ -323,6 +381,9 @@ router.post('/import-historical', requireAdmin, async (req, res) => {
         orderStatus = allLinesResolved ? 'READY_TO_PICK' : 'NEEDS_REVIEW';
       }
 
+      // Extract Amazon order ID if this order came from Amazon
+      const amazonOrderId = extractAmazonOrderId(shopifyOrder);
+
       // Insert order
       const { data: newOrder, error: orderError } = await supabase
         .from('orders')
@@ -337,7 +398,10 @@ router.post('/import-historical', requireAdmin, async (req, res) => {
           shipping_address: shippingAddress,
           raw_payload: shopifyOrder,
           total_price_pence: totalPricePence,
-          currency: shopifyOrder.currency || 'GBP'
+          currency: shopifyOrder.currency || 'GBP',
+          amazon_order_id: amazonOrderId,
+          shopify_order_id: externalOrderId,
+          source_channel: amazonOrderId ? 'AMAZON' : 'SHOPIFY',
         })
         .select()
         .single();
