@@ -1,6 +1,12 @@
 /**
  * Amazon Selling Partner API (SP-API) Client
  * Handles authentication and API calls to Amazon's SP-API
+ *
+ * Features:
+ * - Automatic token refresh
+ * - Rate limiting with per-endpoint tracking
+ * - Exponential backoff for rate limit errors
+ * - Retry logic for transient failures
  */
 import fetch from 'node-fetch';
 
@@ -16,6 +22,131 @@ const LWA_TOKEN_URL = 'https://api.amazon.com/auth/o2/token';
 
 // UK Marketplace ID
 const UK_MARKETPLACE_ID = 'A1F83G8C2ARO7P';
+
+// Retry configuration
+const RETRY_CONFIG = {
+  maxRetries: 4,
+  baseDelayMs: 1000,      // 1 second base delay
+  maxDelayMs: 16000,      // 16 seconds max delay
+  retryableStatuses: [429, 500, 502, 503, 504],
+};
+
+// Rate limit configuration per API type (requests per second)
+const RATE_LIMITS = {
+  '/orders/': { burst: 20, rate: 0.5 },      // Orders API
+  '/finances/': { burst: 30, rate: 0.5 },    // Finances API
+  '/catalog/': { burst: 10, rate: 1 },       // Catalog API
+  '/listings/': { burst: 5, rate: 1 },       // Listings API
+  '/reports/': { burst: 10, rate: 0.5 },     // Reports API
+  '/fba/inventory/': { burst: 2, rate: 0.5 }, // Inventory API
+  default: { burst: 10, rate: 1 },
+};
+
+/**
+ * Rate Limiter class - tracks requests per endpoint to avoid hitting limits
+ */
+class RateLimiter {
+  constructor() {
+    this.buckets = new Map();  // endpoint -> { tokens, lastRefill }
+  }
+
+  /**
+   * Get rate limit config for a path
+   */
+  getConfig(path) {
+    for (const [prefix, config] of Object.entries(RATE_LIMITS)) {
+      if (prefix !== 'default' && path.includes(prefix)) {
+        return config;
+      }
+    }
+    return RATE_LIMITS.default;
+  }
+
+  /**
+   * Get bucket key from path
+   */
+  getBucketKey(path) {
+    for (const prefix of Object.keys(RATE_LIMITS)) {
+      if (prefix !== 'default' && path.includes(prefix)) {
+        return prefix;
+      }
+    }
+    return 'default';
+  }
+
+  /**
+   * Wait for rate limit slot, returns delay applied in ms
+   */
+  async acquire(path) {
+    const key = this.getBucketKey(path);
+    const config = this.getConfig(path);
+
+    if (!this.buckets.has(key)) {
+      this.buckets.set(key, {
+        tokens: config.burst,
+        lastRefill: Date.now(),
+      });
+    }
+
+    const bucket = this.buckets.get(key);
+    const now = Date.now();
+    const timePassed = (now - bucket.lastRefill) / 1000;
+
+    // Refill tokens based on time passed
+    bucket.tokens = Math.min(config.burst, bucket.tokens + timePassed * config.rate);
+    bucket.lastRefill = now;
+
+    if (bucket.tokens >= 1) {
+      bucket.tokens -= 1;
+      return 0;
+    }
+
+    // Need to wait for a token
+    const waitTime = Math.ceil((1 - bucket.tokens) / config.rate * 1000);
+    await this.sleep(waitTime);
+    bucket.tokens = 0;
+    bucket.lastRefill = Date.now();
+    return waitTime;
+  }
+
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+
+/**
+ * Calculate exponential backoff delay
+ */
+function calculateBackoff(attempt, baseDelay = RETRY_CONFIG.baseDelayMs) {
+  const delay = baseDelay * Math.pow(2, attempt);
+  // Add jitter (±25%)
+  const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+  return Math.min(delay + jitter, RETRY_CONFIG.maxDelayMs);
+}
+
+/**
+ * Check if error is retryable
+ */
+function isRetryableError(error, status) {
+  // Network errors
+  if (error && (
+    error.code === 'ECONNRESET' ||
+    error.code === 'ETIMEDOUT' ||
+    error.code === 'ENOTFOUND' ||
+    error.code === 'ECONNREFUSED' ||
+    error.message?.includes('network') ||
+    error.message?.includes('timeout')
+  )) {
+    return true;
+  }
+
+  // HTTP status codes
+  if (status && RETRY_CONFIG.retryableStatuses.includes(status)) {
+    return true;
+  }
+
+  return false;
+}
 
 /**
  * SP-API Client class
@@ -35,6 +166,9 @@ class SpApiClient {
 
     this.accessToken = null;
     this.tokenExpiry = null;
+
+    // Rate limiter for request throttling
+    this.rateLimiter = new RateLimiter();
   }
 
   /**
@@ -46,6 +180,7 @@ class SpApiClient {
 
   /**
    * Get a valid access token, refreshing if needed
+   * Includes retry logic for transient failures
    */
   async getAccessToken() {
     // Return cached token if still valid (with 60s buffer)
@@ -53,56 +188,145 @@ class SpApiClient {
       return this.accessToken;
     }
 
-    // Refresh the token
-    const response = await fetch(LWA_TOKEN_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: this.refreshToken,
-        client_id: this.clientId,
-        client_secret: this.clientSecret,
-      }),
-    });
+    let lastError = null;
 
-    if (!response.ok) {
-      const error = await response.text();
-      console.error('SP-API token refresh failed:', error);
-      throw new Error(`Failed to refresh SP-API token: ${response.status}`);
+    for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+      try {
+        const response = await fetch(LWA_TOKEN_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            refresh_token: this.refreshToken,
+            client_id: this.clientId,
+            client_secret: this.clientSecret,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.text();
+
+          // Check if retryable
+          if (isRetryableError(null, response.status) && attempt < RETRY_CONFIG.maxRetries) {
+            const delay = calculateBackoff(attempt);
+            console.warn(`[SP-API] Token refresh failed (${response.status}), retrying in ${delay}ms (attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries})`);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+
+          console.error('SP-API token refresh failed:', error);
+          throw new Error(`Failed to refresh SP-API token: ${response.status}`);
+        }
+
+        const data = await response.json();
+        this.accessToken = data.access_token;
+        this.tokenExpiry = Date.now() + (data.expires_in * 1000);
+
+        return this.accessToken;
+      } catch (err) {
+        lastError = err;
+
+        // Check if network error is retryable
+        if (isRetryableError(err, null) && attempt < RETRY_CONFIG.maxRetries) {
+          const delay = calculateBackoff(attempt);
+          console.warn(`[SP-API] Token refresh network error, retrying in ${delay}ms (attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries}):`, err.message);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+
+        throw err;
+      }
     }
 
-    const data = await response.json();
-    this.accessToken = data.access_token;
-    this.tokenExpiry = Date.now() + (data.expires_in * 1000);
-
-    return this.accessToken;
+    throw lastError || new Error('Failed to refresh SP-API token after retries');
   }
 
   /**
    * Make an authenticated request to SP-API
+   * Includes rate limiting and retry logic with exponential backoff
    */
   async request(path, options = {}) {
-    const token = await this.getAccessToken();
-
-    const url = `${this.endpoint}${path}`;
-    const response = await fetch(url, {
-      ...options,
-      headers: {
-        'x-amz-access-token': token,
-        'Content-Type': 'application/json',
-        ...options.headers,
-      },
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`SP-API request failed: ${response.status}`, errorText);
-      throw new Error(`SP-API error: ${response.status} - ${errorText}`);
+    // Apply rate limiting
+    const waitTime = await this.rateLimiter.acquire(path);
+    if (waitTime > 0) {
+      console.log(`[SP-API] Rate limited, waited ${waitTime}ms for ${path}`);
     }
 
-    return response.json();
+    let lastError = null;
+    let lastStatus = null;
+
+    for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+      try {
+        const token = await this.getAccessToken();
+        const url = `${this.endpoint}${path}`;
+
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            'x-amz-access-token': token,
+            'Content-Type': 'application/json',
+            ...options.headers,
+          },
+        });
+
+        lastStatus = response.status;
+
+        if (!response.ok) {
+          const errorText = await response.text();
+
+          // Handle rate limiting specifically (429)
+          if (response.status === 429) {
+            // Check for Retry-After header
+            const retryAfter = response.headers.get('Retry-After');
+            const delay = retryAfter
+              ? parseInt(retryAfter) * 1000
+              : calculateBackoff(attempt, 2000); // Higher base for rate limits
+
+            if (attempt < RETRY_CONFIG.maxRetries) {
+              console.warn(`[SP-API] Rate limited (429), retrying in ${delay}ms (attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries})`);
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+          }
+
+          // Handle other retryable errors
+          if (isRetryableError(null, response.status) && attempt < RETRY_CONFIG.maxRetries) {
+            const delay = calculateBackoff(attempt);
+            console.warn(`[SP-API] Request failed (${response.status}), retrying in ${delay}ms (attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries})`);
+            await new Promise(r => setTimeout(r, delay));
+            continue;
+          }
+
+          console.error(`SP-API request failed: ${response.status}`, errorText);
+          const error = new Error(`SP-API error: ${response.status} - ${errorText}`);
+          error.status = response.status;
+          throw error;
+        }
+
+        return response.json();
+      } catch (err) {
+        lastError = err;
+
+        // Don't retry if it's an API error we already handled
+        if (err.status && !isRetryableError(null, err.status)) {
+          throw err;
+        }
+
+        // Check if network error is retryable
+        if (isRetryableError(err, null) && attempt < RETRY_CONFIG.maxRetries) {
+          const delay = calculateBackoff(attempt);
+          console.warn(`[SP-API] Network error on ${path}, retrying in ${delay}ms (attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries}):`, err.message);
+          await new Promise(r => setTimeout(r, delay));
+          continue;
+        }
+
+        throw err;
+      }
+    }
+
+    throw lastError || new Error(`SP-API request failed after ${RETRY_CONFIG.maxRetries} retries`);
   }
 
   /**
@@ -146,10 +370,12 @@ class SpApiClient {
 
   /**
    * Get all orders with pagination
+   * Rate limiting is handled automatically by the request method
    */
   async getAllOrders(params = {}) {
     const allOrders = [];
     let nextToken = null;
+    let pageCount = 0;
 
     do {
       const response = await this.getOrders({
@@ -162,10 +388,11 @@ class SpApiClient {
       }
 
       nextToken = response.NextToken;
+      pageCount++;
 
-      // Rate limiting - SP-API has burst limits
-      if (nextToken) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+      // Log progress for large fetches
+      if (pageCount % 5 === 0) {
+        console.log(`[SP-API] Fetched ${allOrders.length} orders (${pageCount} pages)...`);
       }
     } while (nextToken);
 
@@ -292,6 +519,7 @@ class SpApiClient {
 
   /**
    * Get all financial events with pagination
+   * Rate limiting is handled automatically by the request method
    */
   async getAllFinancialEvents(params = {}) {
     const allEvents = {
@@ -300,6 +528,7 @@ class SpApiClient {
       ServiceFeeEventList: [],
     };
     let nextToken = null;
+    let pageCount = 0;
 
     do {
       const response = await this.getFinancialEvents({
@@ -320,10 +549,14 @@ class SpApiClient {
       }
 
       nextToken = response.NextToken;
+      pageCount++;
 
-      // Rate limiting
-      if (nextToken) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+      // Log progress for large fetches
+      if (pageCount % 5 === 0) {
+        const total = allEvents.ShipmentEventList.length +
+                      allEvents.RefundEventList.length +
+                      allEvents.ServiceFeeEventList.length;
+        console.log(`[SP-API] Fetched ${total} financial events (${pageCount} pages)...`);
       }
     } while (nextToken);
 

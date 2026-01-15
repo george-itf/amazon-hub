@@ -6,6 +6,7 @@ import supabase from './supabase.js';
 import spApiClient from './spApi.js';
 import royalMailClient from './royalMail.js';
 import { recordSystemEvent } from './audit.js';
+import { processAmazonOrder, createResultsTracker } from '../utils/amazonOrderProcessor.js';
 
 const SCHEDULES = {
   ORDERS: 'amazon_order_sync',
@@ -126,7 +127,7 @@ class Scheduler {
   }
 
   /**
-   * Sync Amazon orders
+   * Sync Amazon orders - fully imports new orders and updates existing ones
    */
   async syncOrders() {
     if (!spApiClient.isConfigured()) {
@@ -144,43 +145,37 @@ class Scheduler {
 
     console.log(`[Scheduler] Found ${orders.length} orders to process`);
 
-    // Process orders (simplified - full logic is in amazon routes)
-    let created = 0;
-    let updated = 0;
+    // Use the shared order processor for full import
+    const results = createResultsTracker();
+    results.total = orders.length;
 
     for (const order of orders) {
-      const { data: existing } = await supabase
-        .from('orders')
-        .select('id, status')
-        .eq('external_order_id', order.AmazonOrderId)
-        .eq('channel', 'AMAZON')
-        .maybeSingle();
-
-      if (!existing) {
-        // New order - delegate to full import logic
-        // For scheduler, we just note it needs processing
-        created++;
-      } else {
-        // Check for status updates
-        const statusMap = {
-          'Shipped': 'DISPATCHED',
-          'Canceled': 'CANCELLED',
-        };
-        const newStatus = statusMap[order.OrderStatus];
-        if (newStatus && existing.status !== newStatus) {
-          await supabase
-            .from('orders')
-            .update({ status: newStatus, updated_at: new Date().toISOString() })
-            .eq('id', existing.id);
-          updated++;
-        }
+      try {
+        await processAmazonOrder(order, results);
+      } catch (err) {
+        console.error(`[Scheduler] Error processing order ${order.AmazonOrderId}:`, err.message);
+        results.errors.push({
+          orderId: order.AmazonOrderId,
+          error: err.message,
+        });
       }
     }
 
+    const summary = `Auto-sync: ${results.total} orders - ${results.created} created, ${results.linked} linked, ${results.updated} updated, ${results.skipped} skipped`;
+    console.log(`[Scheduler] ${summary}`);
+
     await recordSystemEvent({
       eventType: 'SCHEDULED_ORDER_SYNC',
-      description: `Auto-sync: ${orders.length} orders checked, ${created} new, ${updated} updated`,
-      metadata: { total: orders.length, created, updated },
+      description: summary,
+      severity: results.errors.length > 0 ? 'WARN' : 'INFO',
+      metadata: {
+        total: results.total,
+        created: results.created,
+        linked: results.linked,
+        updated: results.updated,
+        skipped: results.skipped,
+        errors: results.errors.length,
+      },
     });
   }
 
