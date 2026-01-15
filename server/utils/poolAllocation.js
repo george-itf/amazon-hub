@@ -126,7 +126,7 @@ export function allocatePool(pool) {
   for (const item of sortedByRemainder) {
     if (leftover <= 0) break;
 
-    const current = allocation.get(item.bom_id);
+    const current = allocation.get(item.bom_id) || 0;
     const buildable = members.find(m => m.bom_id === item.bom_id)?.buildable || 0;
     const maxQty = members.find(m => m.bom_id === item.bom_id)?.max_qty;
     const cap = maxQty !== null && maxQty !== undefined

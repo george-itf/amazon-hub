@@ -1252,18 +1252,19 @@ router.post('/inventory/push', requireAdmin, async (req, res) => {
         sync_type: 'INVENTORY_PUSH',
         started_at: startedAt,
         completed_at: completedAt,
-        status: results.failed === 0 ? 'SUCCESS' : (results.success > 0 ? 'PARTIAL' : 'FAILED'),
+        status: results.failed === 0 ? 'COMPLETED' : 'FAILED',
         items_processed: results.total,
         items_created: results.success,
         items_updated: 0,
         items_failed: results.failed,
-        error_details: results.errors.length > 0 ? results.errors : null,
+        error_message: results.errors.length > 0 ? JSON.stringify(results.errors) : null,
         metadata: {
           location,
           idempotency_key: idempotencyKey,
           dry_run: false,
           truncated,
           skipped_count: skipped.length,
+          partial_success: results.success > 0 && results.failed > 0,
         },
       });
     } catch (logErr) {
