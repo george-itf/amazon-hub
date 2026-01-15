@@ -262,4 +262,155 @@ router.get('/:id/movements', async (req, res) => {
   }
 });
 
+/**
+ * GET /components/:id/dependent-listings
+ * Get all listings/BOMs that depend on this component
+ * Shows impact analysis when component stock is low
+ */
+router.get('/:id/dependent-listings', async (req, res) => {
+  const { id } = req.params;
+  const { location = 'Warehouse' } = req.query;
+
+  try {
+    // Try RPC first
+    const { data: result, error } = await supabase.rpc('rpc_get_component_dependent_listings', {
+      p_component_id: id,
+      p_location: location
+    });
+
+    if (error) {
+      // Fall back to manual calculation if RPC doesn't exist
+      if (error.message?.includes('function') || error.code === '42883') {
+        console.warn('rpc_get_component_dependent_listings not found - using fallback');
+        return await calculateDependentListingsFallback(req, res, id, location);
+      }
+      console.error('Dependent listings fetch error:', error);
+      return errors.internal(res, `Failed to fetch dependent listings: ${error.message}`);
+    }
+
+    if (result?.ok === false) {
+      if (result.error?.code === 'COMPONENT_NOT_FOUND') {
+        return errors.notFound(res, 'Component');
+      }
+      return errors.internal(res, result.error?.message || 'Failed to fetch dependent listings');
+    }
+
+    sendSuccess(res, result?.data || result);
+  } catch (err) {
+    console.error('Dependent listings fetch error:', err);
+    errors.internal(res, `Failed to fetch dependent listings: ${err.message}`);
+  }
+});
+
+/**
+ * Fallback for dependent listings when RPC not available
+ */
+async function calculateDependentListingsFallback(req, res, componentId, location) {
+  try {
+    // Get the component
+    const { data: component, error: compError } = await supabase
+      .from('components')
+      .select('id, internal_sku, description, brand')
+      .eq('id', componentId)
+      .single();
+
+    if (compError) {
+      if (compError.code === 'PGRST116') {
+        return errors.notFound(res, 'Component');
+      }
+      throw compError;
+    }
+
+    // Get stock for this component
+    const { data: stock } = await supabase
+      .from('component_stock')
+      .select('on_hand, reserved')
+      .eq('component_id', componentId)
+      .eq('location', location)
+      .maybeSingle();
+
+    const onHand = stock?.on_hand || 0;
+    const reserved = stock?.reserved || 0;
+    const available = Math.max(0, onHand - reserved);
+
+    // Get all BOMs using this component
+    const { data: bomComponents, error: bcError } = await supabase
+      .from('bom_components')
+      .select(`
+        qty_required,
+        bom_id,
+        boms (
+          id,
+          bundle_sku,
+          description,
+          is_active
+        )
+      `)
+      .eq('component_id', componentId);
+
+    if (bcError) {
+      throw bcError;
+    }
+
+    // Get listings for these BOMs
+    const bomIds = [...new Set((bomComponents || [])
+      .filter(bc => bc.boms?.is_active)
+      .map(bc => bc.bom_id))];
+
+    const { data: listings } = await supabase
+      .from('listing_memory')
+      .select('id, asin, sku, title_fingerprint, is_active, bom_id')
+      .in('bom_id', bomIds)
+      .eq('is_active', true);
+
+    // Build result
+    const bomMap = new Map();
+    for (const bc of bomComponents || []) {
+      if (bc.boms?.is_active) {
+        bomMap.set(bc.bom_id, {
+          bundle_sku: bc.boms.bundle_sku,
+          description: bc.boms.description,
+          qty_required: bc.qty_required
+        });
+      }
+    }
+
+    const dependentListings = (listings || []).map(listing => {
+      const bomInfo = bomMap.get(listing.bom_id);
+      const maxSellable = Math.floor(available / (bomInfo?.qty_required || 1));
+
+      return {
+        listing_id: listing.id,
+        asin: listing.asin,
+        sku: listing.sku,
+        title_fingerprint: listing.title_fingerprint,
+        is_active: listing.is_active,
+        bom_id: listing.bom_id,
+        bundle_sku: bomInfo?.bundle_sku,
+        bom_description: bomInfo?.description,
+        qty_required_per_unit: bomInfo?.qty_required || 1,
+        max_sellable_from_this_component: maxSellable
+      };
+    });
+
+    sendSuccess(res, {
+      component: {
+        id: component.id,
+        internal_sku: component.internal_sku,
+        description: component.description,
+        brand: component.brand,
+        on_hand: onHand,
+        reserved,
+        available,
+        location
+      },
+      dependent_listings: dependentListings,
+      total_dependent: dependentListings.length
+    });
+  } catch (err) {
+    console.error('Dependent listings fallback error:', err);
+    errors.internal(res, `Failed to calculate dependent listings: ${err.message}`);
+  }
+}
+
 export default router;

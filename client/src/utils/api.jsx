@@ -260,6 +260,21 @@ export async function searchListings(query, activeOnly = true) {
   return request(`/listings/search/query?q=${encodeURIComponent(query)}&active_only=${activeOnly}`);
 }
 
+export async function getListingInventory(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/listings/inventory${query ? `?${query}` : ''}`);
+}
+
+export async function getSharedComponents(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/listings/shared-components${query ? `?${query}` : ''}`);
+}
+
+export async function getComponentDependentListings(componentId, params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/components/${componentId}/dependent-listings${query ? `?${query}` : ''}`);
+}
+
 // ============ Orders API ============
 
 export async function getOrders(params = {}) {
