@@ -599,3 +599,29 @@ export async function analyzeProfitability({ asin, components, sizeTier = 'stand
 export async function quickProfitCheck(asin) {
   return request(`/profit/quick/${asin}`);
 }
+
+// ============ Amazon SP-API ============
+
+export async function getAmazonStatus() {
+  return request('/amazon/status');
+}
+
+export async function syncAmazonOrders(daysBack = 7, statuses) {
+  return request('/amazon/sync/orders', {
+    method: 'POST',
+    body: { daysBack, statuses },
+    timeout: 120000, // 2 minute timeout for sync
+  });
+}
+
+export async function getRecentAmazonOrders(daysBack = 3) {
+  return request(`/amazon/orders/recent?daysBack=${daysBack}`);
+}
+
+export async function getAmazonOrderDetails(orderId) {
+  return request(`/amazon/order/${orderId}`);
+}
+
+export async function getAmazonInventory() {
+  return request('/amazon/inventory');
+}

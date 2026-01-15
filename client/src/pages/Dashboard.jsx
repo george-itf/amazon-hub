@@ -75,19 +75,26 @@ export default function Dashboard() {
   const [analyticsData, setAnalyticsData] = useState(null);
   const [selectedTab, setSelectedTab] = useState(0);
 
+  // Amazon sync state
+  const [amazonStatus, setAmazonStatus] = useState(null);
+  const [syncingAmazon, setSyncingAmazon] = useState(false);
+  const [amazonResult, setAmazonResult] = useState(null);
+
   const loadDashboard = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Load dashboard and analytics in parallel
-      const [dashboardData, analytics] = await Promise.all([
+      // Load dashboard, analytics, and Amazon status in parallel
+      const [dashboardData, analytics, amzStatus] = await Promise.all([
         api.getDashboard(),
         api.getAnalyticsSummary({ start_date: getDateDaysAgo(7) }).catch(() => null),
+        api.getAmazonStatus().catch(() => ({ connected: false, configured: false })),
       ]);
 
       setData(dashboardData);
       setAnalyticsData(analytics);
+      setAmazonStatus(amzStatus);
     } catch (err) {
       console.error('Dashboard load error:', err);
       setError(typeof err === 'string' ? err : err.message || JSON.stringify(err));
@@ -114,6 +121,23 @@ export default function Dashboard() {
       setImportError(errorMsg);
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleSyncAmazon = async () => {
+    try {
+      setSyncingAmazon(true);
+      setAmazonResult(null);
+      setImportError(null);
+      const result = await api.syncAmazonOrders(7); // Last 7 days
+      await loadDashboard();
+      setAmazonResult(result);
+    } catch (err) {
+      console.error('Amazon sync error:', err);
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Amazon sync failed');
+      setImportError(errorMsg);
+    } finally {
+      setSyncingAmazon(false);
     }
   };
 
@@ -175,6 +199,11 @@ export default function Dashboard() {
         loading: importing,
       }}
       secondaryActions={[
+        ...(amazonStatus?.connected ? [{
+          content: syncingAmazon ? 'Syncing...' : 'Sync Amazon',
+          onAction: handleSyncAmazon,
+          disabled: syncingAmazon,
+        }] : []),
         { content: 'Refresh', onAction: loadDashboard },
       ]}
     >
@@ -182,12 +211,26 @@ export default function Dashboard() {
         {/* Import Result Banner */}
         {importResult && (
           <Banner
-            title="Import Complete"
+            title="Shopify Import Complete"
             tone="success"
             onDismiss={() => setImportResult(null)}
           >
             <p>
               Imported: {importResult.imported} | Updated: {importResult.updated} | Skipped: {importResult.skipped}
+            </p>
+          </Banner>
+        )}
+
+        {/* Amazon Sync Result Banner */}
+        {amazonResult && (
+          <Banner
+            title="Amazon Sync Complete"
+            tone="success"
+            onDismiss={() => setAmazonResult(null)}
+          >
+            <p>
+              {amazonResult.created} new orders imported, {amazonResult.updated} updated, {amazonResult.skipped} unchanged
+              {amazonResult.errors?.length > 0 && ` (${amazonResult.errors.length} errors)`}
             </p>
           </Banner>
         )}

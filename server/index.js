@@ -28,6 +28,7 @@ import dashboardRoutes from './routes/dashboard.js';
 import brainRoutes from './routes/brain.js';
 import analyticsRoutes from './routes/analytics.js';
 import profitRoutes from './routes/profit.js';
+import amazonRoutes from './routes/amazon.js';
 
 // Create the Express app
 const app = express();
@@ -193,6 +194,9 @@ app.use('/analytics', heavyOpLimiter, analyticsRoutes);
 
 // Profit analyzer
 app.use('/profit', profitRoutes);
+
+// Amazon SP-API integration
+app.use('/amazon', amazonRoutes);
 
 // 404 handler
 app.use((req, res) => {
