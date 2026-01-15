@@ -17,6 +17,8 @@ import {
   KeyboardIcon,
   SearchIcon,
   CheckIcon,
+  StoreMajor,
+  DeliveryIcon,
 } from '@shopify/polaris-icons';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -52,6 +54,10 @@ export default function Nav() {
     { label: 'Audit Log', url: '/audit', icon: ClockIcon },
   ];
 
+  const integrationsItems = [
+    { label: 'Amazon', url: '/amazon', icon: StoreMajor },
+  ];
+
   return (
     <Navigation location={location.pathname}>
       <Navigation.Section
@@ -76,6 +82,16 @@ export default function Nav() {
       <Navigation.Section
         title="Analytics"
         items={analyticsItems.map(item => ({
+          ...item,
+          selected: location.pathname === item.url,
+          onClick: () => navigate(item.url),
+        }))}
+        separator
+      />
+
+      <Navigation.Section
+        title="Integrations"
+        items={integrationsItems.map(item => ({
           ...item,
           selected: location.pathname === item.url,
           onClick: () => navigate(item.url),

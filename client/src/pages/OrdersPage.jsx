@@ -19,8 +19,9 @@ import {
   Checkbox,
   ButtonGroup,
 } from '@shopify/polaris';
-import { importOrders, getOrders, createPickBatch, importHistoricalOrders } from '../utils/api.jsx';
+import { importOrders, getOrders, createPickBatch, importHistoricalOrders, getAmazonOrderEnhancedDetails, syncAmazonOrders } from '../utils/api.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
+import { KeepaMetricsCompact } from '../components/KeepaMetrics.jsx';
 
 /**
  * Format price from pence to pounds
@@ -85,6 +86,14 @@ export default function OrdersPage() {
   const [creatingBatch, setCreatingBatch] = useState(false);
   const [batchSuccess, setBatchSuccess] = useState(null);
 
+  // Amazon enhanced details
+  const [amazonDetails, setAmazonDetails] = useState(null);
+  const [loadingAmazonDetails, setLoadingAmazonDetails] = useState(false);
+
+  // Amazon sync state
+  const [syncingAmazon, setSyncingAmazon] = useState(false);
+  const [amazonSyncResult, setAmazonSyncResult] = useState(null);
+
   // Historical import state
   const [historicalModal, setHistoricalModal] = useState(false);
   const [historicalForm, setHistoricalForm] = useState({
@@ -108,6 +117,49 @@ export default function OrdersPage() {
       setError(errorMsg);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Load Amazon enhanced details when selecting an Amazon order
+  async function loadAmazonDetails(order) {
+    if (order.channel !== 'AMAZON' && !order.amazon_order_id) {
+      setAmazonDetails(null);
+      return;
+    }
+
+    setLoadingAmazonDetails(true);
+    try {
+      const details = await getAmazonOrderEnhancedDetails(order.id);
+      setAmazonDetails(details);
+    } catch (err) {
+      console.error('Failed to load Amazon details:', err);
+      setAmazonDetails(null);
+    } finally {
+      setLoadingAmazonDetails(false);
+    }
+  }
+
+  // When an order is selected, load Amazon details if applicable
+  useEffect(() => {
+    if (selectedOrder) {
+      loadAmazonDetails(selectedOrder);
+    } else {
+      setAmazonDetails(null);
+    }
+  }, [selectedOrder]);
+
+  async function handleSyncAmazon() {
+    setSyncingAmazon(true);
+    setAmazonSyncResult(null);
+    try {
+      const result = await syncAmazonOrders(7);
+      setAmazonSyncResult(result);
+      await loadOrders();
+    } catch (err) {
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Amazon sync failed');
+      setError(errorMsg);
+    } finally {
+      setSyncingAmazon(false);
     }
   }
 
@@ -334,6 +386,7 @@ export default function OrdersPage() {
       }}
       secondaryActions={[
         { content: 'Refresh', onAction: loadOrders },
+        { content: syncingAmazon ? 'Syncing...' : 'Sync Amazon', onAction: handleSyncAmazon, loading: syncingAmazon },
         ...(isAdmin
           ? [{ content: 'Import Historical', onAction: () => setHistoricalModal(true) }]
           : []),
@@ -361,6 +414,19 @@ export default function OrdersPage() {
           >
             <p>
               Imported: {importResult.imported} | Updated: {importResult.updated} | Skipped: {importResult.skipped}
+            </p>
+          </Banner>
+        )}
+
+        {amazonSyncResult && (
+          <Banner
+            title="Amazon Sync Complete"
+            tone="success"
+            onDismiss={() => setAmazonSyncResult(null)}
+          >
+            <p>
+              {amazonSyncResult.created} new | {amazonSyncResult.linked || 0} linked | {amazonSyncResult.updated} updated | {amazonSyncResult.skipped} unchanged
+              {amazonSyncResult.errors?.length > 0 && ` | ${amazonSyncResult.errors.length} errors`}
             </p>
           </Banner>
         )}
@@ -522,6 +588,136 @@ export default function OrdersPage() {
                 </BlockStack>
               </InlineStack>
 
+              {/* Amazon-Specific Details */}
+              {(selectedOrder.channel === 'AMAZON' || selectedOrder.amazon_order_id) && (
+                <>
+                  <Divider />
+                  <BlockStack gap="300">
+                    <InlineStack align="space-between">
+                      <Text variant="headingSm">Amazon Details</Text>
+                      <Badge tone="info">Amazon FBM</Badge>
+                    </InlineStack>
+
+                    {loadingAmazonDetails ? (
+                      <InlineStack gap="200" blockAlign="center">
+                        <Spinner size="small" />
+                        <Text variant="bodySm" tone="subdued">Loading Amazon details...</Text>
+                      </InlineStack>
+                    ) : amazonDetails ? (
+                      <BlockStack gap="300">
+                        {/* Profit Analysis */}
+                        {amazonDetails.profit_analysis && (
+                          <Card>
+                            <BlockStack gap="200">
+                              <Text variant="bodyMd" fontWeight="semibold">Profit Analysis</Text>
+                              <InlineStack gap="600" wrap>
+                                <BlockStack gap="100">
+                                  <Text variant="bodySm" tone="subdued">Revenue</Text>
+                                  <Text variant="bodyMd" fontWeight="semibold" tone="success">
+                                    {formatPrice(amazonDetails.profit_analysis.revenue_pence)}
+                                  </Text>
+                                </BlockStack>
+                                <BlockStack gap="100">
+                                  <Text variant="bodySm" tone="subdued">Amazon Fees</Text>
+                                  <Text variant="bodyMd" fontWeight="semibold" tone="critical">
+                                    -{formatPrice(amazonDetails.profit_analysis.amazon_fees_pence)}
+                                  </Text>
+                                </BlockStack>
+                                <BlockStack gap="100">
+                                  <Text variant="bodySm" tone="subdued">Component Cost</Text>
+                                  <Text variant="bodyMd" fontWeight="semibold" tone="critical">
+                                    -{formatPrice(amazonDetails.profit_analysis.component_cost_pence)}
+                                  </Text>
+                                </BlockStack>
+                                <BlockStack gap="100">
+                                  <Text variant="bodySm" tone="subdued">Gross Profit</Text>
+                                  <Text
+                                    variant="headingSm"
+                                    fontWeight="bold"
+                                    tone={amazonDetails.profit_analysis.gross_profit_pence >= 0 ? 'success' : 'critical'}
+                                  >
+                                    {formatPrice(amazonDetails.profit_analysis.gross_profit_pence)}
+                                    <Text as="span" variant="bodySm" tone="subdued">
+                                      {' '}({amazonDetails.profit_analysis.margin_percent}%)
+                                    </Text>
+                                  </Text>
+                                </BlockStack>
+                              </InlineStack>
+                            </BlockStack>
+                          </Card>
+                        )}
+
+                        {/* Shipment Status */}
+                        {amazonDetails.shipment && (
+                          <Card>
+                            <BlockStack gap="200">
+                              <InlineStack align="space-between">
+                                <Text variant="bodyMd" fontWeight="semibold">Shipment</Text>
+                                <Badge tone="success">Dispatched</Badge>
+                              </InlineStack>
+                              <InlineStack gap="600" wrap>
+                                <BlockStack gap="100">
+                                  <Text variant="bodySm" tone="subdued">Carrier</Text>
+                                  <Text variant="bodyMd">{amazonDetails.shipment.carrier_name}</Text>
+                                </BlockStack>
+                                <BlockStack gap="100">
+                                  <Text variant="bodySm" tone="subdued">Tracking #</Text>
+                                  <Text variant="bodyMd" fontFamily="monospace">
+                                    {amazonDetails.shipment.tracking_number}
+                                  </Text>
+                                </BlockStack>
+                                {amazonDetails.shipment.ship_date && (
+                                  <BlockStack gap="100">
+                                    <Text variant="bodySm" tone="subdued">Ship Date</Text>
+                                    <Text variant="bodyMd">
+                                      {formatDate(amazonDetails.shipment.ship_date)}
+                                    </Text>
+                                  </BlockStack>
+                                )}
+                              </InlineStack>
+                            </BlockStack>
+                          </Card>
+                        )}
+
+                        {/* Fees Breakdown */}
+                        {amazonDetails.fees && amazonDetails.fees.length > 0 && (
+                          <Card>
+                            <BlockStack gap="200">
+                              <Text variant="bodyMd" fontWeight="semibold">Fee Breakdown</Text>
+                              {amazonDetails.fees.map((fee, idx) => (
+                                <InlineStack key={idx} gap="400" blockAlign="center">
+                                  <Text variant="bodySm" tone="subdued">{fee.asin || fee.seller_sku}</Text>
+                                  <Text variant="bodySm">
+                                    Referral: {formatPrice(fee.referral_fee_pence)}
+                                  </Text>
+                                  <Text variant="bodySm" tone="success">
+                                    Net: {formatPrice(fee.net_proceeds_pence)}
+                                  </Text>
+                                </InlineStack>
+                              ))}
+                            </BlockStack>
+                          </Card>
+                        )}
+
+                        {/* Amazon Order ID */}
+                        <InlineStack gap="400">
+                          <BlockStack gap="100">
+                            <Text variant="bodySm" tone="subdued">Amazon Order ID</Text>
+                            <Text variant="bodySm" fontFamily="monospace">
+                              {amazonDetails.amazon_order_id || amazonDetails.external_order_id}
+                            </Text>
+                          </BlockStack>
+                        </InlineStack>
+                      </BlockStack>
+                    ) : (
+                      <Text variant="bodySm" tone="subdued">
+                        No additional Amazon details available. Sync fees to see profit analysis.
+                      </Text>
+                    )}
+                  </BlockStack>
+                </>
+              )}
+
               <Divider />
 
               {/* Customer Info */}
@@ -561,8 +757,8 @@ export default function OrdersPage() {
                 </InlineStack>
                 {selectedOrder.order_lines?.length > 0 ? (
                   <DataTable
-                    columnContentTypes={['text', 'text', 'numeric', 'numeric', 'text']}
-                    headings={['Item', 'SKU / ASIN', 'Qty', 'Unit Price', 'Status']}
+                    columnContentTypes={['text', 'text', 'text', 'numeric', 'numeric', 'text']}
+                    headings={['Item', 'SKU / ASIN', 'Market Data', 'Qty', 'Unit Price', 'Status']}
                     rows={selectedOrder.order_lines.map((line) => [
                       <BlockStack gap="100" key={line.id}>
                         <Text variant="bodyMd" fontWeight="semibold">
@@ -579,6 +775,17 @@ export default function OrdersPage() {
                         {line.asin && <Text variant="bodySm">ASIN: {line.asin}</Text>}
                         {!line.sku && !line.asin && <Text variant="bodySm" tone="subdued">-</Text>}
                       </BlockStack>,
+                      line.asin ? (
+                        <KeepaMetricsCompact
+                          key={`keepa-${line.id}`}
+                          asin={line.asin}
+                          showPrice
+                          showRank
+                          showRating={false}
+                        />
+                      ) : (
+                        <Text key={`keepa-${line.id}`} variant="bodySm" tone="subdued">-</Text>
+                      ),
                       line.quantity,
                       formatPrice(line.unit_price_pence, selectedOrder.currency),
                       <BlockStack gap="100" key={`status-${line.id}`}>

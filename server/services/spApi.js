@@ -221,10 +221,199 @@ class SpApiClient {
   async getCatalogItem(asin) {
     const queryParams = new URLSearchParams({
       marketplaceIds: this.marketplaceId,
-      includedData: 'summaries,attributes,salesRanks',
+      includedData: 'summaries,attributes,salesRanks,images,dimensions',
     });
 
     const response = await this.request(`/catalog/2022-04-01/items/${asin}?${queryParams}`);
+    return response;
+  }
+
+  /**
+   * Get a single order with buyer info
+   */
+  async getOrder(orderId) {
+    const response = await this.request(`/orders/v0/orders/${orderId}`);
+    return response.payload || response;
+  }
+
+  /**
+   * Get buyer info for an order (requires additional permissions)
+   */
+  async getOrderBuyerInfo(orderId) {
+    try {
+      const response = await this.request(`/orders/v0/orders/${orderId}/buyerInfo`);
+      return response.payload || response;
+    } catch (err) {
+      console.warn(`Could not get buyer info for ${orderId}:`, err.message);
+      return null;
+    }
+  }
+
+  /**
+   * Confirm shipment for FBM order
+   * @param {string} orderId - Amazon order ID
+   * @param {Object} shipmentInfo - Shipment details
+   * @param {string} shipmentInfo.carrierCode - Carrier code (e.g., 'Royal Mail', 'DPD')
+   * @param {string} shipmentInfo.trackingNumber - Tracking number
+   * @param {string} shipmentInfo.shipDate - ISO date string (optional, defaults to now)
+   */
+  async confirmShipment(orderId, shipmentInfo) {
+    const { carrierCode, carrierName, trackingNumber, shipDate } = shipmentInfo;
+
+    // Build the shipment confirmation request
+    const body = {
+      marketplaceId: this.marketplaceId,
+      codCollectionMethod: 'DirectPayment',
+      packageDetail: {
+        packageReferenceId: `PKG-${orderId}`,
+        carrierCode: carrierCode,
+        carrierName: carrierName || carrierCode,
+        shippingMethod: 'Standard',
+        trackingNumber: trackingNumber,
+        shipDate: shipDate || new Date().toISOString(),
+      },
+    };
+
+    const response = await this.request(`/orders/v0/orders/${orderId}/shipmentConfirmation`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+
+    return response;
+  }
+
+  /**
+   * Get financial events for a specific order
+   */
+  async getOrderFinancialEvents(orderId) {
+    const response = await this.request(`/finances/v0/orders/${orderId}/financialEvents`);
+    return response.payload || response;
+  }
+
+  /**
+   * Get all financial events with pagination
+   */
+  async getAllFinancialEvents(params = {}) {
+    const allEvents = {
+      ShipmentEventList: [],
+      RefundEventList: [],
+      ServiceFeeEventList: [],
+    };
+    let nextToken = null;
+
+    do {
+      const response = await this.getFinancialEvents({
+        ...params,
+        nextToken,
+      });
+
+      const events = response.FinancialEvents || {};
+
+      if (events.ShipmentEventList) {
+        allEvents.ShipmentEventList.push(...events.ShipmentEventList);
+      }
+      if (events.RefundEventList) {
+        allEvents.RefundEventList.push(...events.RefundEventList);
+      }
+      if (events.ServiceFeeEventList) {
+        allEvents.ServiceFeeEventList.push(...events.ServiceFeeEventList);
+      }
+
+      nextToken = response.NextToken;
+
+      // Rate limiting
+      if (nextToken) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    } while (nextToken);
+
+    return allEvents;
+  }
+
+  /**
+   * Get seller listings (for inventory management)
+   */
+  async getListingsItem(sellerSku) {
+    const queryParams = new URLSearchParams({
+      marketplaceIds: this.marketplaceId,
+      includedData: 'summaries,attributes,offers,fulfillmentAvailability',
+    });
+
+    const sellerId = process.env.SP_API_SELLER_ID;
+    if (!sellerId) {
+      throw new Error('SP_API_SELLER_ID not configured');
+    }
+
+    const response = await this.request(
+      `/listings/2021-08-01/items/${sellerId}/${encodeURIComponent(sellerSku)}?${queryParams}`
+    );
+    return response;
+  }
+
+  /**
+   * Update listing quantity (FBM inventory)
+   */
+  async updateListingQuantity(sellerSku, quantity) {
+    const sellerId = process.env.SP_API_SELLER_ID;
+    if (!sellerId) {
+      throw new Error('SP_API_SELLER_ID not configured');
+    }
+
+    const body = {
+      productType: 'PRODUCT',
+      patches: [
+        {
+          op: 'replace',
+          path: '/attributes/fulfillment_availability',
+          value: [
+            {
+              fulfillment_channel_code: 'DEFAULT',
+              quantity: quantity,
+            },
+          ],
+        },
+      ],
+    };
+
+    const response = await this.request(
+      `/listings/2021-08-01/items/${sellerId}/${encodeURIComponent(sellerSku)}?marketplaceIds=${this.marketplaceId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }
+    );
+    return response;
+  }
+
+  /**
+   * Get seller's active listings report
+   */
+  async requestListingsReport() {
+    const body = {
+      reportType: 'GET_MERCHANT_LISTINGS_ALL_DATA',
+      marketplaceIds: [this.marketplaceId],
+    };
+
+    const response = await this.request('/reports/2021-06-30/reports', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return response;
+  }
+
+  /**
+   * Get report status
+   */
+  async getReport(reportId) {
+    const response = await this.request(`/reports/2021-06-30/reports/${reportId}`);
+    return response;
+  }
+
+  /**
+   * Get report document
+   */
+  async getReportDocument(reportDocumentId) {
+    const response = await this.request(`/reports/2021-06-30/documents/${reportDocumentId}`);
     return response;
   }
 }

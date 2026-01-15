@@ -17,6 +17,7 @@ import {
   EmptyState,
 } from '@shopify/polaris';
 import { getBomReviewQueue, getBomReviewStats, approveBom, rejectBom, getComponents } from '../utils/api.jsx';
+import KeepaMetrics, { KeepaMetricsCompact } from '../components/KeepaMetrics.jsx';
 
 /**
  * Format price from pence to pounds
@@ -318,24 +319,56 @@ export default function BomReviewPage() {
                 )}
               </InlineStack>
 
-              {/* Linked Listings */}
+              {/* Linked Listings with Market Data */}
               {getLinkedListings(selectedBom).length > 0 && (
                 <Card>
-                  <BlockStack gap="200">
-                    <Text variant="headingSm">Linked Listings</Text>
+                  <BlockStack gap="300">
+                    <Text variant="headingSm">Linked Listings & Market Data</Text>
                     {getLinkedListings(selectedBom).map((l) => (
-                      <InlineStack key={l.id} gap="400">
-                        {l.asin && <Badge tone="info">ASIN: {l.asin}</Badge>}
-                        {l.sku && <Badge>SKU: {l.sku}</Badge>}
-                        {l.title_fingerprint && (
-                          <Text variant="bodySm" tone="subdued">
-                            Title: {l.title_fingerprint.substring(0, 50)}...
-                          </Text>
-                        )}
-                      </InlineStack>
+                      <div
+                        key={l.id}
+                        style={{
+                          padding: '12px',
+                          borderRadius: '8px',
+                          backgroundColor: 'var(--p-color-bg-surface-secondary)',
+                        }}
+                      >
+                        <BlockStack gap="200">
+                          <InlineStack gap="400" wrap>
+                            {l.asin && <Badge tone="info">ASIN: {l.asin}</Badge>}
+                            {l.sku && <Badge>SKU: {l.sku}</Badge>}
+                            {l.title_fingerprint && (
+                              <Text variant="bodySm" tone="subdued">
+                                Title: {l.title_fingerprint.substring(0, 50)}...
+                              </Text>
+                            )}
+                          </InlineStack>
+                          {/* Market Data for ASINs */}
+                          {l.asin && (
+                            <InlineStack gap="200" blockAlign="center">
+                              <Text variant="bodySm" fontWeight="semibold">Market:</Text>
+                              <KeepaMetricsCompact
+                                asin={l.asin}
+                                showPrice
+                                showRank
+                                showRating
+                              />
+                            </InlineStack>
+                          )}
+                        </BlockStack>
+                      </div>
                     ))}
                   </BlockStack>
                 </Card>
+              )}
+
+              {/* Detailed Market Analysis for Primary ASIN */}
+              {getLinkedListings(selectedBom).some(l => l.asin) && (
+                <KeepaMetrics
+                  asin={getLinkedListings(selectedBom).find(l => l.asin)?.asin}
+                  showCharts
+                  compact
+                />
               )}
 
               <Divider />

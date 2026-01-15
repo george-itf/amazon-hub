@@ -27,6 +27,7 @@ import {
   InvictaLoading,
   InvictaActivityFeed,
 } from '../components/ui/index.jsx';
+import { KeepaStatusCard } from '../components/KeepaMetrics.jsx';
 import * as api from '../utils/api.jsx';
 
 /**
@@ -574,6 +575,9 @@ export default function Dashboard() {
                         </InlineStack>
                       </BlockStack>
                     </Card>
+
+                    {/* Keepa API Status */}
+                    <KeepaStatusCard />
 
                     {/* Recent Activity */}
                     <InvictaActivityFeed
