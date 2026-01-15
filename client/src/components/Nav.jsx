@@ -16,6 +16,7 @@ import {
   SearchIcon,
   ReceiptIcon,
   RefreshIcon,
+  DeliveryIcon,
 } from '@shopify/polaris-icons';
 import { useAuth } from '../context/AuthContext.jsx';
 
@@ -45,6 +46,7 @@ export default function Nav() {
         { label: 'Pending Shipment', url: '/orders?status=READY_TO_PICK' },
         { label: 'Needs Review', url: '/review' },
         { label: 'Pick Lists', url: '/picklists' },
+        { label: 'Shipping', url: '/shipping' },
       ],
     },
     {

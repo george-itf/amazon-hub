@@ -170,3 +170,102 @@ export async function fetchHistoricalOrders(options = {}) {
 
   return allOrders;
 }
+
+/**
+ * Create a fulfillment for an order with tracking information
+ * @param {Object} order - Order object with shopify_order_id or external_order_id
+ * @param {string} trackingNumber - Tracking number
+ * @param {string} trackingCompany - Carrier name (default: 'Royal Mail')
+ * @returns {Promise<Object>} Fulfillment response
+ */
+export async function createShopifyFulfillment(order, trackingNumber, trackingCompany = 'Royal Mail') {
+  if (!domain || !token) {
+    throw new Error('Shopify credentials are not configured.');
+  }
+
+  // Determine the Shopify order ID
+  const shopifyOrderId = order.shopify_order_id ||
+    (order.channel === 'SHOPIFY' ? order.external_order_id : null);
+
+  if (!shopifyOrderId) {
+    throw new Error('No Shopify order ID found');
+  }
+
+  // First, get the order's fulfillment orders
+  const fulfillmentOrdersUrl = `https://${domain}/admin/api/2023-10/orders/${shopifyOrderId}/fulfillment_orders.json`;
+
+  const foResp = await fetchWithTimeout(fulfillmentOrdersUrl, {
+    headers: {
+      'X-Shopify-Access-Token': token,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    }
+  });
+
+  if (!foResp.ok) {
+    const body = await foResp.text();
+    throw new Error(`Failed to get fulfillment orders: ${foResp.status} ${body.substring(0, 200)}`);
+  }
+
+  const foData = await foResp.json();
+  const fulfillmentOrders = foData.fulfillment_orders || [];
+
+  if (fulfillmentOrders.length === 0) {
+    throw new Error('No fulfillment orders found for this order');
+  }
+
+  // Find an open fulfillment order
+  const openFO = fulfillmentOrders.find(fo =>
+    fo.status === 'open' || fo.status === 'in_progress'
+  );
+
+  if (!openFO) {
+    console.log('[Shopify] No open fulfillment orders, order may already be fulfilled');
+    return { already_fulfilled: true };
+  }
+
+  // Create the fulfillment
+  const fulfillmentUrl = `https://${domain}/admin/api/2023-10/fulfillments.json`;
+
+  const fulfillmentPayload = {
+    fulfillment: {
+      line_items_by_fulfillment_order: [
+        {
+          fulfillment_order_id: openFO.id,
+          fulfillment_order_line_items: openFO.line_items.map(li => ({
+            id: li.id,
+            quantity: li.fulfillable_quantity
+          }))
+        }
+      ],
+      tracking_info: {
+        company: trackingCompany,
+        number: trackingNumber,
+        url: trackingCompany === 'Royal Mail'
+          ? `https://www.royalmail.com/track-your-item#/tracking-results/${trackingNumber}`
+          : null
+      },
+      notify_customer: true
+    }
+  };
+
+  const fulfillResp = await fetchWithTimeout(fulfillmentUrl, {
+    method: 'POST',
+    headers: {
+      'X-Shopify-Access-Token': token,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify(fulfillmentPayload)
+  });
+
+  if (!fulfillResp.ok) {
+    const body = await fulfillResp.text();
+    throw new Error(`Failed to create fulfillment: ${fulfillResp.status} ${body.substring(0, 200)}`);
+  }
+
+  const result = await fulfillResp.json();
+  console.log(`[Shopify] Created fulfillment for order ${shopifyOrderId}: ${result.fulfillment?.id}`);
+
+  return result.fulfillment;
+}

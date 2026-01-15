@@ -922,3 +922,115 @@ export async function deleteListingSettings(listingMemoryId) {
 export async function getListingSettingsByGroup(groupKey) {
   return request(`/listing-settings/by-group/${encodeURIComponent(groupKey)}`);
 }
+
+// ============ Shipping API ============
+
+/**
+ * Get Royal Mail API connection status
+ */
+export async function getShippingStatus() {
+  return request('/shipping/status');
+}
+
+/**
+ * Get available Royal Mail service codes
+ */
+export async function getShippingServices() {
+  return request('/shipping/services');
+}
+
+/**
+ * Get orders ready to ship
+ */
+export async function getReadyToShipOrders() {
+  return request('/shipping/orders/ready');
+}
+
+/**
+ * Create shipping labels in batch
+ * @param {string[]} orderIds - Array of order UUIDs
+ * @param {Object} options - Options
+ * @param {boolean} options.dryRun - If true, simulate without creating labels
+ * @param {string} options.serviceCode - Override service code for all labels
+ */
+export async function createShippingBatch(orderIds, options = {}) {
+  return request('/shipping/batch-create', {
+    method: 'POST',
+    body: {
+      order_ids: orderIds,
+      dry_run: options.dryRun || false,
+      service_code: options.serviceCode,
+    },
+    timeout: 120000, // 2 minute timeout for batch operations
+  });
+}
+
+/**
+ * Get recent batch operations history
+ */
+export async function getShippingBatches(limit = 20) {
+  return request(`/shipping/batches?limit=${limit}`);
+}
+
+/**
+ * Get shipping labels with optional filters
+ */
+export async function getShippingLabels(options = {}) {
+  const params = new URLSearchParams();
+  if (options.orderId) params.append('order_id', options.orderId);
+  if (options.status) params.append('status', options.status);
+  if (options.limit) params.append('limit', options.limit);
+  const query = params.toString();
+  return request(`/shipping/labels${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get today's total shipping cost
+ */
+export async function getShippingTodayCost() {
+  return request('/shipping/today-cost');
+}
+
+/**
+ * Create a single shipping label
+ */
+export async function createShippingLabel(orderId, serviceCode = 'TPN') {
+  return request('/shipping/label/create', {
+    method: 'POST',
+    body: { orderId, serviceCode },
+  });
+}
+
+/**
+ * Sync tracking numbers from Royal Mail
+ */
+export async function syncShippingTracking(options = {}) {
+  return request('/shipping/sync-tracking', {
+    method: 'POST',
+    body: {
+      daysBack: options.daysBack || 7,
+      autoConfirmAmazon: options.autoConfirmAmazon !== false,
+    },
+  });
+}
+
+/**
+ * Get tracking info for an order
+ */
+export async function getShippingTracking(orderId) {
+  return request(`/shipping/tracking/${orderId}`);
+}
+
+/**
+ * Manually confirm shipment with tracking
+ */
+export async function confirmShipment(orderId, trackingNumber, options = {}) {
+  return request(`/shipping/confirm/${orderId}`, {
+    method: 'POST',
+    body: {
+      trackingNumber,
+      carrierCode: options.carrierCode || 'Royal Mail',
+      confirmOnAmazon: options.confirmOnAmazon !== false,
+    },
+  });
+}
