@@ -30,6 +30,7 @@ import analyticsRoutes from './routes/analytics.js';
 import profitRoutes from './routes/profit.js';
 import amazonRoutes from './routes/amazon.js';
 import shippingRoutes from './routes/shipping.js';
+import scheduler from './services/scheduler.js';
 
 // Create the Express app
 const app = express();
@@ -229,6 +230,11 @@ const host = '0.0.0.0'; // Bind to all interfaces for container environments
 const server = app.listen(port, host, () => {
   console.log(`Amazon Hub Brain API listening on ${host}:${port}`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
+
+  // Initialize scheduler after server is ready
+  scheduler.init().catch(err => {
+    console.error('Failed to initialize scheduler:', err);
+  });
 });
 
 // Server timeout configuration to prevent idle connection DoS

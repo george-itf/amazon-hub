@@ -386,6 +386,105 @@ router.post('/confirm/:orderId', requireStaff, async (req, res) => {
 });
 
 /**
+ * POST /shipping/confirm-bulk
+ * Bulk confirm shipments with tracking numbers
+ */
+router.post('/confirm-bulk', requireStaff, async (req, res) => {
+  const { shipments, confirmOnAmazon = true } = req.body;
+
+  if (!Array.isArray(shipments) || shipments.length === 0) {
+    return errors.badRequest(res, 'shipments array is required');
+  }
+
+  if (shipments.length > 50) {
+    return errors.badRequest(res, 'Maximum 50 shipments per bulk operation');
+  }
+
+  const results = {
+    total: shipments.length,
+    confirmed: 0,
+    amazonConfirmed: 0,
+    errors: [],
+  };
+
+  for (const shipment of shipments) {
+    const { orderId, trackingNumber, carrierCode = 'Royal Mail' } = shipment;
+
+    if (!orderId || !trackingNumber) {
+      results.errors.push({ orderId, error: 'Missing orderId or trackingNumber' });
+      continue;
+    }
+
+    try {
+      // Get order
+      const { data: order, error: orderError } = await supabase
+        .from('orders')
+        .select('id, channel, amazon_order_id, external_order_id')
+        .eq('id', orderId)
+        .single();
+
+      if (orderError || !order) {
+        results.errors.push({ orderId, error: 'Order not found' });
+        continue;
+      }
+
+      // Record shipment
+      await supabase
+        .from('amazon_shipments')
+        .upsert({
+          order_id: order.id,
+          amazon_order_id: order.amazon_order_id || order.external_order_id,
+          carrier_code: carrierCode,
+          carrier_name: carrierCode,
+          tracking_number: trackingNumber,
+          ship_date: new Date().toISOString(),
+          confirmed_at: new Date().toISOString(),
+        }, { onConflict: 'order_id' });
+
+      // Update order status
+      await supabase
+        .from('orders')
+        .update({
+          status: 'DISPATCHED',
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', order.id);
+
+      results.confirmed++;
+
+      // Confirm on Amazon
+      if (confirmOnAmazon && spApiClient.isConfigured()) {
+        const amazonOrderId = order.amazon_order_id || (order.channel === 'AMAZON' ? order.external_order_id : null);
+
+        if (amazonOrderId) {
+          try {
+            await spApiClient.confirmShipment(amazonOrderId, {
+              carrierCode,
+              carrierName: carrierCode,
+              trackingNumber,
+              shipDate: new Date().toISOString(),
+            });
+            results.amazonConfirmed++;
+          } catch (amazonErr) {
+            results.errors.push({ orderId, amazonOrderId, error: `Amazon: ${amazonErr.message}` });
+          }
+        }
+      }
+    } catch (err) {
+      results.errors.push({ orderId, error: err.message });
+    }
+  }
+
+  await recordSystemEvent({
+    eventType: 'BULK_SHIPMENT_CONFIRMED',
+    description: `Bulk confirmed ${results.confirmed} shipments, ${results.amazonConfirmed} on Amazon`,
+    metadata: results,
+  });
+
+  sendSuccess(res, results);
+});
+
+/**
  * GET /shipping/tracking/:orderId
  * Get tracking info for an order
  */

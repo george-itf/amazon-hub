@@ -622,6 +622,10 @@ export async function getAmazonOrderDetails(orderId) {
   return request(`/amazon/order/${orderId}`);
 }
 
+export async function getAmazonOrderEnhancedDetails(orderId) {
+  return request(`/amazon/order/${orderId}/details`);
+}
+
 export async function getAmazonInventory() {
   return request('/amazon/inventory');
 }
@@ -706,4 +710,50 @@ export async function confirmShipment(orderId, trackingNumber, carrierCode = 'Ro
 
 export async function getOrderTracking(orderId) {
   return request(`/shipping/tracking/${orderId}`);
+}
+
+export async function confirmBulkShipments(shipments, confirmOnAmazon = true) {
+  return request('/shipping/confirm-bulk', {
+    method: 'POST',
+    body: { shipments, confirmOnAmazon },
+    timeout: 180000, // 3 minute timeout for bulk
+  });
+}
+
+// ============ Amazon Catalog & Listings ============
+
+export async function syncAmazonCatalog(asins, daysBack = 30) {
+  return request('/amazon/sync/catalog', {
+    method: 'POST',
+    body: { asins, daysBack },
+    timeout: 300000, // 5 minute timeout for catalog sync
+  });
+}
+
+export async function getAmazonCatalogItems(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/amazon/catalog${query ? `?${query}` : ''}`);
+}
+
+export async function getAmazonListings(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/amazon/listings${query ? `?${query}` : ''}`);
+}
+
+export async function mapAmazonListing(asin, bomId) {
+  return request(`/amazon/listings/${asin}/map`, {
+    method: 'POST',
+    body: { bomId },
+  });
+}
+
+export async function getSchedulerStatus() {
+  return request('/amazon/scheduler/status');
+}
+
+export async function updateSchedulerSettings(settings) {
+  return request('/amazon/scheduler/settings', {
+    method: 'POST',
+    body: settings,
+  });
 }
