@@ -21,6 +21,7 @@ import {
 } from '@shopify/polaris';
 import { importOrders, getOrders, createPickBatch, importHistoricalOrders, getAmazonOrderEnhancedDetails, syncAmazonOrders } from '../utils/api.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
+import { KeepaMetricsCompact } from '../components/KeepaMetrics.jsx';
 
 /**
  * Format price from pence to pounds
@@ -756,8 +757,8 @@ export default function OrdersPage() {
                 </InlineStack>
                 {selectedOrder.order_lines?.length > 0 ? (
                   <DataTable
-                    columnContentTypes={['text', 'text', 'numeric', 'numeric', 'text']}
-                    headings={['Item', 'SKU / ASIN', 'Qty', 'Unit Price', 'Status']}
+                    columnContentTypes={['text', 'text', 'text', 'numeric', 'numeric', 'text']}
+                    headings={['Item', 'SKU / ASIN', 'Market Data', 'Qty', 'Unit Price', 'Status']}
                     rows={selectedOrder.order_lines.map((line) => [
                       <BlockStack gap="100" key={line.id}>
                         <Text variant="bodyMd" fontWeight="semibold">
@@ -774,6 +775,17 @@ export default function OrdersPage() {
                         {line.asin && <Text variant="bodySm">ASIN: {line.asin}</Text>}
                         {!line.sku && !line.asin && <Text variant="bodySm" tone="subdued">-</Text>}
                       </BlockStack>,
+                      line.asin ? (
+                        <KeepaMetricsCompact
+                          key={`keepa-${line.id}`}
+                          asin={line.asin}
+                          showPrice
+                          showRank
+                          showRating={false}
+                        />
+                      ) : (
+                        <Text key={`keepa-${line.id}`} variant="bodySm" tone="subdued">-</Text>
+                      ),
                       line.quantity,
                       formatPrice(line.unit_price_pence, selectedOrder.currency),
                       <BlockStack gap="100" key={`status-${line.id}`}>

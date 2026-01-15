@@ -21,6 +21,7 @@ import {
   adjustStock,
   generateIdempotencyKey,
 } from '../utils/api.jsx';
+import KeepaMetrics from './KeepaMetrics.jsx';
 
 /**
  * Format price from pence to pounds
@@ -478,6 +479,11 @@ export default function ProductDetailModal() {
                     </InlineStack>
                   </BlockStack>
                 </Card>
+              )}
+
+              {/* Keepa Market Data (if ASIN available) */}
+              {selectedProduct?.asin && (
+                <KeepaMetrics asin={selectedProduct.asin} showCharts compact={false} />
               )}
             </>
           )}

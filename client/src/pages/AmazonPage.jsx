@@ -25,6 +25,7 @@ import {
   InvictaButton,
   InvictaBadge,
 } from '../components/ui/index.jsx';
+import KeepaMetrics, { KeepaMetricsCompact, KeepaStatusCard } from '../components/KeepaMetrics.jsx';
 import * as api from '../utils/api.jsx';
 
 /**
@@ -427,7 +428,7 @@ export default function AmazonPage() {
 
         {/* Connection Status */}
         <Layout>
-          <Layout.Section variant="oneHalf">
+          <Layout.Section variant="oneThird">
             <Card>
               <BlockStack gap="300">
                 <InlineStack align="space-between">
@@ -449,7 +450,7 @@ export default function AmazonPage() {
               </BlockStack>
             </Card>
           </Layout.Section>
-          <Layout.Section variant="oneHalf">
+          <Layout.Section variant="oneThird">
             <Card>
               <BlockStack gap="300">
                 <InlineStack align="space-between">
@@ -465,6 +466,9 @@ export default function AmazonPage() {
                 )}
               </BlockStack>
             </Card>
+          </Layout.Section>
+          <Layout.Section variant="oneThird">
+            <KeepaStatusCard />
           </Layout.Section>
         </Layout>
 
@@ -959,8 +963,8 @@ export default function AmazonPage() {
                     </BlockStack>
                   ) : (
                     <DataTable
-                      columnContentTypes={['text', 'text', 'text', 'text', 'text']}
-                      headings={['Image', 'ASIN', 'Title', 'BOM Mapping', 'Action']}
+                      columnContentTypes={['text', 'text', 'text', 'text', 'text', 'text']}
+                      headings={['Image', 'ASIN', 'Title', 'Market Data', 'BOM Mapping', 'Action']}
                       rows={listings.map(listing => [
                         listing.main_image_url ? (
                           <img
@@ -988,7 +992,7 @@ export default function AmazonPage() {
                         <Text key={`asin-${listing.asin}`} variant="bodyMd" fontWeight="semibold">
                           {listing.asin}
                         </Text>,
-                        <div key={`title-${listing.asin}`} style={{ maxWidth: 300 }}>
+                        <div key={`title-${listing.asin}`} style={{ maxWidth: 250 }}>
                           <Text variant="bodySm" truncate>
                             {listing.title || '-'}
                           </Text>
@@ -996,6 +1000,13 @@ export default function AmazonPage() {
                             <Text variant="bodySm" tone="subdued">{listing.brand}</Text>
                           )}
                         </div>,
+                        <KeepaMetricsCompact
+                          key={`keepa-${listing.asin}`}
+                          asin={listing.asin}
+                          showPrice
+                          showRank
+                          showRating
+                        />,
                         listing.is_mapped ? (
                           <Badge key={`mapped-${listing.asin}`} tone="success">
                             {listing.bom_name}
@@ -1143,41 +1154,47 @@ export default function AmazonPage() {
           secondaryActions={[
             { content: 'Cancel', onAction: () => setMappingModal({ open: false, listing: null }), disabled: mapping },
           ]}
+          large
         >
           <Modal.Section>
             <BlockStack gap="400">
               {mappingModal.listing && (
-                <Card>
-                  <InlineStack gap="400" blockAlign="start">
-                    {mappingModal.listing.main_image_url ? (
-                      <img
-                        src={mappingModal.listing.main_image_url}
-                        alt={mappingModal.listing.title}
-                        style={{ width: 60, height: 60, objectFit: 'contain', borderRadius: 4 }}
-                      />
-                    ) : (
-                      <div style={{
-                        width: 60,
-                        height: 60,
-                        backgroundColor: '#f4f4f4',
-                        borderRadius: 4,
-                      }} />
-                    )}
-                    <BlockStack gap="100">
-                      <Text variant="bodyMd" fontWeight="semibold">
-                        {mappingModal.listing.asin}
-                      </Text>
-                      <Text variant="bodySm">
-                        {mappingModal.listing.title}
-                      </Text>
-                      {mappingModal.listing.brand && (
-                        <Text variant="bodySm" tone="subdued">
-                          Brand: {mappingModal.listing.brand}
-                        </Text>
+                <>
+                  <Card>
+                    <InlineStack gap="400" blockAlign="start">
+                      {mappingModal.listing.main_image_url ? (
+                        <img
+                          src={mappingModal.listing.main_image_url}
+                          alt={mappingModal.listing.title}
+                          style={{ width: 80, height: 80, objectFit: 'contain', borderRadius: 4 }}
+                        />
+                      ) : (
+                        <div style={{
+                          width: 80,
+                          height: 80,
+                          backgroundColor: '#f4f4f4',
+                          borderRadius: 4,
+                        }} />
                       )}
-                    </BlockStack>
-                  </InlineStack>
-                </Card>
+                      <BlockStack gap="100">
+                        <Text variant="headingSm" fontWeight="semibold">
+                          {mappingModal.listing.asin}
+                        </Text>
+                        <Text variant="bodySm">
+                          {mappingModal.listing.title}
+                        </Text>
+                        {mappingModal.listing.brand && (
+                          <Text variant="bodySm" tone="subdued">
+                            Brand: {mappingModal.listing.brand}
+                          </Text>
+                        )}
+                      </BlockStack>
+                    </InlineStack>
+                  </Card>
+
+                  {/* Keepa Market Data */}
+                  <KeepaMetrics asin={mappingModal.listing.asin} compact showCharts={false} />
+                </>
               )}
 
               <Select
