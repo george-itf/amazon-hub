@@ -6,43 +6,81 @@ import { auditLog, getAuditContext } from '../services/audit.js';
 
 const router = express.Router();
 
+// Supabase default limit is 1000 rows, so we paginate to fetch all
+const PAGE_SIZE = 1000;
+
 /**
  * GET /components
  * Returns all components with optional filters
+ * Paginates through Supabase's 1000 row limit to fetch all
  */
 router.get('/', async (req, res) => {
   const { active_only = 'true', limit = 99999, offset = 0 } = req.query;
+  const requestedLimit = parseInt(limit);
+  const requestedOffset = parseInt(offset);
 
   try {
-    let query = supabase
+    // Build base query for counting
+    let countQuery = supabase
       .from('components')
-      .select(`
-        *,
-        component_stock (
-          id,
-          location,
-          on_hand,
-          reserved
-        )
-      `, { count: 'exact' })
-      .order('internal_sku', { ascending: true });
+      .select('*', { count: 'exact', head: true });
 
     if (active_only === 'true') {
-      query = query.eq('is_active', true);
+      countQuery = countQuery.eq('is_active', true);
     }
 
-    const { data, error, count } = await query.range(
-      parseInt(offset),
-      parseInt(offset) + parseInt(limit) - 1
-    );
+    const { count: totalCount, error: countError } = await countQuery;
 
-    if (error) {
-      console.error('Components fetch error:', error);
+    if (countError) {
+      console.error('Components count error:', countError);
       return errors.internal(res, 'Failed to fetch components');
     }
 
+    // Paginate through all results (bypasses Supabase 1000 row limit)
+    let allData = [];
+    let currentOffset = 0;
+    const targetCount = Math.min(requestedLimit, totalCount || 0);
+
+    while (allData.length < targetCount) {
+      let query = supabase
+        .from('components')
+        .select(`
+          *,
+          component_stock (
+            id,
+            location,
+            on_hand,
+            reserved
+          )
+        `)
+        .order('internal_sku', { ascending: true })
+        .range(currentOffset, currentOffset + PAGE_SIZE - 1);
+
+      if (active_only === 'true') {
+        query = query.eq('is_active', true);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error('Components fetch error:', error);
+        return errors.internal(res, 'Failed to fetch components');
+      }
+
+      if (!data || data.length === 0) break;
+
+      allData = allData.concat(data);
+      currentOffset += PAGE_SIZE;
+
+      // Safety break
+      if (data.length < PAGE_SIZE) break;
+    }
+
+    // Apply requested offset/limit
+    const slicedData = allData.slice(requestedOffset, requestedOffset + requestedLimit);
+
     // Add computed available stock
-    const componentsWithAvailable = data.map(c => {
+    const componentsWithAvailable = slicedData.map(c => {
       const totalOnHand = (c.component_stock || []).reduce((sum, s) => sum + s.on_hand, 0);
       const totalReserved = (c.component_stock || []).reduce((sum, s) => sum + s.reserved, 0);
       return {
@@ -55,9 +93,9 @@ router.get('/', async (req, res) => {
 
     sendSuccess(res, {
       components: componentsWithAvailable,
-      total: count,
-      limit: parseInt(limit),
-      offset: parseInt(offset)
+      total: totalCount,
+      limit: requestedLimit,
+      offset: requestedOffset
     });
   } catch (err) {
     console.error('Components fetch error:', err);

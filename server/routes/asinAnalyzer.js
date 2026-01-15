@@ -8,6 +8,7 @@
  */
 
 import express from 'express';
+import fetch from 'node-fetch';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
 import { requireStaff } from '../middleware/auth.js';
@@ -22,7 +23,125 @@ import {
   DEFAULT_FEE_CONFIG,
 } from '../services/feeCalculator.js';
 
+// Keepa API configuration
+const KEEPA_API_BASE = 'https://api.keepa.com';
+const KEEPA_DOMAIN_UK = 3; // UK Amazon
+
 const router = express.Router();
+
+// ============================================================================
+// KEEPA API HELPERS
+// ============================================================================
+
+/**
+ * Fetch products directly from Keepa API
+ * @param {string[]} asins - Array of ASINs to fetch
+ * @returns {Object} - Map of ASIN to product data
+ */
+async function fetchFromKeepaApi(asins) {
+  const apiKey = process.env.KEEPA_API_KEY;
+  if (!apiKey) {
+    console.warn('[AsinAnalyzer] KEEPA_API_KEY not configured');
+    return { products: {}, error: 'KEEPA_API_KEY not configured' };
+  }
+
+  try {
+    const asinList = asins.join(',');
+    const url = `${KEEPA_API_BASE}/product?key=${apiKey}&domain=${KEEPA_DOMAIN_UK}&asin=${asinList}&stats=1&offers=20`;
+
+    console.log(`[AsinAnalyzer] Fetching ${asins.length} ASINs from Keepa API`);
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[AsinAnalyzer] Keepa API error:', response.status, errorText);
+      return { products: {}, error: `Keepa API error: ${response.status}` };
+    }
+
+    const data = await response.json();
+
+    if (!data.products || data.products.length === 0) {
+      return { products: {}, tokensUsed: data.tokensConsumed || 0 };
+    }
+
+    // Build map of ASIN to product data
+    const products = {};
+    for (const product of data.products) {
+      if (product && product.asin) {
+        products[product.asin] = parseKeepaProduct(product);
+      }
+    }
+
+    console.log(`[AsinAnalyzer] Fetched ${Object.keys(products).length} products, used ${data.tokensConsumed || 0} tokens`);
+    return { products, tokensUsed: data.tokensConsumed || 0 };
+  } catch (err) {
+    console.error('[AsinAnalyzer] Keepa fetch error:', err);
+    return { products: {}, error: err.message };
+  }
+}
+
+/**
+ * Parse Keepa product response into usable format
+ */
+function parseKeepaProduct(product) {
+  const csv = product.csv || [];
+
+  // Extract latest values from CSV arrays
+  const buyboxPrice = latestPriceFromCsv(csv[18]) || latestPriceFromCsv(csv[0]);
+  const salesRank = latestIntFromCsv(csv[3]);
+  const offerCount = latestIntFromCsv(csv[11]);
+
+  // Get image URL
+  let imageUrl = null;
+  if (product.imagesCSV) {
+    const firstImage = product.imagesCSV.split(',')[0];
+    imageUrl = `https://images-na.ssl-images-amazon.com/images/I/${firstImage}`;
+  }
+
+  return {
+    asin: product.asin,
+    title: product.title || null,
+    brand: product.brand || null,
+    image_url: imageUrl,
+    buybox_price_pence: buyboxPrice,
+    sales_rank: salesRank,
+    offer_count: offerCount,
+    // Stats from Keepa stats object (if available)
+    stats: product.stats || null,
+  };
+}
+
+/**
+ * Extract latest non-null price value from a Keepa CSV array
+ */
+function latestPriceFromCsv(csvArray) {
+  if (!csvArray || !Array.isArray(csvArray) || csvArray.length < 2) {
+    return null;
+  }
+  for (let i = csvArray.length - 1; i >= 0; i--) {
+    const value = csvArray[i];
+    if (typeof value === 'number' && value > 0) {
+      return value;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extract latest non-null integer value from a Keepa CSV array
+ */
+function latestIntFromCsv(csvArray) {
+  if (!csvArray || !Array.isArray(csvArray) || csvArray.length < 2) {
+    return null;
+  }
+  for (let i = csvArray.length - 1; i >= 0; i--) {
+    const value = csvArray[i];
+    if (typeof value === 'number' && value >= 0) {
+      return value;
+    }
+  }
+  return null;
+}
 
 // Default scoring configuration
 const DEFAULT_SCORING = {
@@ -271,44 +390,37 @@ router.post('/analyze', requireStaff, async (req, res) => {
     // Get active demand model
     const demandModel = await getActiveDemandModel();
 
-    // 1. Batch fetch latest Keepa metrics for all ASINs
-    const { data: keepaMetrics, error: keepaError } = await supabase
-      .from('keepa_metrics_daily')
-      .select('asin, date, sales_rank, offer_count, buybox_price_pence')
-      .in('asin', validAsins)
-      .order('date', { ascending: false });
+    // 1. FETCH DIRECTLY FROM KEEPA API (live data, not cached)
+    const { products: keepaProducts, error: keepaError, tokensUsed } = await fetchFromKeepaApi(validAsins);
 
-    if (keepaError) throw keepaError;
+    if (keepaError && Object.keys(keepaProducts).length === 0) {
+      // If Keepa API fails completely, return error
+      return errors.badRequest(res, keepaError);
+    }
 
-    // Dedupe to latest per ASIN
+    // Build keepa data maps from API response
     const keepaByAsin = new Map();
-    for (const row of keepaMetrics || []) {
-      if (!keepaByAsin.has(row.asin)) {
-        keepaByAsin.set(row.asin, row);
-      }
-    }
-
-    // 2. Batch fetch Keepa product cache for titles/images
-    const { data: keepaProducts } = await supabase
-      .from('keepa_products_cache')
-      .select('asin, payload_json')
-      .in('asin', validAsins);
-
     const productInfoByAsin = new Map();
-    for (const row of keepaProducts || []) {
-      if (row.payload_json) {
-        const payload = row.payload_json;
-        productInfoByAsin.set(row.asin, {
-          title: payload.title || null,
-          brand: payload.brand || null,
-          image_url: payload.imagesCSV
-            ? `https://images-na.ssl-images-amazon.com/images/I/${payload.imagesCSV.split(',')[0]}`
-            : null,
-        });
-      }
+
+    for (const [asin, product] of Object.entries(keepaProducts)) {
+      // Keepa metrics (price, rank, offers)
+      keepaByAsin.set(asin, {
+        asin,
+        buybox_price_pence: product.buybox_price_pence,
+        sales_rank: product.sales_rank,
+        offer_count: product.offer_count,
+        date: new Date().toISOString().split('T')[0],
+      });
+
+      // Product info (title, brand, image)
+      productInfoByAsin.set(asin, {
+        title: product.title,
+        brand: product.brand,
+        image_url: product.image_url,
+      });
     }
 
-    // 3. Batch fetch existing listing_memory entries
+    // 2. Batch fetch existing listing_memory entries
     const { data: existingListings } = await supabase
       .from('listing_memory')
       .select('asin, bom_id, sku, amazon_fee_percent')
@@ -362,35 +474,10 @@ router.post('/analyze', requireStaff, async (req, res) => {
       });
     }
 
-    // 6. Fetch historical price data for volatility (last 14 days)
-    const fourteenDaysAgo = new Date();
-    fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-    const fourteenDaysAgoStr = fourteenDaysAgo.toISOString().split('T')[0];
-
-    const { data: priceHistory } = await supabase
-      .from('keepa_metrics_daily')
-      .select('asin, buybox_price_pence')
-      .in('asin', validAsins)
-      .gte('date', fourteenDaysAgoStr)
-      .not('buybox_price_pence', 'is', null);
-
-    // Calculate price volatility per ASIN
+    // 6. Price volatility - not available with live API calls (would need historical data)
+    // For now, we set volatility to null; could be enhanced to request stats from Keepa
     const priceVolatilityByAsin = new Map();
     const pricesByAsin = new Map();
-    for (const row of priceHistory || []) {
-      if (!pricesByAsin.has(row.asin)) {
-        pricesByAsin.set(row.asin, []);
-      }
-      pricesByAsin.get(row.asin).push(row.buybox_price_pence);
-    }
-    for (const [asin, prices] of pricesByAsin) {
-      if (prices.length >= 2) {
-        const mean = prices.reduce((a, b) => a + b, 0) / prices.length;
-        const std = Math.sqrt(prices.reduce((sum, p) => sum + (p - mean) ** 2, 0) / (prices.length - 1));
-        const volatilityPct = mean > 0 ? (std / mean) * 100 : 0;
-        priceVolatilityByAsin.set(asin, volatilityPct);
-      }
-    }
 
     // 7. Process each ASIN
     const results = [];
@@ -624,6 +711,8 @@ router.post('/analyze', requireStaff, async (req, res) => {
         unresolved_asins: unresolvedAsins,
         invalid_asins: invalidAsins,
         has_demand_model: !!demandModel,
+        keepa_tokens_used: tokensUsed || 0,
+        data_source: 'KEEPA_API_LIVE',
         used_defaults: {
           location,
           scoring: scoringConfig,
