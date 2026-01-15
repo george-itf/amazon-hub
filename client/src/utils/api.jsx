@@ -837,3 +837,24 @@ export async function pushAmazonInventory(options = {}) {
     timeout: 180000, // 3 minutes for live push
   });
 }
+
+// ============ Allocation Engine API ============
+
+export async function getAllocationPools(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/intelligence/allocation/pools${query ? `?${query}` : ''}`);
+}
+
+export async function getAllocationPreview(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/intelligence/allocation/preview${query ? `?${query}` : ''}`);
+}
+
+export async function applyAllocation(params, idempotencyKey) {
+  return request('/intelligence/allocation/apply', {
+    method: 'POST',
+    body: params,
+    idempotencyKey,
+    timeout: 180000, // 3 minutes for live push
+  });
+}

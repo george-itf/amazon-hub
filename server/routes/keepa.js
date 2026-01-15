@@ -430,55 +430,124 @@ router.put('/settings', requireAdmin, async (req, res) => {
   }
 });
 
+// ============================================================================
+// KEEPA CSV INDEX MAPPING (aligned with profit.js usage)
+// ============================================================================
+// Keepa CSV array indices:
+//   csv[0]  = Amazon price
+//   csv[1]  = New 3rd party (marketplace new) price
+//   csv[2]  = Used price
+//   csv[3]  = Sales Rank
+//   csv[11] = New offer count
+//   csv[16] = Rating (multiply by 10 in Keepa format)
+//   csv[17] = Review count
+//   csv[18] = Buy Box price
+// ============================================================================
+
 /**
- * Helper: Store Keepa metrics from product data
+ * Extract latest non-null price value from a Keepa CSV array
+ * Searches backwards from the end to find the most recent valid price.
+ *
+ * @param {Array<number>} csvArray - Keepa CSV array (timestamp, value, timestamp, value, ...)
+ * @returns {number|null} - Latest valid price in pence, or null if none found
+ */
+function latestPriceFromCsv(csvArray) {
+  if (!csvArray || !Array.isArray(csvArray) || csvArray.length < 2) {
+    return null;
+  }
+
+  // Keepa CSV format: [timestamp, value, timestamp, value, ...]
+  // Values are at odd indices (1, 3, 5, ...) but we typically just get the last value
+  // Search backwards for the first valid value
+  for (let i = csvArray.length - 1; i >= 0; i--) {
+    const value = csvArray[i];
+    // Keepa uses -1 for "no data" and -2 for "out of stock"
+    if (typeof value === 'number' && value > 0) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extract latest non-null integer value from a Keepa CSV array
+ * Used for sales rank, offer count, review count, etc.
+ *
+ * @param {Array<number>} csvArray - Keepa CSV array
+ * @returns {number|null} - Latest valid integer, or null if none found
+ */
+function latestIntFromCsv(csvArray) {
+  if (!csvArray || !Array.isArray(csvArray) || csvArray.length < 2) {
+    return null;
+  }
+
+  // Search backwards for the first valid value
+  for (let i = csvArray.length - 1; i >= 0; i--) {
+    const value = csvArray[i];
+    // Keepa uses -1 for "no data"
+    if (typeof value === 'number' && value >= 0) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extract latest rating from Keepa CSV array
+ * Keepa stores ratings multiplied by 10 (e.g., 45 = 4.5 stars)
+ *
+ * @param {Array<number>} csvArray - Keepa CSV array for rating
+ * @returns {number|null} - Latest rating as decimal (e.g., 4.5), or null
+ */
+function latestRatingFromCsv(csvArray) {
+  const rawValue = latestIntFromCsv(csvArray);
+  if (rawValue === null) return null;
+  // Convert from Keepa format (45 = 4.5 stars)
+  return Math.round((rawValue / 10) * 100) / 100;
+}
+
+/**
+ * Store Keepa metrics from product data to keepa_metrics_daily
+ *
+ * Uses correct CSV index mapping:
+ * - buybox: csv[18] with fallback to csv[0] (Amazon price)
+ * - amazon price: csv[0]
+ * - new 3P price: csv[1]
+ * - used price: csv[2]
+ * - sales rank: csv[3]
+ * - offer count: csv[11]
+ * - rating: csv[16]
+ * - review count: csv[17]
  */
 async function storeKeepaMetrics(asin, product) {
   try {
     if (!product.csv) return;
 
     const today = new Date().toISOString().split('T')[0];
+    const csv = product.csv;
 
-    // Extract current metrics from Keepa CSV data
-    // Keepa stores prices in their proprietary format (cents * 100)
+    // Extract buybox price with fallback to Amazon price (matching profit.js behavior)
+    const buyboxPrice = latestPriceFromCsv(csv[18]) || latestPriceFromCsv(csv[0]);
+
     const metrics = {
       asin,
       date: today,
-      buybox_price_pence: extractLatestPrice(product.csv[0]),
-      amazon_price_pence: extractLatestPrice(product.csv[1]),
-      new_price_pence: extractLatestPrice(product.csv[2]),
-      used_price_pence: extractLatestPrice(product.csv[3]),
-      sales_rank: extractLatestValue(product.csv[4]),
-      offer_count: extractLatestValue(product.csv[11]),
-      rating: product.lastRatingUpdate ? product.csv[16]?.[product.csv[16].length - 1] / 10 : null,
-      review_count: extractLatestValue(product.csv[17])
+      buybox_price_pence: buyboxPrice,
+      amazon_price_pence: latestPriceFromCsv(csv[0]),
+      new_price_pence: latestPriceFromCsv(csv[1]),
+      used_price_pence: latestPriceFromCsv(csv[2]),
+      sales_rank: latestIntFromCsv(csv[3]),
+      offer_count: latestIntFromCsv(csv[11]),
+      rating: latestRatingFromCsv(csv[16]),
+      review_count: latestIntFromCsv(csv[17]),
     };
 
     await supabase.from('keepa_metrics_daily').upsert(metrics);
   } catch (err) {
     console.error('Failed to store Keepa metrics:', err);
   }
-}
-
-/**
- * Helper: Extract latest price from Keepa CSV array
- */
-function extractLatestPrice(csvArray) {
-  if (!csvArray || csvArray.length < 2) return null;
-  const value = csvArray[csvArray.length - 1];
-  if (value === -1 || value === -2) return null;
-  // Keepa prices are in cents, convert to pence (assuming 1:1 for UK)
-  return value;
-}
-
-/**
- * Helper: Extract latest value from Keepa CSV array
- */
-function extractLatestValue(csvArray) {
-  if (!csvArray || csvArray.length < 2) return null;
-  const value = csvArray[csvArray.length - 1];
-  if (value === -1 || value === -2) return null;
-  return value;
 }
 
 export default router;

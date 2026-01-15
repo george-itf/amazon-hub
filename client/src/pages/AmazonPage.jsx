@@ -106,6 +106,19 @@ export default function AmazonPage() {
   const [pushResult, setPushResult] = useState(null);
   const [pushing, setPushing] = useState(false);
 
+  // Allocation Engine state (new tab)
+  const [allocationPools, setAllocationPools] = useState([]);
+  const [allocationPoolsLoading, setAllocationPoolsLoading] = useState(false);
+  const [selectedPoolId, setSelectedPoolId] = useState('');
+  const [allocationMinMargin, setAllocationMinMargin] = useState('10');
+  const [allocationTargetMargin, setAllocationTargetMargin] = useState('15');
+  const [allocationBufferUnits, setAllocationBufferUnits] = useState('1');
+  const [allocationPreview, setAllocationPreview] = useState(null);
+  const [allocationPreviewLoading, setAllocationPreviewLoading] = useState(false);
+  const [allocationApplying, setAllocationApplying] = useState(false);
+  const [allocationApplyResult, setAllocationApplyResult] = useState(null);
+  const [allocationDryRun, setAllocationDryRun] = useState(true);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -256,6 +269,90 @@ export default function AmazonPage() {
       setError(err.message);
     } finally {
       setPushing(false);
+    }
+  };
+
+  // Load allocation pools when tab is selected
+  const loadAllocationPools = useCallback(async () => {
+    try {
+      setAllocationPoolsLoading(true);
+      const result = await api.getAllocationPools({ location: 'Warehouse', min_boms: 2 });
+      setAllocationPools(result.pools || []);
+    } catch (err) {
+      console.error('Failed to load allocation pools:', err);
+      setError(err.message);
+    } finally {
+      setAllocationPoolsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedTab === 5) {
+      loadAllocationPools();
+    }
+  }, [selectedTab, loadAllocationPools]);
+
+  // Handle allocation preview
+  const handleAllocationPreview = async () => {
+    if (!selectedPoolId) {
+      setError('Please select a pool component');
+      return;
+    }
+
+    try {
+      setAllocationPreviewLoading(true);
+      setAllocationPreview(null);
+      setAllocationApplyResult(null);
+
+      const result = await api.getAllocationPreview({
+        pool_component_id: selectedPoolId,
+        location: 'Warehouse',
+        min_margin: allocationMinMargin,
+        target_margin: allocationTargetMargin,
+        buffer_units: allocationBufferUnits,
+      });
+
+      setAllocationPreview(result);
+    } catch (err) {
+      console.error('Allocation preview error:', err);
+      setError(err.message);
+    } finally {
+      setAllocationPreviewLoading(false);
+    }
+  };
+
+  // Handle allocation apply
+  const handleAllocationApply = async () => {
+    if (!selectedPoolId) {
+      setError('Please select a pool component');
+      return;
+    }
+
+    try {
+      setAllocationApplying(true);
+      setAllocationApplyResult(null);
+
+      const idempotencyKey = allocationDryRun ? undefined : api.generateIdempotencyKey();
+      const result = await api.applyAllocation({
+        pool_component_id: selectedPoolId,
+        location: 'Warehouse',
+        min_margin: parseFloat(allocationMinMargin),
+        target_margin: parseFloat(allocationTargetMargin),
+        buffer_units: parseInt(allocationBufferUnits, 10),
+        dry_run: allocationDryRun,
+      }, idempotencyKey);
+
+      setAllocationApplyResult(result);
+
+      // Refresh preview if live apply was successful
+      if (!allocationDryRun && result.summary?.success_count > 0) {
+        await handleAllocationPreview();
+      }
+    } catch (err) {
+      console.error('Allocation apply error:', err);
+      setError(err.message);
+    } finally {
+      setAllocationApplying(false);
     }
   };
 
@@ -425,6 +522,7 @@ export default function AmazonPage() {
     { id: 'sync', content: 'Sync & Settings' },
     { id: 'listings', content: 'Listings' },
     { id: 'inventory', content: 'Inventory Allocation' },
+    { id: 'allocation', content: 'Allocation' },
   ];
 
   return (
@@ -1286,6 +1384,242 @@ export default function AmazonPage() {
                 <Card>
                   <Text tone="subdued">Unable to load inventory recommendations.</Text>
                 </Card>
+              )}
+            </BlockStack>
+          )}
+
+          {/* Allocation Tab */}
+          {selectedTab === 5 && (
+            <BlockStack gap="400">
+              <Banner tone="info">
+                <p>
+                  Use the allocation engine to intelligently distribute limited stock across multiple Amazon listings
+                  sharing the same core component. Prioritizes by demand score and margin to maximize revenue.
+                </p>
+              </Banner>
+
+              {/* Controls Card */}
+              <Card>
+                <BlockStack gap="400">
+                  <Text variant="headingSm">Allocation Parameters</Text>
+                  <Divider />
+
+                  <InlineStack gap="400" wrap={false}>
+                    <div style={{ flex: 2 }}>
+                      <Select
+                        label="Pool Component"
+                        placeholder="Select a shared component..."
+                        options={allocationPools.map(pool => ({
+                          label: `${pool.internal_sku} (${pool.available} avail, ${pool.boms?.length || 0} BOMs)`,
+                          value: pool.component_id,
+                        }))}
+                        value={selectedPoolId}
+                        onChange={setSelectedPoolId}
+                        disabled={allocationPoolsLoading}
+                        helpText={allocationPoolsLoading ? 'Loading pools...' : `${allocationPools.length} pool candidates found`}
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <TextField
+                        label="Min Margin %"
+                        type="number"
+                        value={allocationMinMargin}
+                        onChange={setAllocationMinMargin}
+                        min={0}
+                        max={100}
+                        helpText="Listings below this margin get 0 units"
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <TextField
+                        label="Target Margin %"
+                        type="number"
+                        value={allocationTargetMargin}
+                        onChange={setAllocationTargetMargin}
+                        min={0}
+                        max={100}
+                        helpText="Listings at/above get bonus multiplier"
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <TextField
+                        label="Buffer Units"
+                        type="number"
+                        value={allocationBufferUnits}
+                        onChange={setAllocationBufferUnits}
+                        min={0}
+                        helpText="Reserve units not allocated"
+                      />
+                    </div>
+                  </InlineStack>
+
+                  <InlineStack gap="300">
+                    <InvictaButton
+                      variant="primary"
+                      onClick={handleAllocationPreview}
+                      loading={allocationPreviewLoading}
+                      disabled={!selectedPoolId}
+                    >
+                      Preview Allocation
+                    </InvictaButton>
+                    <InvictaButton
+                      size="slim"
+                      variant="secondary"
+                      onClick={loadAllocationPools}
+                      loading={allocationPoolsLoading}
+                    >
+                      Refresh Pools
+                    </InvictaButton>
+                  </InlineStack>
+                </BlockStack>
+              </Card>
+
+              {/* Preview Results */}
+              {allocationPreview && (
+                <>
+                  {/* Pool Summary */}
+                  <Card>
+                    <BlockStack gap="300">
+                      <InlineStack align="space-between">
+                        <Text variant="headingSm">Pool: {allocationPreview.pool?.internal_sku}</Text>
+                        <InlineStack gap="200">
+                          <Badge tone="info">{allocationPreview.pool?.available || 0} available</Badge>
+                          <Badge tone="success">{allocationPreview.pool?.allocatable_units || 0} allocatable</Badge>
+                          <Badge>{allocationPreview.summary?.total_allocated || 0} allocated</Badge>
+                        </InlineStack>
+                      </InlineStack>
+                      <ProgressBar
+                        progress={allocationPreview.pool?.available > 0
+                          ? Math.min(100, ((allocationPreview.summary?.total_allocated || 0) / allocationPreview.pool.available) * 100)
+                          : 0}
+                        size="small"
+                        tone="highlight"
+                      />
+                    </BlockStack>
+                  </Card>
+
+                  {/* Apply Controls */}
+                  <Card>
+                    <BlockStack gap="300">
+                      <InlineStack align="space-between">
+                        <BlockStack gap="100">
+                          <Text variant="headingSm">Apply to Amazon</Text>
+                          <Text variant="bodySm" tone="subdued">
+                            Push recommended quantities to Amazon FBM listings
+                          </Text>
+                        </BlockStack>
+                        <InlineStack gap="300" blockAlign="center">
+                          <Checkbox
+                            label="Dry run"
+                            checked={allocationDryRun}
+                            onChange={setAllocationDryRun}
+                          />
+                          <InvictaButton
+                            variant={allocationDryRun ? 'secondary' : 'primary'}
+                            onClick={handleAllocationApply}
+                            loading={allocationApplying}
+                            disabled={!amazonStatus?.connected || !allocationPreview}
+                          >
+                            {allocationDryRun ? 'Preview Apply' : 'Apply to Amazon'}
+                          </InvictaButton>
+                        </InlineStack>
+                      </InlineStack>
+
+                      {!amazonStatus?.connected && (
+                        <Text variant="bodySm" tone="critical">
+                          SP-API not connected. Configure credentials to enable inventory push.
+                        </Text>
+                      )}
+                    </BlockStack>
+                  </Card>
+
+                  {/* Apply Result Banner */}
+                  {allocationApplyResult && (
+                    <Banner
+                      tone={allocationApplyResult.results?.failed?.length > 0 ? 'warning' : 'success'}
+                      title={allocationApplyResult.dry_run
+                        ? `Dry run: ${allocationApplyResult.summary?.success_count || 0} listings would be updated`
+                        : `Applied: ${allocationApplyResult.summary?.success_count || 0} listings updated`}
+                      onDismiss={() => setAllocationApplyResult(null)}
+                    >
+                      <p>
+                        {allocationApplyResult.summary?.total_units_allocated || 0} total units allocated
+                        {allocationApplyResult.summary?.failed_count > 0 && ` (${allocationApplyResult.summary.failed_count} failed)`}
+                        {allocationApplyResult.summary?.skipped_count > 0 && ` (${allocationApplyResult.summary.skipped_count} skipped - missing SKU)`}
+                      </p>
+                    </Banner>
+                  )}
+
+                  {/* Candidates Table */}
+                  <Card>
+                    <BlockStack gap="400">
+                      <InlineStack align="space-between">
+                        <Text variant="headingSm">
+                          Allocation Preview ({allocationPreview.candidates?.length || 0} listings)
+                        </Text>
+                        <Text variant="bodySm" tone="subdued">
+                          Sorted by score (demand × margin multiplier)
+                        </Text>
+                      </InlineStack>
+                      <Divider />
+
+                      {allocationPreview.candidates && allocationPreview.candidates.length > 0 ? (
+                        <DataTable
+                          columnContentTypes={['text', 'text', 'text', 'numeric', 'numeric', 'numeric', 'numeric', 'numeric', 'numeric']}
+                          headings={['SKU', 'ASIN', 'Bundle', 'Price', 'Margin %', 'Units 30d', 'Rank', 'Score', 'Recommended']}
+                          rows={allocationPreview.candidates.map(c => [
+                            <Text key={`sku-${c.listing_memory_id}`} variant="bodySm" fontFamily="monospace">
+                              {c.sku || '-'}
+                            </Text>,
+                            <Text key={`asin-${c.listing_memory_id}`} variant="bodySm" fontFamily="monospace">
+                              {c.asin || '-'}
+                            </Text>,
+                            <Text key={`bundle-${c.listing_memory_id}`} variant="bodySm" truncate>
+                              {c.bundle_sku || '-'}
+                            </Text>,
+                            formatPrice(c.asp_pence),
+                            c.margin_percent != null ? (
+                              <Text
+                                key={`margin-${c.listing_memory_id}`}
+                                variant="bodySm"
+                                tone={c.margin_percent < parseFloat(allocationMinMargin) ? 'critical' : 'success'}
+                              >
+                                {c.margin_percent.toFixed(1)}%
+                              </Text>
+                            ) : '-',
+                            c.units_30d || 0,
+                            c.keepa_sales_rank ? c.keepa_sales_rank.toLocaleString() : '-',
+                            c.score != null ? c.score.toFixed(2) : '-',
+                            <Badge
+                              key={`qty-${c.listing_memory_id}`}
+                              tone={c.recommended_qty > 0 ? 'success' : 'attention'}
+                            >
+                              {c.recommended_qty}
+                            </Badge>,
+                          ])}
+                        />
+                      ) : (
+                        <Text tone="subdued">No candidates found for this pool.</Text>
+                      )}
+                    </BlockStack>
+                  </Card>
+                </>
+              )}
+
+              {/* Empty state when no preview */}
+              {!allocationPreview && !allocationPreviewLoading && (
+                <Card>
+                  <BlockStack gap="200" inlineAlign="center">
+                    <Text tone="subdued">
+                      Select a pool component and click "Preview Allocation" to see recommended quantities.
+                    </Text>
+                  </BlockStack>
+                </Card>
+              )}
+
+              {/* Loading state */}
+              {allocationPreviewLoading && (
+                <InvictaLoading message="Calculating allocation preview..." />
               )}
             </BlockStack>
           )}

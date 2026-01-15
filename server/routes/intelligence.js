@@ -2,6 +2,9 @@ import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
 import { buildAllocationPreview, getPoolCandidates } from '../services/allocationEngine.js';
+import { requireAdmin } from '../middleware/auth.js';
+import spApiClient from '../services/spApi.js';
+import { recordSystemEvent } from '../services/audit.js';
 
 const router = express.Router();
 
@@ -469,6 +472,207 @@ router.get('/allocation/preview', async (req, res) => {
     }
 
     errors.internal(res, `Failed to build allocation preview: ${err.message}`);
+  }
+});
+
+/**
+ * POST /intelligence/allocation/apply
+ * Apply allocation preview to Amazon inventory via SP-API
+ * ADMIN only, requires Idempotency-Key header
+ *
+ * Body:
+ * - pool_component_id (required) - UUID of the shared component
+ * - location (default: 'Warehouse')
+ * - min_margin (default: 10)
+ * - target_margin (default: 15)
+ * - buffer_units (default: 1)
+ * - dry_run (default: true) - If true, compute but don't apply
+ */
+router.post('/allocation/apply', requireAdmin, async (req, res) => {
+  try {
+    const {
+      pool_component_id: poolComponentId,
+      location = 'Warehouse',
+      min_margin: minMargin = 10,
+      target_margin: targetMargin = 15,
+      buffer_units: bufferUnits = 1,
+      dry_run: dryRun = true,
+    } = req.body;
+
+    // Validate required params
+    if (!poolComponentId) {
+      return errors.badRequest(res, 'pool_component_id is required');
+    }
+
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(poolComponentId)) {
+      return errors.badRequest(res, 'pool_component_id must be a valid UUID');
+    }
+
+    // Check idempotency key for non-dry-run requests
+    const idempotencyKey = req.headers['idempotency-key'];
+    if (!dryRun && !idempotencyKey) {
+      return errors.badRequest(res, 'Idempotency-Key header is required for non-dry-run requests');
+    }
+
+    // Check SP-API configuration
+    if (!dryRun && !spApiClient.isConfigured()) {
+      return errors.badRequest(res, 'Amazon SP-API is not configured');
+    }
+
+    // Validate numeric params
+    const minMarginPercent = parseFloat(minMargin);
+    const targetMarginPercent = parseFloat(targetMargin);
+    const bufferUnitsInt = parseInt(bufferUnits, 10);
+
+    if (minMarginPercent < 0 || minMarginPercent > 100) {
+      return errors.badRequest(res, 'min_margin must be between 0 and 100');
+    }
+    if (targetMarginPercent < minMarginPercent) {
+      return errors.badRequest(res, 'target_margin must be >= min_margin');
+    }
+    if (bufferUnitsInt < 0) {
+      return errors.badRequest(res, 'buffer_units must be >= 0');
+    }
+
+    console.log(`[Allocation Apply] Starting: component=${poolComponentId}, location=${location}, dry_run=${dryRun}`);
+
+    // Step 1: Recompute allocation preview (never trust client-passed allocations)
+    const preview = await buildAllocationPreview({
+      poolComponentId,
+      location,
+      lookbackDays: 30,
+      minMarginPercent,
+      targetMarginPercent,
+      bufferUnits: bufferUnitsInt,
+    });
+
+    // Step 2: Prepare allocations to apply
+    const allocationsToApply = preview.candidates
+      .filter(c => c.recommended_qty > 0 && c.sku)
+      .map(c => ({
+        sku: c.sku,
+        asin: c.asin,
+        listing_memory_id: c.listing_memory_id,
+        bundle_sku: c.bundle_sku,
+        recommended_qty: c.recommended_qty,
+        margin_percent: c.margin_percent,
+        score: c.score,
+      }));
+
+    // Track skipped (no SKU)
+    const skipped = preview.candidates.filter(c => c.recommended_qty > 0 && !c.sku);
+
+    // Step 3: Apply to Amazon (unless dry_run)
+    const results = {
+      success: [],
+      failed: [],
+      skipped: skipped.map(c => ({
+        listing_memory_id: c.listing_memory_id,
+        asin: c.asin,
+        reason: 'Missing seller SKU',
+      })),
+    };
+
+    if (!dryRun) {
+      // Sequential calls with small delay to avoid rate limiting
+      const DELAY_MS = 200;
+
+      for (const allocation of allocationsToApply) {
+        try {
+          await spApiClient.updateListingQuantity(allocation.sku, allocation.recommended_qty);
+
+          results.success.push({
+            sku: allocation.sku,
+            asin: allocation.asin,
+            quantity: allocation.recommended_qty,
+          });
+
+          console.log(`[Allocation Apply] Updated ${allocation.sku} to qty=${allocation.recommended_qty}`);
+
+          // Small delay between calls
+          if (allocationsToApply.indexOf(allocation) < allocationsToApply.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+          }
+        } catch (apiErr) {
+          console.error(`[Allocation Apply] Failed to update ${allocation.sku}:`, apiErr.message);
+
+          results.failed.push({
+            sku: allocation.sku,
+            asin: allocation.asin,
+            quantity: allocation.recommended_qty,
+            error: 'Failed to update Amazon listing',
+          });
+        }
+      }
+    } else {
+      // Dry run - mark all as "would apply"
+      for (const allocation of allocationsToApply) {
+        results.success.push({
+          sku: allocation.sku,
+          asin: allocation.asin,
+          quantity: allocation.recommended_qty,
+          dry_run: true,
+        });
+      }
+    }
+
+    // Step 4: Record system event
+    await recordSystemEvent({
+      eventType: 'AMAZON_INVENTORY_ALLOCATION_APPLIED',
+      description: dryRun
+        ? `Dry run: would allocate ${results.success.length} listings from pool`
+        : `Applied allocation to ${results.success.length} Amazon listings`,
+      metadata: {
+        params: {
+          pool_component_id: poolComponentId,
+          location,
+          min_margin: minMarginPercent,
+          target_margin: targetMarginPercent,
+          buffer_units: bufferUnitsInt,
+        },
+        dry_run: dryRun,
+        idempotency_key: idempotencyKey || null,
+        pool: {
+          internal_sku: preview.pool.internal_sku,
+          available: preview.pool.available,
+          allocatable_units: preview.pool.allocatable_units,
+        },
+        allocations: allocationsToApply.map(a => ({
+          sku: a.sku,
+          qty: a.recommended_qty,
+        })),
+        results_summary: {
+          success_count: results.success.length,
+          failed_count: results.failed.length,
+          skipped_count: results.skipped.length,
+        },
+      },
+      severity: results.failed.length > 0 ? 'WARN' : 'INFO',
+    });
+
+    // Step 5: Return results
+    sendSuccess(res, {
+      dry_run: dryRun,
+      pool: preview.pool,
+      summary: {
+        total_candidates: preview.candidates.length,
+        eligible_for_apply: allocationsToApply.length,
+        success_count: results.success.length,
+        failed_count: results.failed.length,
+        skipped_count: results.skipped.length,
+        total_units_allocated: allocationsToApply.reduce((sum, a) => sum + a.recommended_qty, 0),
+      },
+      results,
+    });
+  } catch (err) {
+    console.error('Allocation apply error:', err);
+
+    if (err.message.includes('not found')) {
+      return errors.notFound(res, 'Component');
+    }
+
+    errors.internal(res, 'Failed to apply allocation');
   }
 });
 
