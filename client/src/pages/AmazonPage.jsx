@@ -26,6 +26,7 @@ import {
   InvictaBadge,
 } from '../components/ui/index.jsx';
 import KeepaMetrics, { KeepaMetricsCompact, KeepaStatusCard } from '../components/KeepaMetrics.jsx';
+import SystemHealthPanel from '../components/SystemHealthPanel.jsx';
 import * as api from '../utils/api.jsx';
 
 /**
@@ -523,6 +524,7 @@ export default function AmazonPage() {
     { id: 'listings', content: 'Listings' },
     { id: 'inventory', content: 'Inventory Allocation' },
     { id: 'allocation', content: 'Allocation' },
+    { id: 'health', content: 'System Health' },
   ];
 
   return (
@@ -1622,6 +1624,11 @@ export default function AmazonPage() {
                 <InvictaLoading message="Calculating allocation preview..." />
               )}
             </BlockStack>
+          )}
+
+          {/* System Health Tab */}
+          {selectedTab === 6 && (
+            <SystemHealthPanel />
           )}
         </Tabs>
 

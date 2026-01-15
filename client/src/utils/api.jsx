@@ -1127,3 +1127,27 @@ export async function reverseSearchComponent(params) {
     body: params,
   });
 }
+
+// ============ System Health API ============
+
+/**
+ * Get system health data (integrations status, sync history)
+ * @param {Object} params - Query params
+ * @param {number} params.days_back - Lookback period in days (default: 30)
+ */
+export async function getSystemHealth(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/health/system${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get recent system events
+ * @param {Object} params - Query params
+ * @param {number} params.limit - Max events to return
+ * @param {string} params.event_type - Filter by event type
+ * @param {string} params.severity - Filter by severity
+ */
+export async function getSystemEvents(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/health/events${query ? `?${query}` : ''}`);
+}
