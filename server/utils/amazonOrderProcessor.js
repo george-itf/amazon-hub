@@ -7,6 +7,7 @@ import supabase from '../services/supabase.js';
 import spApiClient from '../services/spApi.js';
 import { resolveListing } from './memoryResolution.js';
 import { normalizeAsin, normalizeSku, fingerprintTitle } from './identityNormalization.js';
+import { isCompoundSku, parseAndMatchSku, generateBundleSku } from './skuParser.js';
 
 /**
  * Map Amazon order status to internal status
@@ -19,6 +20,173 @@ const STATUS_MAP = {
   'Canceled': 'CANCELLED',
   'Unfulfillable': 'CANCELLED',
 };
+
+/**
+ * Attempt to infer a BOM from a compound SKU
+ *
+ * If the SKU contains patterns like "DHR242Z+2xBL1850+DC18RC", attempt to:
+ * 1. Parse it into component parts with quantities
+ * 2. Match against existing components
+ * 3. Auto-create a BOM with review_status='PENDING_REVIEW' if all parts match
+ * 4. Create a listing_memory entry for future resolution
+ *
+ * @param {string} asin - The ASIN of the listing
+ * @param {string} sku - The seller SKU to parse
+ * @param {string} title - The listing title
+ * @param {string} fingerprint - The title fingerprint
+ * @returns {Promise<{id: string, bom_id: string, resolution_source: string}|null>}
+ */
+async function attemptSkuBasedBomInference(asin, sku, title, fingerprint) {
+  // Only attempt if SKU looks like a compound SKU
+  if (!isCompoundSku(sku)) {
+    return null;
+  }
+
+  try {
+    // Fetch all active components for matching
+    const { data: components, error: compError } = await supabase
+      .from('components')
+      .select('id, internal_sku')
+      .eq('is_active', true);
+
+    if (compError || !components || components.length === 0) {
+      console.log('[SKU Parser] No components found for matching');
+      return null;
+    }
+
+    // Parse SKU and try to match
+    const result = parseAndMatchSku(sku, components);
+
+    // Only proceed if ALL parts matched
+    if (!result.allMatched || result.totalParts === 0) {
+      console.log(`[SKU Parser] Partial match for SKU ${sku}: ${result.matchedCount}/${result.totalParts} parts matched`);
+      return null;
+    }
+
+    console.log(`[SKU Parser] All ${result.totalParts} parts matched for SKU ${sku}`);
+
+    // Filter out null matches and build matched components array
+    const matchedComponents = result.matches.filter(m => m !== null);
+
+    // Generate a canonical bundle_sku from matched components
+    const bundleSku = generateBundleSku(matchedComponents);
+
+    // Check if a BOM with this bundle_sku already exists
+    const { data: existingBom } = await supabase
+      .from('boms')
+      .select('id, review_status')
+      .eq('bundle_sku', bundleSku)
+      .maybeSingle();
+
+    let bomId;
+    let bomCreated = false;
+
+    if (existingBom) {
+      // Use existing BOM (could be PENDING_REVIEW, APPROVED, or REJECTED)
+      bomId = existingBom.id;
+      console.log(`[SKU Parser] Found existing BOM ${bundleSku} (status: ${existingBom.review_status})`);
+    } else {
+      // Create new BOM with PENDING_REVIEW status
+      const { data: newBom, error: bomError } = await supabase
+        .from('boms')
+        .insert({
+          bundle_sku: bundleSku,
+          description: `Auto-inferred from SKU: ${sku}`,
+          is_active: true,
+          review_status: 'PENDING_REVIEW',
+        })
+        .select('id')
+        .single();
+
+      if (bomError) {
+        console.error('[SKU Parser] Failed to create BOM:', bomError.message);
+        return null;
+      }
+
+      bomId = newBom.id;
+      bomCreated = true;
+
+      // Insert bom_components for the new BOM
+      const bomComponents = matchedComponents.map(m => ({
+        bom_id: bomId,
+        component_id: m.component_id,
+        qty_required: m.qty_required,
+      }));
+
+      const { error: compInsertError } = await supabase
+        .from('bom_components')
+        .insert(bomComponents);
+
+      if (compInsertError) {
+        console.error('[SKU Parser] Failed to insert bom_components:', compInsertError.message);
+        // Clean up the orphaned BOM
+        await supabase.from('boms').delete().eq('id', bomId);
+        return null;
+      }
+
+      console.log(`[SKU Parser] Created new BOM ${bundleSku} with ${bomComponents.length} components (PENDING_REVIEW)`);
+    }
+
+    // Check if listing_memory entry already exists for this SKU
+    const { data: existingMemory } = await supabase
+      .from('listing_memory')
+      .select('id, bom_id')
+      .eq('sku', sku)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    let listingMemoryId;
+
+    if (existingMemory) {
+      // Update existing listing_memory if bom_id is not set
+      if (!existingMemory.bom_id) {
+        await supabase
+          .from('listing_memory')
+          .update({
+            bom_id: bomId,
+            resolution_source: 'SKU_INFERENCE',
+          })
+          .eq('id', existingMemory.id);
+      }
+      listingMemoryId = existingMemory.id;
+    } else {
+      // Create new listing_memory entry
+      const { data: newMemory, error: memError } = await supabase
+        .from('listing_memory')
+        .insert({
+          asin: asin,
+          sku: sku,
+          title_fingerprint: fingerprint,
+          bom_id: bomId,
+          resolution_source: 'SKU_INFERENCE',
+          is_active: true,
+          created_by_actor_type: 'SYSTEM',
+          created_by_actor_display: 'SKU Parser',
+        })
+        .select('id')
+        .single();
+
+      if (memError) {
+        console.error('[SKU Parser] Failed to create listing_memory:', memError.message);
+        // Don't fail completely - BOM still exists for future use
+        return null;
+      }
+
+      listingMemoryId = newMemory.id;
+      console.log(`[SKU Parser] Created listing_memory for SKU ${sku}`);
+    }
+
+    return {
+      id: listingMemoryId,
+      bom_id: bomId,
+      resolution_source: 'SKU_INFERENCE',
+      bom_created: bomCreated,
+    };
+  } catch (error) {
+    console.error('[SKU Parser] Error during SKU-based inference:', error.message);
+    return null;
+  }
+}
 
 /**
  * Process a single Amazon order
@@ -164,8 +332,20 @@ export async function processAmazonOrder(amazonOrder, results) {
     const fingerprint = fingerprintTitle(title);
 
     // Attempt to resolve listing using the standard resolution flow
-    const resolution = await resolveListing(asin, sku, title);
-    const isResolved = resolution !== null && resolution.bom_id !== null;
+    let resolution = await resolveListing(asin, sku, title);
+    let isResolved = resolution !== null && resolution.bom_id !== null;
+    let resolutionSource = isResolved ? 'MEMORY' : null;
+
+    // If standard resolution failed, try SKU-based BOM inference
+    if (!isResolved) {
+      const skuInference = await attemptSkuBasedBomInference(asin, sku, title, fingerprint);
+      if (skuInference) {
+        resolution = skuInference;
+        isResolved = true;
+        resolutionSource = 'SKU_INFERENCE';
+        console.log(`[Amazon Processor] SKU inference succeeded for ${sku} -> BOM ${resolution.bom_id}`);
+      }
+    }
 
     if (!isResolved) {
       allLinesResolved = false;
@@ -179,6 +359,7 @@ export async function processAmazonOrder(amazonOrder, results) {
       fingerprint,
       resolution,
       isResolved,
+      resolutionSource,
     });
   }
 
@@ -219,7 +400,7 @@ export async function processAmazonOrder(amazonOrder, results) {
 
   // Create order lines
   for (const processed of processedLines) {
-    const { item, asin, sku, title, fingerprint, resolution, isResolved } = processed;
+    const { item, asin, sku, title, fingerprint, resolution, isResolved, resolutionSource } = processed;
     const quantity = item.QuantityOrdered || 1;
     const pricePerUnit = item.ItemPrice
       ? Math.round(parseFloat(item.ItemPrice.Amount) / quantity * 100)
@@ -239,7 +420,7 @@ export async function processAmazonOrder(amazonOrder, results) {
         unit_price_pence: pricePerUnit,
         listing_memory_id: resolution?.id || null,
         bom_id: resolution?.bom_id || null,
-        resolution_source: resolution ? 'MEMORY' : null,
+        resolution_source: resolutionSource,
         is_resolved: isResolved,
         parse_intent: null,
       });
