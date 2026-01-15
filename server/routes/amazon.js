@@ -15,6 +15,23 @@ import { normalizeAsin, normalizeSku, fingerprintTitle } from '../utils/identity
 const router = express.Router();
 
 /**
+ * Sanitize search input for Supabase PostgREST queries
+ * Escapes special characters that could break or exploit the filter syntax
+ */
+function sanitizeSearchInput(input) {
+  if (!input || typeof input !== 'string') return '';
+  // Escape characters that have special meaning in PostgREST filter syntax
+  // and could be used for injection: commas, periods, parentheses, backslashes
+  return input
+    .replace(/\\/g, '\\\\')
+    .replace(/,/g, '\\,')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/\./g, '\\.')
+    .substring(0, 100); // Limit length to prevent abuse
+}
+
+/**
  * GET /amazon/status
  * Check SP-API connection status
  */
@@ -869,7 +886,8 @@ router.get('/catalog', requireAdmin, async (req, res) => {
       .select('*', { count: 'exact' });
 
     if (search) {
-      query = query.or(`asin.ilike.%${search}%,title.ilike.%${search}%,brand.ilike.%${search}%`);
+      const sanitized = sanitizeSearchInput(search);
+      query = query.or(`asin.ilike.%${sanitized}%,title.ilike.%${sanitized}%,brand.ilike.%${sanitized}%`);
     }
 
     if (needsSync === 'true') {
@@ -919,7 +937,8 @@ router.get('/listings', requireAdmin, async (req, res) => {
       `, { count: 'exact' });
 
     if (search) {
-      query = query.or(`asin.ilike.%${search}%,title.ilike.%${search}%,brand.ilike.%${search}%`);
+      const sanitized = sanitizeSearchInput(search);
+      query = query.or(`asin.ilike.%${sanitized}%,title.ilike.%${sanitized}%,brand.ilike.%${sanitized}%`);
     }
 
     query = query

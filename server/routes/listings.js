@@ -9,6 +9,21 @@ import { fingerprintTitle, normalizeAsin, normalizeSku } from '../utils/identity
 const router = express.Router();
 
 /**
+ * Sanitize search input for Supabase PostgREST queries
+ * Escapes special characters that could break or exploit the filter syntax
+ */
+function sanitizeSearchInput(input) {
+  if (!input || typeof input !== 'string') return '';
+  return input
+    .replace(/\\/g, '\\\\')
+    .replace(/,/g, '\\,')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/\./g, '\\.')
+    .substring(0, 100);
+}
+
+/**
  * GET /listings
  * Returns all listing memory entries
  */
@@ -425,7 +440,7 @@ router.get('/search/query', async (req, res) => {
   }
 
   try {
-    const searchTerm = q.toUpperCase().trim();
+    const searchTerm = sanitizeSearchInput(q.toUpperCase().trim());
 
     let query = supabase
       .from('listing_memory')
