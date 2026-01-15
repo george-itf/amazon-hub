@@ -126,12 +126,55 @@ SELECT 'Large Parcel', 'For items over 10kg', 'CRL2', 30000, 1200, true
 WHERE NOT EXISTS (SELECT 1 FROM shipping_rules WHERE name = 'Large Parcel');
 
 -- ============================================================================
--- 5. AUDIT: Record migration application
+-- 5. CREATE shipping_labels TABLE (if not exists)
+-- Stores Royal Mail label metadata and tracking info per order
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS shipping_labels (
+  id bigserial PRIMARY KEY,
+  order_id uuid NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+  label_id text UNIQUE,
+  tracking_number text,
+  service_code text NOT NULL,
+  price_pence integer,
+  status text NOT NULL DEFAULT 'CREATED' CHECK (status IN (
+    'PENDING', 'CREATED', 'FAILED', 'CANCELLED', 'DISPATCHED'
+  )),
+  carrier text DEFAULT 'Royal Mail',
+  payload jsonb,
+  error_message text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+-- Indexes for shipping_labels
+CREATE INDEX IF NOT EXISTS idx_shipping_labels_order_id ON shipping_labels(order_id);
+CREATE INDEX IF NOT EXISTS idx_shipping_labels_status ON shipping_labels(status);
+CREATE INDEX IF NOT EXISTS idx_shipping_labels_created_at ON shipping_labels(created_at DESC);
+
+-- Trigger to update updated_at
+CREATE OR REPLACE FUNCTION update_shipping_labels_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS shipping_labels_updated_at ON shipping_labels;
+CREATE TRIGGER shipping_labels_updated_at
+  BEFORE UPDATE ON shipping_labels
+  FOR EACH ROW
+  EXECUTE FUNCTION update_shipping_labels_updated_at();
+
+COMMENT ON TABLE shipping_labels IS 'Royal Mail labels and tracking metadata per order';
+
+-- ============================================================================
+-- 6. AUDIT: Record migration application
 -- ============================================================================
 INSERT INTO system_events (event_type, description, severity, metadata)
 SELECT
   'MIGRATION_APPLIED',
-  'Applied 2026-01-15_schema_fixes.sql: cost_price_pence, listing_settings, amazon_fee_percent, shipping_rules',
+  'Applied 2026-01-15_schema_fixes.sql: cost_price_pence, listing_settings, amazon_fee_percent, shipping_rules, shipping_labels',
   'INFO',
   '{
     "migration": "2026-01-15_schema_fixes.sql",
@@ -139,7 +182,8 @@ SELECT
       "Added cost_price_pence to components",
       "Created listing_settings table",
       "Added amazon_fee_percent to listing_memory",
-      "Created shipping_rules table with defaults"
+      "Created shipping_rules table with defaults",
+      "Created shipping_labels table"
     ]
   }'::jsonb
 WHERE EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'system_events');

@@ -594,7 +594,7 @@ export default function Dashboard() {
       title: `${reviewCount} order(s) need review`,
       description: 'Resolve listing issues to process these orders',
       action: 'Review Now',
-      onAction: () => navigate('/review'),
+      onAction: () => navigate('/listings?tab=review'),
     });
   }
   if (bottlenecks.length > 0) {
@@ -603,7 +603,7 @@ export default function Dashboard() {
       title: `${bottlenecks.length} stock bottleneck(s)`,
       description: 'Low inventory blocking orders',
       action: 'View Stock',
-      onAction: () => navigate('/components'),
+      onAction: () => navigate('/inventory'),
     });
   }
   if (!amazonStatus?.connected) {
@@ -612,7 +612,7 @@ export default function Dashboard() {
       title: 'Connect Amazon SP-API',
       description: 'Link your Amazon account to sync orders automatically',
       action: 'Connect',
-      onAction: () => navigate('/amazon'),
+      onAction: () => navigate('/settings'),
     });
   }
 
@@ -681,7 +681,7 @@ export default function Dashboard() {
             title="Today's Orders"
             value={amazonStats?.sales_trend?.slice(-1)[0]?.orders || stats.orders_today || 0}
             subtitle={formatPrice(amazonStats?.sales_trend?.slice(-1)[0]?.revenue_pence || 0)}
-            onClick={() => navigate('/orders')}
+            onClick={() => navigate('/shipping')}
           />
           <MetricCard
             title="This Week"
@@ -700,7 +700,7 @@ export default function Dashboard() {
             value={pendingCount}
             subtitle={pendingCount > 0 ? 'Action required' : 'All caught up'}
             highlighted={pendingCount > 0}
-            onClick={() => navigate('/orders?status=READY_TO_PICK')}
+            onClick={() => navigate('/shipping')}
           />
         </div>
 
@@ -709,7 +709,7 @@ export default function Dashboard() {
           <BlockStack gap="400">
             <InlineStack align="space-between">
               <Text variant="headingMd" fontWeight="bold">Order Pipeline</Text>
-              <Button variant="plain" onClick={() => navigate('/orders')}>
+              <Button variant="plain" onClick={() => navigate('/shipping')}>
                 View all orders
               </Button>
             </InlineStack>
@@ -723,7 +723,7 @@ export default function Dashboard() {
                 count={reviewCount}
                 color="#D97706"
                 active={reviewCount > 0}
-                onClick={() => navigate('/review')}
+                onClick={() => navigate('/listings?tab=review')}
               />
               <div style={{ display: 'flex', alignItems: 'center', color: '#9CA3AF' }}>→</div>
               <PipelineStage
@@ -731,7 +731,7 @@ export default function Dashboard() {
                 count={pendingCount}
                 color="#2563EB"
                 active={pendingCount > 0}
-                onClick={() => navigate('/orders?status=READY_TO_PICK')}
+                onClick={() => navigate('/shipping')}
               />
               <div style={{ display: 'flex', alignItems: 'center', color: '#9CA3AF' }}>→</div>
               <PipelineStage
@@ -739,7 +739,7 @@ export default function Dashboard() {
                 count={pickedCount}
                 color="#7C3AED"
                 active={pickedCount > 0}
-                onClick={() => navigate('/picklists')}
+                onClick={() => navigate('/shipping')}
               />
               <div style={{ display: 'flex', alignItems: 'center', color: '#9CA3AF' }}>→</div>
               <PipelineStage
@@ -747,7 +747,7 @@ export default function Dashboard() {
                 count={shippedToday}
                 color="#059669"
                 active={false}
-                onClick={() => navigate('/orders?status=DISPATCHED')}
+                onClick={() => navigate('/shipping')}
               />
             </div>
           </BlockStack>
@@ -766,7 +766,7 @@ export default function Dashboard() {
                     <Button
                       variant="primary"
                       size="slim"
-                      onClick={() => navigate('/orders?status=READY_TO_PICK')}
+                      onClick={() => navigate('/shipping')}
                     >
                       Process Orders
                     </Button>
@@ -797,14 +797,14 @@ export default function Dashboard() {
                       <OrderRow
                         key={order.id}
                         order={order}
-                        onClick={() => navigate(`/orders?id=${order.id}`)}
+                        onClick={() => navigate('/shipping')}
                       />
                     ))}
                     {readyToPick.length > 10 && (
                       <Button
                         variant="plain"
                         fullWidth
-                        onClick={() => navigate('/orders?status=READY_TO_PICK')}
+                        onClick={() => navigate('/shipping')}
                       >
                         View all {readyToPick.length} orders
                       </Button>
@@ -822,7 +822,7 @@ export default function Dashboard() {
               <StockHeatmap
                 data={heatmapData}
                 loading={heatmapLoading}
-                onClick={(item) => navigate(`/components?id=${item.component_id}`)}
+                onClick={(item) => navigate(`/inventory?component=${item.component_id}`)}
               />
 
               {/* Account Health */}
@@ -919,7 +919,7 @@ export default function Dashboard() {
                         </Text>
                       </BlockStack>
                     ))}
-                    <Button variant="plain" onClick={() => navigate('/audit')}>
+                    <Button variant="plain" onClick={() => navigate('/settings')}>
                       View all activity
                     </Button>
                   </BlockStack>

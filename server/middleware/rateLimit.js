@@ -23,11 +23,11 @@ export const standardLimiter = rateLimit({
 /**
  * Heavy operation rate limiter for expensive endpoints
  * Used for analytics, search, and report generation
- * 10 requests per hour per IP
+ * 100 requests per 15 minutes per IP (same as standard)
  */
 export const heavyOpLimiter = rateLimit({
-  windowMs: 60 * 60 * 1000, // 1 hour
-  max: 10,
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   // Acknowledge that we're using 'trust proxy: 1' in index.js
