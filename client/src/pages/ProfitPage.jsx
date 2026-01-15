@@ -31,6 +31,7 @@ import {
   InvictaPanel,
   InvictaSectionHeader,
 } from '../components/ui/index.jsx';
+import { useProductModal } from '../context/ProductModalContext.jsx';
 
 /**
  * Format price from pence to pounds
@@ -177,6 +178,7 @@ function StatCard({ title, value, subtitle, change, changeTone, large }) {
  * ProfitPage - Comprehensive profitability analytics
  */
 export default function ProfitPage() {
+  const { openProductModal } = useProductModal();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -585,13 +587,27 @@ export default function ProfitPage() {
                       columnContentTypes={['text', 'numeric', 'numeric', 'numeric', 'numeric', 'numeric']}
                       headings={['Product', 'Qty Sold', 'Revenue', 'COGS', 'Profit', 'Margin']}
                       rows={displayProducts.map((p) => [
-                        <BlockStack gap="100" key={p.key}>
-                          <Text variant="bodyMd" fontWeight="semibold">
-                            {(p.title || p.bom_description || p.asin || p.sku || 'Unknown').substring(0, 50)}
-                            {(p.title || '').length > 50 ? '...' : ''}
-                          </Text>
-                          {p.bom_sku && <Text variant="bodySm" tone="subdued">SKU: {p.bom_sku}</Text>}
-                        </BlockStack>,
+                        <button
+                          key={p.key}
+                          onClick={() => openProductModal(p)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            padding: 0,
+                            cursor: 'pointer',
+                            textAlign: 'left',
+                          }}
+                        >
+                          <BlockStack gap="100">
+                            <Text variant="bodyMd" fontWeight="semibold">
+                              <span style={{ textDecoration: 'underline', color: 'var(--p-color-text-emphasis)' }}>
+                                {(p.title || p.bom_description || p.asin || p.sku || 'Unknown').substring(0, 50)}
+                                {(p.title || '').length > 50 ? '...' : ''}
+                              </span>
+                            </Text>
+                            {p.bom_sku && <Text variant="bodySm" tone="subdued">SKU: {p.bom_sku}</Text>}
+                          </BlockStack>
+                        </button>,
                         p.quantity_sold,
                         formatPrice(p.gross_revenue),
                         formatPrice(p.cogs),

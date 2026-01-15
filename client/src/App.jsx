@@ -3,9 +3,11 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { Frame, Spinner } from '@shopify/polaris';
 import Nav from './components/Nav.jsx';
 import { useAuth } from './context/AuthContext.jsx';
+import { ProductModalProvider } from './context/ProductModalContext.jsx';
 import { InvictaLoading } from './components/ui/index.jsx';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts.jsx';
 import KeyboardShortcutsHelp from './components/KeyboardShortcutsHelp.jsx';
+import ProductDetailModal from './components/ProductDetailModal.jsx';
 
 // Lazy load pages for code splitting
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
@@ -25,8 +27,22 @@ const BomReviewPage = lazy(() => import('./pages/BomReviewPage.jsx'));
 
 /**
  * Loading fallback for lazy-loaded pages
+ * Returns null initially to prevent flash, only shows spinner after delay
  */
 function PageLoader() {
+  const [showSpinner, setShowSpinner] = useState(false);
+
+  React.useEffect(() => {
+    // Only show spinner if loading takes more than 200ms
+    const timer = setTimeout(() => setShowSpinner(true), 200);
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (!showSpinner) {
+    // Return empty div with same layout to prevent content jump
+    return <div style={{ minHeight: '200px' }} />;
+  }
+
   return (
     <div style={{
       display: 'flex',
@@ -87,29 +103,32 @@ export default function App() {
   }
 
   return (
-    <Frame navigation={<Nav />}>
-      <Suspense fallback={<PageLoader />}>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/picklists" element={<PicklistsPage />} />
-          <Route path="/components" element={<ComponentsPage />} />
-          <Route path="/bundles" element={<BundlesPage />} />
-          <Route path="/bom-review" element={<BomReviewPage />} />
-          <Route path="/listings" element={<ListingsPage />} />
-          <Route path="/review" element={<ReviewPage />} />
-          <Route path="/replenishment" element={<ReplenishmentPage />} />
-          <Route path="/profit" element={<ProfitPage />} />
-          <Route path="/returns" element={<ReturnsPage />} />
-          <Route path="/audit" element={<AuditPage />} />
-          <Route path="/analyzer" element={<AsinAnalyzerPage />} />
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
-      </Suspense>
-      <KeyboardShortcutsHelp
-        open={showShortcuts}
-        onClose={() => setShowShortcuts(false)}
-      />
-    </Frame>
+    <ProductModalProvider>
+      <Frame navigation={<Nav />}>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/orders" element={<OrdersPage />} />
+            <Route path="/picklists" element={<PicklistsPage />} />
+            <Route path="/components" element={<ComponentsPage />} />
+            <Route path="/bundles" element={<BundlesPage />} />
+            <Route path="/bom-review" element={<BomReviewPage />} />
+            <Route path="/listings" element={<ListingsPage />} />
+            <Route path="/review" element={<ReviewPage />} />
+            <Route path="/replenishment" element={<ReplenishmentPage />} />
+            <Route path="/profit" element={<ProfitPage />} />
+            <Route path="/returns" element={<ReturnsPage />} />
+            <Route path="/audit" element={<AuditPage />} />
+            <Route path="/analyzer" element={<AsinAnalyzerPage />} />
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </Suspense>
+        <KeyboardShortcutsHelp
+          open={showShortcuts}
+          onClose={() => setShowShortcuts(false)}
+        />
+        <ProductDetailModal />
+      </Frame>
+    </ProductModalProvider>
   );
 }
