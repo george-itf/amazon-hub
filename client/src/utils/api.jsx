@@ -1088,3 +1088,42 @@ export async function getAnalyticsHubStockRisk(params = {}) {
 export async function getAnalyticsHubDataQuality() {
   return request('/analytics/hub/data-quality');
 }
+
+// ============ ASIN Analyzer API ============
+
+/**
+ * Analyze multiple ASINs with scoring and BOM suggestions
+ * @param {Object} params - Analysis params
+ * @param {string[]} params.asins - Array of ASINs to analyze
+ * @param {string} params.location - Warehouse location (optional)
+ * @param {number} params.bom_id - Force specific BOM for all ASINs (optional)
+ * @param {Object} params.scoring - Scoring config { min_margin, target_margin, horizon_days }
+ */
+export async function analyzeAsins(params) {
+  return request('/asin/analyze', {
+    method: 'POST',
+    body: params,
+  });
+}
+
+/**
+ * Get BOM candidates/suggestions for an ASIN
+ * @param {string} asin - ASIN to get suggestions for
+ */
+export async function getBomCandidates(asin) {
+  return request(`/asin/bom-candidates?asin=${encodeURIComponent(asin)}`);
+}
+
+/**
+ * Reverse search: Find opportunities from a component
+ * @param {Object} params - Search params
+ * @param {string} params.component_id - Component ID to search from
+ * @param {string} params.location - Warehouse location (optional)
+ * @param {number} params.horizon_days - Forecast horizon (optional)
+ */
+export async function reverseSearchComponent(params) {
+  return request('/asin/reverse-search', {
+    method: 'POST',
+    body: params,
+  });
+}

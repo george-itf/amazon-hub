@@ -33,6 +33,7 @@ import shippingRoutes from './routes/shipping.js';
 import inventoryRoutes from './routes/inventory.js';
 import viewsRoutes from './routes/views.js';
 import listingSettingsRoutes from './routes/listingSettings.js';
+import asinAnalyzerRoutes from './routes/asinAnalyzer.js';
 import scheduler from './services/scheduler.js';
 
 // Create the Express app
@@ -214,6 +215,9 @@ app.use('/views', viewsRoutes);
 
 // Listing Settings routes (per-listing overrides)
 app.use('/listing-settings', listingSettingsRoutes);
+
+// ASIN Analyzer routes (multi-ASIN analysis, BOM suggestions, reverse search)
+app.use('/asin', asinAnalyzerRoutes);
 
 // 404 handler
 app.use((req, res) => {

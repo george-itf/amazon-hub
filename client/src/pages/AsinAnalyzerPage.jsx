@@ -13,9 +13,31 @@ import {
   Divider,
   Select,
   Spinner,
+  DataTable,
+  Tabs,
+  Modal,
+  Thumbnail,
+  EmptyState,
   ProgressBar,
+  Tooltip,
+  Icon,
+  Autocomplete,
 } from '@shopify/polaris';
-import { getComponents, analyzeProfitability } from '../utils/api.jsx';
+import {
+  SearchIcon,
+  ChartVerticalFilledIcon,
+  AlertCircleIcon,
+  CheckCircleIcon,
+  XCircleIcon,
+} from '@shopify/polaris-icons';
+import {
+  analyzeAsins,
+  reverseSearchComponent,
+  getComponents,
+} from '../utils/api.jsx';
+import ScoreBadge, { ScoreCard } from '../components/ScoreBadge.jsx';
+import BomSuggestionPopover from '../components/BomSuggestionPopover.jsx';
+import { useProductModal } from '../context/ProductModalContext.jsx';
 
 /**
  * Format price from pence to pounds
@@ -26,619 +48,767 @@ function formatPrice(pence) {
 }
 
 /**
- * ASIN Profit Analyzer Page
- * Analyze profitability of an Amazon product by selecting components
+ * Format percentage
+ */
+function formatPercent(value) {
+  if (value === null || value === undefined) return '-';
+  return `${value.toFixed(1)}%`;
+}
+
+/**
+ * ASIN Analyzer Page
+ * Multi-ASIN analysis with scoring, BOM suggestions, and reverse search
  */
 export default function AsinAnalyzerPage() {
-  // Data state
-  const [components, setComponents] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const { openProductModal } = useProductModal();
 
-  // Form state
-  const [asin, setAsin] = useState('');
-  const [selectedComponents, setSelectedComponents] = useState({});
-  const [componentSearch, setComponentSearch] = useState('');
-  const [sizeTier, setSizeTier] = useState('standard');
-  const [targetMargin, setTargetMargin] = useState('10');
+  // Tab state
+  const [selectedTab, setSelectedTab] = useState(0);
 
-  // Analysis state
+  // Analyze tab state
+  const [asinInput, setAsinInput] = useState('');
   const [analyzing, setAnalyzing] = useState(false);
-  const [analysisError, setAnalysisError] = useState(null);
-  const [analysisResult, setAnalysisResult] = useState(null);
+  const [results, setResults] = useState([]);
+  const [meta, setMeta] = useState(null);
+  const [analyzeError, setAnalyzeError] = useState(null);
 
-  // Load components
+  // Scoring options
+  const [minMargin, setMinMargin] = useState('10');
+  const [targetMargin, setTargetMargin] = useState('15');
+  const [horizonDays, setHorizonDays] = useState('14');
+
+  // Detail drawer state
+  const [selectedResult, setSelectedResult] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Reverse search state
+  const [components, setComponents] = useState([]);
+  const [componentsLoading, setComponentsLoading] = useState(false);
+  const [selectedComponent, setSelectedComponent] = useState(null);
+  const [componentSearchText, setComponentSearchText] = useState('');
+  const [reverseResults, setReverseResults] = useState([]);
+  const [reverseSearching, setReverseSearching] = useState(false);
+  const [reverseError, setReverseError] = useState(null);
+
+  // Load components for reverse search
   useEffect(() => {
-    async function loadComponents() {
-      setLoading(true);
-      try {
-        const data = await getComponents({ limit: 99999 });
-        setComponents(data.components || []);
-      } catch (err) {
-        setError(err.message || 'Failed to load components');
-      } finally {
-        setLoading(false);
-      }
+    if (selectedTab === 1 && components.length === 0) {
+      loadComponents();
     }
-    loadComponents();
-  }, []);
+  }, [selectedTab]);
 
-  // Filter components by search
-  const filteredComponents = useMemo(() => {
-    if (!componentSearch) return components;
-    const query = componentSearch.toLowerCase();
-    return components.filter(
-      (c) =>
-        c.internal_sku?.toLowerCase().includes(query) ||
-        c.description?.toLowerCase().includes(query)
-    );
-  }, [components, componentSearch]);
-
-  // Count selected components
-  const selectedCount = Object.values(selectedComponents).filter(
-    (qty) => parseInt(qty) > 0
-  ).length;
-
-  // Calculate total cost preview
-  const totalCostPreview = useMemo(() => {
-    let total = 0;
-    for (const [compId, qty] of Object.entries(selectedComponents)) {
-      const parsedQty = parseInt(qty);
-      if (isNaN(parsedQty) || parsedQty <= 0) continue;
-      const comp = components.find((c) => c.id === compId);
-      if (comp?.cost_ex_vat_pence) {
-        total += comp.cost_ex_vat_pence * parsedQty;
-      }
+  const loadComponents = async () => {
+    setComponentsLoading(true);
+    try {
+      const data = await getComponents({ limit: 99999 });
+      setComponents(data.components || []);
+    } catch (err) {
+      console.error('Failed to load components:', err);
+    } finally {
+      setComponentsLoading(false);
     }
-    return total;
-  }, [selectedComponents, components]);
+  };
 
-  // Handle quantity change
-  const handleQuantityChange = useCallback((componentId) => {
-    return (value) =>
-      setSelectedComponents((prev) => ({
-        ...prev,
-        [componentId]: value,
-      }));
-  }, []);
-
-  // Handle ASIN paste - extract ASIN from URL if needed
-  const handleAsinChange = useCallback((value) => {
-    // Check if it's an Amazon URL
-    const asinMatch = value.match(/\/dp\/([A-Z0-9]{10})/i) ||
-      value.match(/\/product\/([A-Z0-9]{10})/i) ||
-      value.match(/asin=([A-Z0-9]{10})/i);
-
-    if (asinMatch) {
-      setAsin(asinMatch[1].toUpperCase());
-    } else {
-      // Clean up the input - remove whitespace and convert to uppercase
-      setAsin(value.trim().toUpperCase());
-    }
-  }, []);
-
-  // Clear form
-  const handleClear = useCallback(() => {
-    setAsin('');
-    setSelectedComponents({});
-    setComponentSearch('');
-    setSizeTier('standard');
-    setTargetMargin('10');
-    setAnalysisResult(null);
-    setAnalysisError(null);
-  }, []);
+  // Parse ASINs from input
+  const parsedAsins = useMemo(() => {
+    if (!asinInput.trim()) return [];
+    return [...new Set(
+      asinInput
+        .split(/[\n,;\s]+/)
+        .map(a => {
+          // Extract ASIN from Amazon URLs
+          const urlMatch = a.match(/\/dp\/([A-Z0-9]{10})/i) ||
+            a.match(/\/product\/([A-Z0-9]{10})/i) ||
+            a.match(/asin=([A-Z0-9]{10})/i);
+          if (urlMatch) return urlMatch[1].toUpperCase();
+          return a.trim().toUpperCase();
+        })
+        .filter(a => /^[A-Z0-9]{10}$/.test(a))
+    )];
+  }, [asinInput]);
 
   // Run analysis
-  async function handleAnalyze() {
-    if (!asin || selectedCount === 0) return;
+  const handleAnalyze = async () => {
+    if (parsedAsins.length === 0) return;
 
     setAnalyzing(true);
-    setAnalysisError(null);
-    setAnalysisResult(null);
+    setAnalyzeError(null);
+    setResults([]);
+    setMeta(null);
 
     try {
-      const componentsList = Object.entries(selectedComponents)
-        .filter(([, qty]) => {
-          const parsed = parseInt(qty);
-          return !isNaN(parsed) && parsed > 0;
-        })
-        .map(([component_id, qty_required]) => ({
-          component_id,
-          qty_required: parseInt(qty_required),
-        }));
-
-      const result = await analyzeProfitability({
-        asin,
-        components: componentsList,
-        sizeTier,
-        targetMarginPercent: parseInt(targetMargin) || 10,
+      const data = await analyzeAsins({
+        asins: parsedAsins,
+        scoring: {
+          min_margin: parseInt(minMargin) || 10,
+          target_margin: parseInt(targetMargin) || 15,
+          horizon_days: parseInt(horizonDays) || 14,
+        },
       });
 
-      setAnalysisResult(result);
+      setResults(data.results || []);
+      setMeta(data.meta || null);
     } catch (err) {
-      setAnalysisError(err.message || 'Analysis failed');
+      setAnalyzeError(err.message || 'Analysis failed');
     } finally {
       setAnalyzing(false);
     }
-  }
+  };
 
-  // Get recommendation badge
-  const getRecommendationBadge = (action) => {
-    switch (action) {
-      case 'highly_profitable':
-        return <Badge tone="success">Highly Profitable</Badge>;
-      case 'profitable':
-        return <Badge tone="success">Profitable</Badge>;
-      case 'marginal':
-        return <Badge tone="warning">Marginal</Badge>;
-      case 'unprofitable':
-        return <Badge tone="critical">Unprofitable</Badge>;
-      default:
-        return <Badge>Review Needed</Badge>;
+  // Handle BOM selection change
+  const handleBomChange = (resultIndex, bomId, bomSku) => {
+    setResults(prev => {
+      const updated = [...prev];
+      updated[resultIndex] = {
+        ...updated[resultIndex],
+        bom_suggestion: {
+          ...updated[resultIndex].bom_suggestion,
+          suggested_bom_id: bomId,
+          suggested_bom_name: bomSku,
+        },
+      };
+      return updated;
+    });
+  };
+
+  // Open detail drawer
+  const openDrawer = (result) => {
+    setSelectedResult(result);
+    setDrawerOpen(true);
+  };
+
+  // Reverse search
+  const handleReverseSearch = async () => {
+    if (!selectedComponent) return;
+
+    setReverseSearching(true);
+    setReverseError(null);
+    setReverseResults([]);
+
+    try {
+      const data = await reverseSearchComponent({
+        component_id: selectedComponent.id,
+        horizon_days: parseInt(horizonDays) || 14,
+      });
+      setReverseResults(data.opportunities || []);
+    } catch (err) {
+      setReverseError(err.message || 'Reverse search failed');
+    } finally {
+      setReverseSearching(false);
     }
   };
 
-  // Get sales velocity badge
-  const getSalesVelocityBadge = (indicator) => {
-    switch (indicator) {
-      case 'excellent':
-        return <Badge tone="success">Excellent Sales</Badge>;
-      case 'good':
-        return <Badge tone="success">Good Sales</Badge>;
-      case 'moderate':
-        return <Badge tone="info">Moderate Sales</Badge>;
-      case 'low':
-        return <Badge tone="warning">Low Sales</Badge>;
-      case 'very_low':
-        return <Badge tone="critical">Very Low Sales</Badge>;
-      default:
-        return <Badge>Unknown</Badge>;
-    }
+  // Component autocomplete options
+  const componentOptions = useMemo(() => {
+    if (!componentSearchText) return [];
+    const query = componentSearchText.toLowerCase();
+    return components
+      .filter(c =>
+        c.internal_sku?.toLowerCase().includes(query) ||
+        c.description?.toLowerCase().includes(query)
+      )
+      .slice(0, 10)
+      .map(c => ({
+        value: c.id,
+        label: `${c.internal_sku} - ${c.description || 'No description'}`,
+        component: c,
+      }));
+  }, [componentSearchText, components]);
+
+  // Clear analysis
+  const handleClear = () => {
+    setAsinInput('');
+    setResults([]);
+    setMeta(null);
+    setAnalyzeError(null);
   };
 
-  if (loading) {
-    return (
-      <Page title="ASIN Profit Analyzer">
-        <div style={{ padding: '40px', textAlign: 'center' }}>
-          <Spinner accessibilityLabel="Loading" size="large" />
-        </div>
-      </Page>
-    );
-  }
+  const tabs = [
+    { id: 'analyze', content: 'Analyze ASINs' },
+    { id: 'reverse', content: 'Reverse Search' },
+  ];
+
+  // Action badge helper
+  const getActionBadge = (action) => {
+    const badges = {
+      LIST_TEST: { tone: 'success', text: 'List & Test' },
+      MAP_BOM: { tone: 'warning', text: 'Map BOM' },
+      BUY_STOCK: { tone: 'info', text: 'Buy Stock' },
+      DO_NOT_LIST: { tone: 'critical', text: 'Do Not List' },
+      INVESTIGATE: { tone: undefined, text: 'Investigate' },
+    };
+    const b = badges[action] || badges.INVESTIGATE;
+    return <Badge tone={b.tone}>{b.text}</Badge>;
+  };
 
   return (
     <Page
-      title="ASIN Profit Analyzer"
-      subtitle="Analyze profitability for any Amazon product"
-      secondaryActions={[{ content: 'Clear', onAction: handleClear }]}
+      title="ASIN Analyzer"
+      subtitle="Analyze ASINs for listing opportunities with explainable scoring"
     >
-      <Layout>
-        {/* Input Section */}
-        <Layout.Section variant="oneThird">
+      <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
+        {/* Analyze ASINs Tab */}
+        {selectedTab === 0 && (
           <BlockStack gap="400">
-            {error && (
-              <Banner tone="critical" onDismiss={() => setError(null)}>
-                <p>{error}</p>
-              </Banner>
-            )}
+            {/* Input Section */}
+            <Layout>
+              <Layout.Section variant="oneThird">
+                <Card>
+                  <BlockStack gap="400">
+                    <Text variant="headingMd">ASINs to Analyze</Text>
+                    <TextField
+                      label="Paste ASINs"
+                      labelHidden
+                      multiline={6}
+                      value={asinInput}
+                      onChange={setAsinInput}
+                      placeholder="Paste ASINs (one per line) or Amazon URLs..."
+                      autoComplete="off"
+                      helpText={`${parsedAsins.length} valid ASINs detected`}
+                    />
 
-            {/* ASIN Input */}
-            <Card>
-              <BlockStack gap="400">
-                <Text variant="headingMd">Product ASIN</Text>
-                <TextField
-                  label="ASIN or Amazon URL"
-                  value={asin}
-                  onChange={handleAsinChange}
-                  placeholder="B07XYZ1234 or paste Amazon URL"
-                  autoComplete="off"
-                  helpText="Paste an ASIN or full Amazon product URL"
-                />
-
-                <Select
-                  label="Size Tier"
-                  options={[
-                    { label: 'Small (envelope)', value: 'small' },
-                    { label: 'Standard', value: 'standard' },
-                    { label: 'Large', value: 'large' },
-                    { label: 'Oversize', value: 'oversize' },
-                  ]}
-                  value={sizeTier}
-                  onChange={setSizeTier}
-                  helpText="Affects FBA fulfillment fee"
-                />
-
-                <TextField
-                  label="Target Margin %"
-                  type="number"
-                  value={targetMargin}
-                  onChange={setTargetMargin}
-                  min="0"
-                  max="100"
-                  helpText="We'll calculate the price needed for this margin"
-                />
-              </BlockStack>
-            </Card>
-
-            {/* Component Selector */}
-            <Card>
-              <BlockStack gap="400">
-                <InlineStack align="space-between">
-                  <Text variant="headingMd">Components ({selectedCount} selected)</Text>
-                  {totalCostPreview > 0 && (
-                    <Text variant="bodySm" tone="subdued">
-                      Cost: {formatPrice(totalCostPreview)}
-                    </Text>
-                  )}
-                </InlineStack>
-
-                <TextField
-                  label="Search components"
-                  labelHidden
-                  placeholder="Search components..."
-                  value={componentSearch}
-                  onChange={setComponentSearch}
-                  clearButton
-                  onClearButtonClick={() => setComponentSearch('')}
-                  autoComplete="off"
-                />
-
-                <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
-                  <BlockStack gap="200">
-                    {filteredComponents.length === 0 ? (
-                      <Text tone="subdued">No components match "{componentSearch}"</Text>
-                    ) : (
-                      filteredComponents.slice(0, 50).map((c) => {
-                        const currentQty = selectedComponents[c.id] || '';
-                        const hasQty = parseInt(currentQty) > 0;
-                        return (
-                          <div
-                            key={c.id}
-                            style={{
-                              padding: '8px',
-                              borderRadius: '4px',
-                              backgroundColor: hasQty ? 'var(--p-color-bg-surface-success)' : 'transparent',
-                            }}
-                          >
-                            <InlineStack gap="200" blockAlign="center" wrap={false}>
-                              <div style={{ flex: 1 }}>
-                                <Text variant="bodySm" fontWeight="semibold">{c.internal_sku}</Text>
-                                <Text variant="bodySm" tone="subdued">{c.description || 'No description'}</Text>
-                                <Text variant="bodySm" tone="subdued">
-                                  {formatPrice(c.cost_ex_vat_pence)} each
-                                </Text>
-                              </div>
-                              <div style={{ width: '70px' }}>
-                                <TextField
-                                  label={`Qty for ${c.internal_sku}`}
-                                  labelHidden
-                                  type="number"
-                                  min="0"
-                                  value={currentQty}
-                                  onChange={handleQuantityChange(c.id)}
-                                  placeholder="0"
-                                  autoComplete="off"
-                                />
-                              </div>
-                            </InlineStack>
-                          </div>
-                        );
-                      })
-                    )}
-                    {filteredComponents.length > 50 && (
-                      <Text tone="subdued">
-                        Showing 50 of {filteredComponents.length}. Use search to narrow down.
-                      </Text>
-                    )}
-                  </BlockStack>
-                </div>
-
-                {selectedCount > 0 && (
-                  <>
                     <Divider />
-                    <Text variant="headingSm">Selected:</Text>
-                    <InlineStack gap="200" wrap>
-                      {Object.entries(selectedComponents)
-                        .filter(([, qty]) => parseInt(qty) > 0)
-                        .map(([compId, qty]) => {
-                          const comp = components.find((c) => c.id === compId);
-                          return (
-                            <Badge key={compId} tone="success">
-                              {comp?.internal_sku || compId} ×{qty}
-                            </Badge>
-                          );
-                        })}
+
+                    <Text variant="headingSm">Scoring Options</Text>
+                    <InlineStack gap="200">
+                      <div style={{ flex: 1 }}>
+                        <TextField
+                          label="Min Margin %"
+                          type="number"
+                          value={minMargin}
+                          onChange={setMinMargin}
+                          min="0"
+                          max="100"
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <TextField
+                          label="Target Margin %"
+                          type="number"
+                          value={targetMargin}
+                          onChange={setTargetMargin}
+                          min="0"
+                          max="100"
+                        />
+                      </div>
                     </InlineStack>
-                  </>
+                    <TextField
+                      label="Forecast Horizon (days)"
+                      type="number"
+                      value={horizonDays}
+                      onChange={setHorizonDays}
+                      min="1"
+                      max="90"
+                    />
+
+                    <InlineStack gap="200">
+                      <Button
+                        variant="primary"
+                        onClick={handleAnalyze}
+                        loading={analyzing}
+                        disabled={parsedAsins.length === 0}
+                      >
+                        Analyze {parsedAsins.length > 0 ? `(${parsedAsins.length})` : ''}
+                      </Button>
+                      <Button onClick={handleClear} disabled={analyzing}>
+                        Clear
+                      </Button>
+                    </InlineStack>
+                  </BlockStack>
+                </Card>
+
+                {/* Data Quality Warnings */}
+                {meta && (meta.invalid_asins?.length > 0 || meta.unresolved_asins?.length > 0) && (
+                  <Card>
+                    <BlockStack gap="200">
+                      <Text variant="headingSm">Warnings</Text>
+                      {meta.invalid_asins?.length > 0 && (
+                        <Banner tone="warning">
+                          {meta.invalid_asins.length} invalid ASINs skipped
+                        </Banner>
+                      )}
+                      {meta.unresolved_asins?.length > 0 && (
+                        <Banner tone="info">
+                          {meta.unresolved_asins.length} ASINs missing Keepa data
+                        </Banner>
+                      )}
+                      {!meta.has_demand_model && (
+                        <Banner tone="warning">
+                          No demand model active - forecasts unavailable
+                        </Banner>
+                      )}
+                    </BlockStack>
+                  </Card>
+                )}
+              </Layout.Section>
+
+              {/* Results Section */}
+              <Layout.Section>
+                {analyzeError && (
+                  <Banner tone="critical" onDismiss={() => setAnalyzeError(null)}>
+                    {analyzeError}
+                  </Banner>
                 )}
 
-                <Button
-                  variant="primary"
-                  onClick={handleAnalyze}
-                  loading={analyzing}
-                  disabled={!asin || selectedCount === 0}
-                  fullWidth
-                >
-                  Analyze Profitability
-                </Button>
-              </BlockStack>
-            </Card>
-          </BlockStack>
-        </Layout.Section>
+                {analyzing && (
+                  <Card>
+                    <BlockStack gap="400" inlineAlign="center">
+                      <Spinner size="large" />
+                      <Text>Analyzing {parsedAsins.length} ASINs...</Text>
+                    </BlockStack>
+                  </Card>
+                )}
 
-        {/* Results Section */}
-        <Layout.Section>
-          <BlockStack gap="400">
-            {analysisError && (
-              <Banner tone="critical" onDismiss={() => setAnalysisError(null)}>
-                <p>{analysisError}</p>
-              </Banner>
-            )}
-
-            {analyzing && (
-              <Card>
-                <div style={{ padding: '40px', textAlign: 'center' }}>
-                  <Spinner accessibilityLabel="Analyzing" size="large" />
-                  <Text variant="bodyMd" tone="subdued">
-                    Fetching Keepa data and calculating profits...
-                  </Text>
-                </div>
-              </Card>
-            )}
-
-            {analysisResult && !analyzing && (
-              <>
-                {/* Product Info */}
-                <Card>
-                  <BlockStack gap="400">
-                    <InlineStack align="space-between" blockAlign="start">
-                      <BlockStack gap="200">
+                {!analyzing && results.length > 0 && (
+                  <Card>
+                    <BlockStack gap="400">
+                      <InlineStack align="space-between">
+                        <Text variant="headingMd">
+                          Results ({results.length} ASINs)
+                        </Text>
                         <InlineStack gap="200">
-                          <Text variant="headingLg">{analysisResult.product?.title || 'Unknown Product'}</Text>
-                          {getRecommendationBadge(analysisResult.recommendation?.action)}
-                        </InlineStack>
-                        <Text variant="bodySm" tone="subdued">ASIN: {analysisResult.product?.asin}</Text>
-                        <Text variant="bodySm" tone="subdued">Category: {analysisResult.product?.category}</Text>
-                      </BlockStack>
-                      {analysisResult.product?.imageUrl && (
-                        <img
-                          src={analysisResult.product.imageUrl}
-                          alt={analysisResult.product.title}
-                          style={{ width: '80px', height: '80px', objectFit: 'contain' }}
-                        />
-                      )}
-                    </InlineStack>
-
-                    <Banner tone={analysisResult.recommendation?.action === 'unprofitable' ? 'warning' : 'info'}>
-                      <p>{analysisResult.recommendation?.summary}</p>
-                    </Banner>
-                  </BlockStack>
-                </Card>
-
-                {/* Key Metrics */}
-                <Card>
-                  <BlockStack gap="400">
-                    <Text variant="headingMd">Key Metrics</Text>
-                    <InlineStack gap="800" wrap>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Current Price</Text>
-                        <Text variant="headingLg" fontWeight="bold">
-                          {formatPrice(analysisResult.product?.currentPricePence)}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Your Cost</Text>
-                        <Text variant="headingLg">
-                          {formatPrice(analysisResult.costs?.totalCostPence)}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Amazon Fees</Text>
-                        <Text variant="headingLg">
-                          {formatPrice(analysisResult.profitAtCurrentPrice?.fees)}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Net Profit</Text>
-                        <Text
-                          variant="headingLg"
-                          fontWeight="bold"
-                          tone={analysisResult.profitAtCurrentPrice?.netProfit >= 0 ? 'success' : 'critical'}
-                        >
-                          {formatPrice(analysisResult.profitAtCurrentPrice?.netProfit)}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Net Margin</Text>
-                        <Text
-                          variant="headingLg"
-                          fontWeight="bold"
-                          tone={analysisResult.profitAtCurrentPrice?.netMarginPercent >= 10 ? 'success' :
-                            analysisResult.profitAtCurrentPrice?.netMarginPercent >= 0 ? 'warning' : 'critical'}
-                        >
-                          {analysisResult.profitAtCurrentPrice?.netMarginPercent || 0}%
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">ROI</Text>
-                        <Text variant="headingLg">
-                          {analysisResult.profitAtCurrentPrice?.roi || 0}%
-                        </Text>
-                      </BlockStack>
-                    </InlineStack>
-                  </BlockStack>
-                </Card>
-
-                {/* Price Targets */}
-                <Card>
-                  <BlockStack gap="400">
-                    <Text variant="headingMd">Price Targets</Text>
-                    <InlineStack gap="800" wrap>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Break-Even Price</Text>
-                        <Text variant="headingMd">
-                          £{analysisResult.breakEvenPricePounds}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Price for {analysisResult.targetPriceAnalysis?.targetMarginPercent}% Margin</Text>
-                        <Text variant="headingMd" fontWeight="bold">
-                          £{analysisResult.targetPriceAnalysis?.targetPricePounds || '-'}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Current Price</Text>
-                        <Text variant="headingMd">
-                          {formatPrice(analysisResult.product?.currentPricePence)}
-                        </Text>
-                      </BlockStack>
-                    </InlineStack>
-
-                    {analysisResult.product?.currentPricePence && analysisResult.targetPriceAnalysis?.targetPricePence && (
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">
-                          Price vs Target ({analysisResult.targetPriceAnalysis?.targetMarginPercent}% margin)
-                        </Text>
-                        <ProgressBar
-                          progress={Math.min(100, (analysisResult.product.currentPricePence / analysisResult.targetPriceAnalysis.targetPricePence) * 100)}
-                          tone={analysisResult.product.currentPricePence >= analysisResult.targetPriceAnalysis.targetPricePence ? 'success' : 'warning'}
-                        />
-                        <Text variant="bodySm">
-                          {analysisResult.product.currentPricePence >= analysisResult.targetPriceAnalysis.targetPricePence
-                            ? 'Current price meets target margin'
-                            : `Need £${((analysisResult.targetPriceAnalysis.targetPricePence - analysisResult.product.currentPricePence) / 100).toFixed(2)} more to hit target`}
-                        </Text>
-                      </BlockStack>
-                    )}
-                  </BlockStack>
-                </Card>
-
-                {/* Sales Velocity */}
-                <Card>
-                  <BlockStack gap="400">
-                    <InlineStack align="space-between">
-                      <Text variant="headingMd">Sales Velocity</Text>
-                      {getSalesVelocityBadge(analysisResult.salesVelocity?.indicator)}
-                    </InlineStack>
-
-                    <InlineStack gap="800" wrap>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Sales Rank</Text>
-                        <Text variant="headingMd">
-                          #{analysisResult.product?.salesRank?.toLocaleString() || '-'}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Est. Monthly Sales</Text>
-                        <Text variant="headingMd">
-                          {analysisResult.salesVelocity?.estimatedMonthlySales || '-'}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Competitors</Text>
-                        <Text variant="headingMd">
-                          {analysisResult.product?.offerCount || '-'}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Rating</Text>
-                        <Text variant="headingMd">
-                          {analysisResult.product?.rating ? `${analysisResult.product.rating}/5` : '-'}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Reviews</Text>
-                        <Text variant="headingMd">
-                          {analysisResult.product?.reviewCount?.toLocaleString() || '-'}
-                        </Text>
-                      </BlockStack>
-                    </InlineStack>
-
-                    <Text variant="bodySm" tone="subdued">
-                      {analysisResult.salesVelocity?.description}
-                    </Text>
-                  </BlockStack>
-                </Card>
-
-                {/* Fee Breakdown */}
-                <Card>
-                  <BlockStack gap="400">
-                    <Text variant="headingMd">Fee Breakdown</Text>
-                    <InlineStack gap="800" wrap>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Referral Fee ({analysisResult.feeConfig?.referralFeePercent}%)</Text>
-                        <Text variant="headingMd">
-                          {formatPrice(analysisResult.profitAtCurrentPrice?.feeBreakdown?.referralFeeAmount)}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">FBA Fee ({analysisResult.feeConfig?.sizeTier})</Text>
-                        <Text variant="headingMd">
-                          {formatPrice(analysisResult.feeConfig?.fbaFeePence)}
-                        </Text>
-                      </BlockStack>
-                      <BlockStack gap="100">
-                        <Text variant="bodySm" tone="subdued">Total Fees</Text>
-                        <Text variant="headingMd" fontWeight="bold">
-                          {formatPrice(analysisResult.profitAtCurrentPrice?.fees)}
-                        </Text>
-                      </BlockStack>
-                    </InlineStack>
-                  </BlockStack>
-                </Card>
-
-                {/* Component Cost Breakdown */}
-                <Card>
-                  <BlockStack gap="400">
-                    <Text variant="headingMd">Component Cost Breakdown</Text>
-                    {analysisResult.costs?.componentBreakdown?.map((comp) => (
-                      <InlineStack key={comp.component_id} align="space-between">
-                        <BlockStack gap="100">
-                          <Text variant="bodyMd" fontWeight="semibold">{comp.internal_sku}</Text>
-                          <Text variant="bodySm" tone="subdued">{comp.description}</Text>
-                        </BlockStack>
-                        <InlineStack gap="400">
-                          <Text variant="bodySm" tone="subdued">
-                            {comp.qty_required} × {formatPrice(comp.unit_cost_pence)}
-                          </Text>
-                          <Text variant="bodyMd" fontWeight="semibold">
-                            {formatPrice(comp.line_cost_pence)}
-                          </Text>
+                          <Badge tone="success">{results.filter(r => r.score?.band === 'GREEN').length} Green</Badge>
+                          <Badge tone="warning">{results.filter(r => r.score?.band === 'AMBER').length} Amber</Badge>
+                          <Badge tone="critical">{results.filter(r => r.score?.band === 'RED').length} Red</Badge>
                         </InlineStack>
                       </InlineStack>
-                    ))}
-                    <Divider />
-                    <InlineStack align="space-between">
-                      <Text variant="bodyMd" fontWeight="bold">Total Cost</Text>
-                      <Text variant="bodyMd" fontWeight="bold">
-                        {formatPrice(analysisResult.costs?.totalCostPence)}
-                      </Text>
-                    </InlineStack>
+
+                      <DataTable
+                        columnContentTypes={['text', 'text', 'text', 'numeric', 'numeric', 'numeric', 'text', 'numeric', 'text']}
+                        headings={['Score', 'ASIN', 'Title', 'Price', 'Margin', 'Forecast', 'BOM', 'Buildable', 'Action']}
+                        rows={results.map((r, idx) => [
+                          <ScoreBadge key="score" score={r.score} />,
+                          <button
+                            key="asin"
+                            onClick={() => openProductModal({ asin: r.asin })}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                              color: 'var(--p-color-text-emphasis)',
+                            }}
+                          >
+                            {r.asin}
+                          </button>,
+                          <Tooltip key="title" content={r.title || 'Unknown'}>
+                            <Text variant="bodySm">
+                              {r.title ? (r.title.length > 30 ? r.title.substring(0, 30) + '...' : r.title) : '-'}
+                            </Text>
+                          </Tooltip>,
+                          formatPrice(r.finance?.price_pence),
+                          <Badge
+                            key="margin"
+                            tone={
+                              r.finance?.margin_percent >= 15 ? 'success' :
+                              r.finance?.margin_percent >= 10 ? 'info' :
+                              r.finance?.margin_percent !== null ? 'critical' : undefined
+                            }
+                          >
+                            {formatPercent(r.finance?.margin_percent)}
+                          </Badge>,
+                          r.demand?.forecast_units_horizon?.toFixed(1) || '-',
+                          <BomSuggestionPopover
+                            key="bom"
+                            asin={r.asin}
+                            currentBomId={r.bom_suggestion?.suggested_bom_id}
+                            currentBomName={r.bom_suggestion?.suggested_bom_name}
+                            confidence={r.bom_suggestion?.confidence}
+                            onSelect={(bomId, bomSku) => handleBomChange(idx, bomId, bomSku)}
+                          />,
+                          r.feasibility?.buildable_units ?? '-',
+                          <InlineStack key="action" gap="100">
+                            {getActionBadge(r.actions?.suggested_next_step)}
+                            <Button size="slim" onClick={() => openDrawer(r)}>
+                              Details
+                            </Button>
+                          </InlineStack>,
+                        ])}
+                        footerContent={`Analyzed ${results.length} ASINs`}
+                      />
+                    </BlockStack>
+                  </Card>
+                )}
+
+                {!analyzing && results.length === 0 && !analyzeError && (
+                  <Card>
+                    <EmptyState
+                      heading="Ready to Analyze"
+                      image=""
+                    >
+                      <p>
+                        Paste ASINs or Amazon URLs in the input field and click "Analyze"
+                        to see profitability scores, BOM suggestions, and stock feasibility.
+                      </p>
+                    </EmptyState>
+                  </Card>
+                )}
+              </Layout.Section>
+            </Layout>
+          </BlockStack>
+        )}
+
+        {/* Reverse Search Tab */}
+        {selectedTab === 1 && (
+          <BlockStack gap="400">
+            <Layout>
+              <Layout.Section variant="oneThird">
+                <Card>
+                  <BlockStack gap="400">
+                    <Text variant="headingMd">Reverse Search</Text>
+                    <Text variant="bodySm" tone="subdued">
+                      Select a component to find all ASINs/listings that use it,
+                      ranked by profit opportunity.
+                    </Text>
+
+                    {componentsLoading ? (
+                      <InlineStack gap="200" blockAlign="center">
+                        <Spinner size="small" />
+                        <Text tone="subdued">Loading components...</Text>
+                      </InlineStack>
+                    ) : (
+                      <Autocomplete
+                        options={componentOptions}
+                        selected={selectedComponent ? [selectedComponent.id] : []}
+                        onSelect={(selected) => {
+                          const opt = componentOptions.find(o => o.value === selected[0]);
+                          setSelectedComponent(opt?.component || null);
+                          setComponentSearchText(opt?.component?.internal_sku || '');
+                        }}
+                        textField={
+                          <Autocomplete.TextField
+                            onChange={setComponentSearchText}
+                            value={componentSearchText}
+                            label="Component"
+                            placeholder="Search components..."
+                            autoComplete="off"
+                          />
+                        }
+                      />
+                    )}
+
+                    {selectedComponent && (
+                      <Banner tone="info">
+                        Selected: <strong>{selectedComponent.internal_sku}</strong>
+                        <br />
+                        {selectedComponent.description}
+                      </Banner>
+                    )}
+
+                    <TextField
+                      label="Forecast Horizon (days)"
+                      type="number"
+                      value={horizonDays}
+                      onChange={setHorizonDays}
+                      min="1"
+                      max="90"
+                    />
+
+                    <Button
+                      variant="primary"
+                      onClick={handleReverseSearch}
+                      loading={reverseSearching}
+                      disabled={!selectedComponent}
+                    >
+                      Search Opportunities
+                    </Button>
                   </BlockStack>
                 </Card>
-              </>
-            )}
+              </Layout.Section>
 
-            {!analysisResult && !analyzing && (
-              <Card>
-                <div style={{ padding: '40px', textAlign: 'center' }}>
-                  <BlockStack gap="200" inlineAlign="center">
-                    <Text variant="headingMd">Ready to Analyze</Text>
-                    <Text tone="subdued">
-                      Enter an ASIN, select the components that make up this product,
-                      and click "Analyze Profitability" to see detailed profit calculations.
-                    </Text>
-                    <Text tone="subdued">
-                      We'll fetch current pricing from Keepa, calculate Amazon fees,
-                      and show you the profit at current price plus what price you'd need for your target margin.
-                    </Text>
-                  </BlockStack>
-                </div>
-              </Card>
-            )}
+              <Layout.Section>
+                {reverseError && (
+                  <Banner tone="critical" onDismiss={() => setReverseError(null)}>
+                    {reverseError}
+                  </Banner>
+                )}
+
+                {reverseSearching && (
+                  <Card>
+                    <BlockStack gap="400" inlineAlign="center">
+                      <Spinner size="large" />
+                      <Text>Searching opportunities...</Text>
+                    </BlockStack>
+                  </Card>
+                )}
+
+                {!reverseSearching && reverseResults.length > 0 && (
+                  <Card>
+                    <BlockStack gap="400">
+                      <Text variant="headingMd">
+                        Opportunities ({reverseResults.length})
+                      </Text>
+
+                      <DataTable
+                        columnContentTypes={['text', 'text', 'numeric', 'numeric', 'numeric', 'numeric', 'numeric', 'numeric']}
+                        headings={['ASIN', 'BOM', 'Price', 'Margin', 'Forecast', 'Expected Profit', 'Buildable', 'Days Cover']}
+                        rows={reverseResults.map((r) => [
+                          <button
+                            key="asin"
+                            onClick={() => openProductModal({ asin: r.asin })}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              padding: 0,
+                              cursor: 'pointer',
+                              textDecoration: 'underline',
+                              color: 'var(--p-color-text-emphasis)',
+                            }}
+                          >
+                            {r.asin}
+                          </button>,
+                          r.bom_sku || '-',
+                          formatPrice(r.price_pence),
+                          <Badge
+                            key="margin"
+                            tone={
+                              r.margin_percent >= 15 ? 'success' :
+                              r.margin_percent >= 10 ? 'info' :
+                              r.margin_percent !== null ? 'critical' : undefined
+                            }
+                          >
+                            {formatPercent(r.margin_percent)}
+                          </Badge>,
+                          r.forecast_units?.toFixed(1) || '-',
+                          formatPrice(r.expected_profit_pence),
+                          r.buildable_units ?? '-',
+                          r.days_of_cover ?? '-',
+                        ])}
+                        footerContent={`${reverseResults.length} opportunities found`}
+                      />
+                    </BlockStack>
+                  </Card>
+                )}
+
+                {!reverseSearching && reverseResults.length === 0 && selectedComponent && !reverseError && (
+                  <Card>
+                    <EmptyState heading="No Results" image="">
+                      <p>Click "Search Opportunities" to find listings using this component.</p>
+                    </EmptyState>
+                  </Card>
+                )}
+
+                {!reverseSearching && !selectedComponent && (
+                  <Card>
+                    <EmptyState heading="Select a Component" image="">
+                      <p>
+                        Choose a component from your inventory to see which ASINs/listings
+                        use it, ranked by expected profit opportunity.
+                      </p>
+                    </EmptyState>
+                  </Card>
+                )}
+              </Layout.Section>
+            </Layout>
           </BlockStack>
-        </Layout.Section>
-      </Layout>
+        )}
+      </Tabs>
+
+      {/* Detail Drawer Modal */}
+      <Modal
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        title={`Analysis: ${selectedResult?.asin || ''}`}
+        large
+      >
+        <Modal.Section>
+          {selectedResult && (
+            <BlockStack gap="400">
+              {/* Product Info */}
+              <InlineStack gap="400" blockAlign="start">
+                {selectedResult.image_url && (
+                  <Thumbnail
+                    source={selectedResult.image_url}
+                    alt={selectedResult.title || 'Product'}
+                    size="large"
+                  />
+                )}
+                <BlockStack gap="200">
+                  <Text variant="headingMd">{selectedResult.title || 'Unknown Product'}</Text>
+                  <Text variant="bodySm" tone="subdued">ASIN: {selectedResult.asin}</Text>
+                  {selectedResult.brand && (
+                    <Text variant="bodySm" tone="subdued">Brand: {selectedResult.brand}</Text>
+                  )}
+                </BlockStack>
+              </InlineStack>
+
+              <Divider />
+
+              {/* Score Card */}
+              <ScoreCard score={selectedResult.score} />
+
+              <Divider />
+
+              {/* Finance Section */}
+              <Text variant="headingSm">Financial Analysis</Text>
+              <InlineStack gap="600" wrap>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Buy Box Price</Text>
+                  <Text variant="headingMd">{formatPrice(selectedResult.finance?.price_pence)}</Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">COGS</Text>
+                  <Text variant="headingMd">{formatPrice(selectedResult.finance?.cogs_pence)}</Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Fees ({(selectedResult.finance?.fee_rate * 100).toFixed(0)}%)</Text>
+                  <Text variant="headingMd">{formatPrice(selectedResult.finance?.fees_pence)}</Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Profit/Unit</Text>
+                  <Text
+                    variant="headingMd"
+                    tone={selectedResult.finance?.profit_pence > 0 ? 'success' : 'critical'}
+                  >
+                    {formatPrice(selectedResult.finance?.profit_pence)}
+                  </Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Margin</Text>
+                  <Text
+                    variant="headingMd"
+                    tone={
+                      selectedResult.finance?.margin_percent >= 15 ? 'success' :
+                      selectedResult.finance?.margin_percent >= 10 ? undefined : 'critical'
+                    }
+                  >
+                    {formatPercent(selectedResult.finance?.margin_percent)}
+                  </Text>
+                </BlockStack>
+              </InlineStack>
+
+              {/* Minimum Prices */}
+              <InlineStack gap="400">
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Min Price for 10% Margin</Text>
+                  <Text variant="bodyMd">{formatPrice(selectedResult.finance?.min_price_for_10_margin_pence)}</Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Min Price for 15% Margin</Text>
+                  <Text variant="bodyMd">{formatPrice(selectedResult.finance?.min_price_for_15_margin_pence)}</Text>
+                </BlockStack>
+              </InlineStack>
+
+              {selectedResult.finance?.fees_estimated && (
+                <Banner tone="warning">
+                  Fee rate estimated at {(selectedResult.finance.fee_rate * 100).toFixed(0)}% - actual may vary by category.
+                </Banner>
+              )}
+
+              <Divider />
+
+              {/* Demand Section */}
+              <Text variant="headingSm">Demand Forecast</Text>
+              <InlineStack gap="600" wrap>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Units/Day</Text>
+                  <Text variant="headingMd">
+                    {selectedResult.demand?.units_per_day_pred?.toFixed(2) || '-'}
+                  </Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Forecast ({selectedResult.demand?.horizon_days}d)</Text>
+                  <Text variant="headingMd">
+                    {selectedResult.demand?.forecast_units_horizon?.toFixed(1) || '-'} units
+                  </Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Source</Text>
+                  <Badge>{selectedResult.demand?.source || 'N/A'}</Badge>
+                </BlockStack>
+              </InlineStack>
+
+              <Divider />
+
+              {/* Feasibility Section */}
+              <Text variant="headingSm">Stock Feasibility</Text>
+              <InlineStack gap="600" wrap>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Buildable Units</Text>
+                  <Text variant="headingMd">
+                    {selectedResult.feasibility?.buildable_units ?? '-'}
+                  </Text>
+                </BlockStack>
+                <BlockStack gap="100">
+                  <Text variant="bodySm" tone="subdued">Days of Cover</Text>
+                  <Text variant="headingMd">
+                    {selectedResult.feasibility?.days_of_cover ?? '-'}
+                  </Text>
+                </BlockStack>
+              </InlineStack>
+
+              {selectedResult.feasibility?.notes?.length > 0 && (
+                <BlockStack gap="100">
+                  {selectedResult.feasibility.notes.map((note, i) => (
+                    <Banner key={i} tone="info">{note}</Banner>
+                  ))}
+                </BlockStack>
+              )}
+
+              <Divider />
+
+              {/* What Would Make This Green */}
+              <Text variant="headingSm">What Would Make This Green?</Text>
+              <BlockStack gap="200">
+                {selectedResult.score?.band === 'GREEN' ? (
+                  <Banner tone="success">
+                    <Icon source={CheckCircleIcon} /> This ASIN already scores GREEN!
+                  </Banner>
+                ) : (
+                  <>
+                    {selectedResult.finance?.margin_percent < 10 && (
+                      <Banner>
+                        <Text variant="bodySm">
+                          <strong>Improve Margin:</strong> Current {formatPercent(selectedResult.finance.margin_percent)}.
+                          Need price ≥ {formatPrice(selectedResult.finance.min_price_for_10_margin_pence)} for 10% margin,
+                          or reduce COGS by {formatPrice((selectedResult.finance.cogs_pence || 0) - (selectedResult.finance.price_pence * 0.75 - selectedResult.finance.fees_pence))}.
+                        </Text>
+                      </Banner>
+                    )}
+                    {!selectedResult.bom_suggestion?.suggested_bom_id && (
+                      <Banner>
+                        <Text variant="bodySm">
+                          <strong>Map a BOM:</strong> COGS cannot be calculated without a BOM mapping.
+                        </Text>
+                      </Banner>
+                    )}
+                    {selectedResult.feasibility?.buildable_units < 10 && (
+                      <Banner>
+                        <Text variant="bodySm">
+                          <strong>Increase Stock:</strong> Only {selectedResult.feasibility.buildable_units} buildable units.
+                          Consider ordering more components.
+                        </Text>
+                      </Banner>
+                    )}
+                    {selectedResult.keepa?.price_volatility_pct > 8 && (
+                      <Banner>
+                        <Text variant="bodySm">
+                          <strong>Price Stability:</strong> High volatility ({formatPercent(selectedResult.keepa.price_volatility_pct)}).
+                          Wait for buy box to stabilize.
+                        </Text>
+                      </Banner>
+                    )}
+                  </>
+                )}
+              </BlockStack>
+
+              <Divider />
+
+              {/* Actions */}
+              <InlineStack gap="200">
+                <Button
+                  variant="primary"
+                  disabled={!selectedResult.actions?.can_create_listing_memory}
+                >
+                  Create Listing Mapping
+                </Button>
+                <Button>Add to Review Queue</Button>
+              </InlineStack>
+            </BlockStack>
+          )}
+        </Modal.Section>
+      </Modal>
     </Page>
   );
 }
