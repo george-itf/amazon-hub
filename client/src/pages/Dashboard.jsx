@@ -193,16 +193,20 @@ export default function Dashboard() {
     <Page
       title="Ops Command Center"
       subtitle={`Welcome back, ${user?.name || user?.email}`}
-      primaryAction={{
+      primaryAction={amazonStatus?.connected ? {
+        content: syncingAmazon ? 'Syncing Amazon...' : 'Sync Amazon Orders',
+        onAction: handleSyncAmazon,
+        loading: syncingAmazon,
+      } : {
         content: 'Import from Shopify',
         onAction: handleImportOrders,
         loading: importing,
       }}
       secondaryActions={[
         ...(amazonStatus?.connected ? [{
-          content: syncingAmazon ? 'Syncing...' : 'Sync Amazon',
-          onAction: handleSyncAmazon,
-          disabled: syncingAmazon,
+          content: importing ? 'Importing...' : 'Import Shopify',
+          onAction: handleImportOrders,
+          disabled: importing,
         }] : []),
         { content: 'Refresh', onAction: loadDashboard },
       ]}
@@ -212,7 +216,7 @@ export default function Dashboard() {
         {importResult && (
           <Banner
             title="Shopify Import Complete"
-            tone="success"
+            tone="info"
             onDismiss={() => setImportResult(null)}
           >
             <p>
@@ -395,7 +399,7 @@ export default function Dashboard() {
                           <BlockStack gap="200" inlineAlign="center">
                             <Text tone="subdued">No orders ready to pick.</Text>
                             <Text variant="bodySm" tone="subdued">
-                              Import orders from Shopify or resolve pending reviews.
+                              Sync orders from Amazon or resolve pending reviews.
                             </Text>
                           </BlockStack>
                         </Card>
@@ -544,6 +548,12 @@ export default function Dashboard() {
                       <BlockStack gap="300">
                         <Text variant="headingSm">System Status</Text>
                         <Divider />
+                        <InlineStack align="space-between">
+                          <Text variant="bodySm">Amazon SP-API</Text>
+                          <Badge tone={amazonStatus?.connected ? 'success' : 'critical'}>
+                            {amazonStatus?.connected ? 'Connected' : 'Not Connected'}
+                          </Badge>
+                        </InlineStack>
                         <InlineStack align="space-between">
                           <Text variant="bodySm">Active Listings</Text>
                           <Text variant="bodyMd" fontWeight="semibold">{stats.listings_active || 0}</Text>
