@@ -9,29 +9,34 @@ import {
   Text,
   BlockStack,
   InlineStack,
-  Badge,
   Spinner,
   ActionList,
   Popover,
-  Icon,
 } from '@shopify/polaris';
-import { PlusCircleIcon, SettingsIcon, DeleteIcon, EditIcon } from '@shopify/polaris-icons';
-import { getViews, createView, updateView, deleteView } from '../utils/api.jsx';
+import { PlusCircleIcon, SettingsIcon, DeleteIcon, EditIcon, ChevronUpIcon, ChevronDownIcon } from '@shopify/polaris-icons';
+import { getViews, createView, updateView, deleteView, reorderViews } from '../utils/api.jsx';
 
 /**
- * SavedViewsBar - Displays saved filter views as tabs
+ * SavedViewsBar - Reusable component for saved filter views (tabs)
  *
  * Props:
- * - context: string - The page context (e.g., 'components', 'listings')
- * - currentFilters: object - Current filter state to save
- * - onFilterChange: (filters) => void - Callback when a view is selected
- * - filterKeys: string[] - Keys to save/restore from filters (e.g., ['searchQuery', 'stockFilter', 'sortBy'])
+ * - context: 'components' | 'listings'
+ * - currentFilters: object - Current filter state (used when saving a view)
+ * - onApplyView: (config) => void - Called when a view is selected, passes view.config
+ * - onSaveView: () => void - Optional callback after a view is saved (for UI feedback)
+ *
+ * This component:
+ * - Fetches and displays views as horizontal tabs
+ * - "All" tab is always present (virtual, from backend)
+ * - Clicking a tab calls onApplyView(config) - NO filter logic here
+ * - "Save current view" opens modal, persists currentFilters as config
+ * - "Manage views" allows rename, delete, reorder
  */
 export default function SavedViewsBar({
   context,
   currentFilters = {},
-  onFilterChange,
-  filterKeys = [],
+  onApplyView,
+  onSaveView,
 }) {
   const [views, setViews] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,12 +53,12 @@ export default function SavedViewsBar({
   const [manageModalOpen, setManageModalOpen] = useState(false);
   const [editingView, setEditingView] = useState(null);
   const [editName, setEditName] = useState('');
-  const [deleting, setDeleting] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
 
   // Actions popover
   const [actionsOpen, setActionsOpen] = useState(false);
 
-  // Load views
+  // Load views from backend
   const loadViews = useCallback(async () => {
     if (!context) return;
 
@@ -61,10 +66,13 @@ export default function SavedViewsBar({
     setError(null);
     try {
       const data = await getViews(context);
+      // Backend returns views with "All" prepended
       setViews(data.views || []);
     } catch (err) {
       console.error('Failed to load views:', err);
       setError(err.message);
+      // Fallback to just "All" tab
+      setViews([{ id: null, name: 'All', config: {}, is_default: true }]);
     } finally {
       setLoading(false);
     }
@@ -78,41 +86,22 @@ export default function SavedViewsBar({
   const handleTabChange = useCallback((index) => {
     setSelectedTabIndex(index);
 
-    // Index 0 is always "All" - clear filters
-    if (index === 0) {
-      if (onFilterChange) {
-        const clearedFilters = {};
-        filterKeys.forEach(key => {
-          clearedFilters[key] = getDefaultValue(key);
-        });
-        onFilterChange(clearedFilters);
-      }
-      return;
+    const view = views[index];
+    if (view && onApplyView) {
+      // Pass the config object - parent handles applying it
+      onApplyView(view.config || {});
     }
+  }, [views, onApplyView]);
 
-    // Apply the selected view's filters
-    const view = views[index - 1];
-    if (view && view.config_json && onFilterChange) {
-      onFilterChange(view.config_json);
-    }
-  }, [views, onFilterChange, filterKeys]);
-
-  // Get default value for a filter key
-  function getDefaultValue(key) {
-    if (key.includes('search') || key.includes('query')) return '';
-    if (key.includes('Filter') || key.includes('filter')) return 'all';
-    if (key.includes('sort') || key.includes('Sort')) return 'sku';
-    return '';
-  }
-
-  // Check if current filters match a view
-  const isFilterActive = useCallback(() => {
-    return filterKeys.some(key => {
-      const value = currentFilters[key];
-      const defaultVal = getDefaultValue(key);
-      return value !== undefined && value !== defaultVal && value !== '';
+  // Check if current filters have any active values
+  const hasActiveFilters = useCallback(() => {
+    if (!currentFilters || typeof currentFilters !== 'object') return false;
+    return Object.values(currentFilters).some(v => {
+      if (v === null || v === undefined || v === '') return false;
+      if (v === 'all') return false;
+      return true;
     });
-  }, [currentFilters, filterKeys]);
+  }, [currentFilters]);
 
   // Save current view
   const handleSaveView = async () => {
@@ -124,23 +113,16 @@ export default function SavedViewsBar({
     setSaving(true);
     setSaveError(null);
     try {
-      // Extract only the filter keys we care about
-      const configToSave = {};
-      filterKeys.forEach(key => {
-        if (currentFilters[key] !== undefined) {
-          configToSave[key] = currentFilters[key];
-        }
-      });
-
-      await createView({
-        context,
-        name: saveViewName.trim(),
-        config_json: configToSave,
-      });
+      await createView(context, saveViewName.trim(), currentFilters);
 
       setSaveViewName('');
       setSaveModalOpen(false);
       await loadViews();
+
+      // Notify parent if callback provided
+      if (onSaveView) {
+        onSaveView();
+      }
     } catch (err) {
       setSaveError(err.message || 'Failed to save view');
     } finally {
@@ -148,44 +130,75 @@ export default function SavedViewsBar({
     }
   };
 
-  // Update view name
-  const handleUpdateView = async (viewId) => {
+  // Rename view
+  const handleRenameView = async (viewId) => {
     if (!editName.trim()) return;
 
+    setActionLoading(viewId);
     try {
       await updateView(viewId, { name: editName.trim() });
       setEditingView(null);
       setEditName('');
       await loadViews();
     } catch (err) {
-      console.error('Failed to update view:', err);
+      console.error('Failed to rename view:', err);
+    } finally {
+      setActionLoading(null);
     }
   };
 
   // Delete view
   const handleDeleteView = async (viewId) => {
-    setDeleting(viewId);
+    setActionLoading(viewId);
     try {
       await deleteView(viewId);
       await loadViews();
-      // Reset to "All" tab if we deleted the selected view
+      // Reset to "All" tab
       setSelectedTabIndex(0);
+      if (onApplyView) {
+        onApplyView({});
+      }
     } catch (err) {
       console.error('Failed to delete view:', err);
     } finally {
-      setDeleting(null);
+      setActionLoading(null);
     }
   };
 
-  // Build tabs
-  const tabs = [
-    { id: 'all', content: 'All', accessibilityLabel: 'All items' },
-    ...views.map(view => ({
-      id: view.id,
-      content: view.name,
-      accessibilityLabel: `View: ${view.name}`,
-    })),
-  ];
+  // Move view up/down
+  const handleMoveView = async (viewId, direction) => {
+    // Get only user-created views (exclude virtual "All")
+    const userViews = views.filter(v => v.id !== null);
+    const currentIndex = userViews.findIndex(v => v.id === viewId);
+    if (currentIndex === -1) return;
+
+    const newIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    if (newIndex < 0 || newIndex >= userViews.length) return;
+
+    // Swap positions
+    const reordered = [...userViews];
+    [reordered[currentIndex], reordered[newIndex]] = [reordered[newIndex], reordered[currentIndex]];
+
+    setActionLoading(viewId);
+    try {
+      await reorderViews(context, reordered.map(v => v.id));
+      await loadViews();
+    } catch (err) {
+      console.error('Failed to reorder views:', err);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  // Build tabs from views
+  const tabs = views.map(view => ({
+    id: view.id === null ? 'all' : String(view.id),
+    content: view.name,
+    accessibilityLabel: view.id === null ? 'All items' : `View: ${view.name}`,
+  }));
+
+  // Get user-created views for manage modal
+  const userViews = views.filter(v => v.id !== null);
 
   if (loading) {
     return (
@@ -221,8 +234,8 @@ export default function SavedViewsBar({
               {
                 content: 'Save current view',
                 icon: PlusCircleIcon,
-                disabled: !isFilterActive(),
-                helpText: isFilterActive() ? 'Save current filters as a tab' : 'Apply filters first',
+                disabled: !hasActiveFilters(),
+                helpText: hasActiveFilters() ? 'Save current filters as a tab' : 'Apply filters first',
                 onAction: () => {
                   setActionsOpen(false);
                   setSaveModalOpen(true);
@@ -231,7 +244,7 @@ export default function SavedViewsBar({
               {
                 content: 'Manage views',
                 icon: SettingsIcon,
-                disabled: views.length === 0,
+                disabled: userViews.length === 0,
                 onAction: () => {
                   setActionsOpen(false);
                   setManageModalOpen(true);
@@ -298,19 +311,18 @@ export default function SavedViewsBar({
             </FormLayout>
 
             <BlockStack gap="200">
-              <Text variant="bodySm" tone="subdued">Current filters to save:</Text>
-              <InlineStack gap="200" wrap>
-                {filterKeys.map(key => {
-                  const value = currentFilters[key];
-                  const defaultVal = getDefaultValue(key);
-                  if (value === undefined || value === defaultVal || value === '') return null;
-                  return (
-                    <Badge key={key} tone="info">
-                      {key}: {String(value)}
-                    </Badge>
-                  );
-                })}
-              </InlineStack>
+              <Text variant="bodySm" tone="subdued">Current filter configuration:</Text>
+              <div style={{
+                padding: '12px',
+                backgroundColor: '#F6F6F7',
+                borderRadius: '8px',
+                fontFamily: 'monospace',
+                fontSize: '12px',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}>
+                {JSON.stringify(currentFilters, null, 2)}
+              </div>
             </BlockStack>
           </BlockStack>
         </Modal.Section>
@@ -338,10 +350,10 @@ export default function SavedViewsBar({
       >
         <Modal.Section>
           <BlockStack gap="400">
-            {views.length === 0 ? (
+            {userViews.length === 0 ? (
               <Text tone="subdued">No saved views yet. Apply filters and save them as a view.</Text>
             ) : (
-              views.map(view => (
+              userViews.map((view, index) => (
                 <div
                   key={view.id}
                   style={{
@@ -363,7 +375,13 @@ export default function SavedViewsBar({
                         autoComplete="off"
                         autoFocus
                       />
-                      <Button size="slim" onClick={() => handleUpdateView(view.id)}>Save</Button>
+                      <Button
+                        size="slim"
+                        onClick={() => handleRenameView(view.id)}
+                        loading={actionLoading === view.id}
+                      >
+                        Save
+                      </Button>
                       <Button
                         size="slim"
                         variant="plain"
@@ -377,34 +395,43 @@ export default function SavedViewsBar({
                     </InlineStack>
                   ) : (
                     <>
-                      <BlockStack gap="100">
-                        <Text variant="bodyMd" fontWeight="semibold">{view.name}</Text>
-                        <InlineStack gap="100" wrap>
-                          {Object.entries(view.config_json || {}).map(([key, value]) => (
-                            value && value !== 'all' && value !== '' && (
-                              <Badge key={key} tone="info" size="small">
-                                {key}: {String(value)}
-                              </Badge>
-                            )
-                          ))}
-                        </InlineStack>
-                      </BlockStack>
+                      <Text variant="bodyMd" fontWeight="semibold">{view.name}</Text>
                       <InlineStack gap="100">
+                        {/* Move up button */}
+                        <Button
+                          icon={ChevronUpIcon}
+                          variant="plain"
+                          accessibilityLabel={`Move ${view.name} up`}
+                          disabled={index === 0}
+                          loading={actionLoading === view.id}
+                          onClick={() => handleMoveView(view.id, 'up')}
+                        />
+                        {/* Move down button */}
+                        <Button
+                          icon={ChevronDownIcon}
+                          variant="plain"
+                          accessibilityLabel={`Move ${view.name} down`}
+                          disabled={index === userViews.length - 1}
+                          loading={actionLoading === view.id}
+                          onClick={() => handleMoveView(view.id, 'down')}
+                        />
+                        {/* Rename button */}
                         <Button
                           icon={EditIcon}
                           variant="plain"
-                          accessibilityLabel={`Edit ${view.name}`}
+                          accessibilityLabel={`Rename ${view.name}`}
                           onClick={() => {
                             setEditingView(view.id);
                             setEditName(view.name);
                           }}
                         />
+                        {/* Delete button */}
                         <Button
                           icon={DeleteIcon}
                           variant="plain"
                           tone="critical"
                           accessibilityLabel={`Delete ${view.name}`}
-                          loading={deleting === view.id}
+                          loading={actionLoading === view.id}
                           onClick={() => handleDeleteView(view.id)}
                         />
                       </InlineStack>

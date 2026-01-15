@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import {
   Page,
   Layout,
@@ -20,6 +20,7 @@ import {
   Tabs,
 } from '@shopify/polaris';
 import { getListings, createListing, getBoms, getListingInventory, getSharedComponents } from '../utils/api.jsx';
+import SavedViewsBar from '../components/SavedViewsBar.jsx';
 
 /**
  * ListingsPage lists all entries in the listing memory and allows
@@ -176,6 +177,24 @@ export default function ListingsPage() {
     setSourceFilter('all');
     setSortBy('created');
   };
+
+  // Handler for SavedViewsBar - applies view config to filter state
+  const handleApplyView = useCallback((config) => {
+    setSearchQuery(config.searchQuery || '');
+    setStatusFilter(config.statusFilter || 'all');
+    setBomFilter(config.bomFilter || 'all');
+    setSourceFilter(config.sourceFilter || 'all');
+    setSortBy(config.sortBy || 'created');
+  }, []);
+
+  // Current filters for SavedViewsBar
+  const currentFilters = useMemo(() => ({
+    searchQuery,
+    statusFilter,
+    bomFilter,
+    sourceFilter,
+    sortBy,
+  }), [searchQuery, statusFilter, bomFilter, sourceFilter, sortBy]);
 
   const hasFilters = searchQuery || statusFilter !== 'all' || bomFilter !== 'all' || sourceFilter !== 'all' || sortBy !== 'created';
 
@@ -503,6 +522,15 @@ export default function ListingsPage() {
             <Tabs tabs={tabs} selected={selectedTab} onSelect={setSelectedTab}>
               {selectedTab === 0 ? (
                 <BlockStack gap="400">
+                  {/* Saved Views Bar */}
+                  <Card>
+                    <SavedViewsBar
+                      context="listings"
+                      currentFilters={currentFilters}
+                      onApplyView={handleApplyView}
+                    />
+                  </Card>
+
                   {/* Search and Filter */}
                   <Card>
                     <BlockStack gap="300">

@@ -134,11 +134,12 @@ export default function ComponentsPage() {
     setSortBy('sku');
   };
 
-  // Handler for SavedViewsBar filter changes
-  const handleViewFilterChange = useCallback((filters) => {
-    if (filters.searchQuery !== undefined) setSearchQuery(filters.searchQuery);
-    if (filters.stockFilter !== undefined) setStockFilter(filters.stockFilter);
-    if (filters.sortBy !== undefined) setSortBy(filters.sortBy);
+  // Handler for SavedViewsBar - applies view config to filter state
+  const handleApplyView = useCallback((config) => {
+    // Reset to defaults first, then apply config values
+    setSearchQuery(config.searchQuery || '');
+    setStockFilter(config.stockFilter || 'all');
+    setSortBy(config.sortBy || 'sku');
   }, []);
 
   // Current filters for SavedViewsBar
@@ -388,8 +389,7 @@ export default function ComponentsPage() {
               <SavedViewsBar
                 context="components"
                 currentFilters={currentFilters}
-                onFilterChange={handleViewFilterChange}
-                filterKeys={['searchQuery', 'stockFilter', 'sortBy']}
+                onApplyView={handleApplyView}
               />
             </Card>
 

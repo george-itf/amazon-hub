@@ -873,16 +873,15 @@ export async function getViews(context) {
   return request(`/views?context=${encodeURIComponent(context)}`);
 }
 
-export async function getView(id) {
-  return request(`/views/${id}`);
+export async function createView(context, name, config) {
+  return request('/views', {
+    method: 'POST',
+    body: { context, name, config },
+  });
 }
 
-export async function createView(view) {
-  return request('/views', { method: 'POST', body: view });
-}
-
-export async function updateView(id, updates) {
-  return request(`/views/${id}`, { method: 'PUT', body: updates });
+export async function updateView(id, payload) {
+  return request(`/views/${id}`, { method: 'PUT', body: payload });
 }
 
 export async function deleteView(id) {
