@@ -2,9 +2,15 @@ import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
 import { buildAllocationPreview, getPoolCandidates } from '../services/allocationEngine.js';
-import { requireAdmin } from '../middleware/auth.js';
+import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import spApiClient from '../services/spApi.js';
 import { recordSystemEvent } from '../services/audit.js';
+import {
+  getDemandModelSettings,
+  getActiveDemandModel,
+  trainDemandModelRun,
+  predictUnitsPerDayForAsin,
+} from '../services/keepaDemandModel.js';
 
 const router = express.Router();
 
@@ -673,6 +679,181 @@ router.post('/allocation/apply', requireAdmin, async (req, res) => {
     }
 
     errors.internal(res, 'Failed to apply allocation');
+  }
+});
+
+// ============================================================================
+// DEMAND MODEL ROUTES
+// ============================================================================
+
+/**
+ * GET /intelligence/demand-model/status
+ * Get active demand model status and metrics
+ */
+router.get('/demand-model/status', async (req, res) => {
+  try {
+    const settings = await getDemandModelSettings();
+    const model = await getActiveDemandModel(settings.domainId);
+
+    if (!model) {
+      return sendSuccess(res, {
+        active: false,
+        settings: {
+          enabled: settings.enabled,
+          refresh_minutes: settings.refreshMinutes,
+          lookback_days: settings.lookbackDays,
+          min_asins: settings.minAsins,
+          ridge_lambda: settings.ridgeLambda,
+          domain_id: settings.domainId,
+        },
+        model: null,
+      });
+    }
+
+    sendSuccess(res, {
+      active: true,
+      settings: {
+        enabled: settings.enabled,
+        refresh_minutes: settings.refreshMinutes,
+        lookback_days: settings.lookbackDays,
+        min_asins: settings.minAsins,
+        ridge_lambda: settings.ridgeLambda,
+        domain_id: settings.domainId,
+      },
+      model: {
+        id: model.id,
+        model_name: model.model_name,
+        trained_at: model.trained_at,
+        trained_from: model.trained_from,
+        trained_to: model.trained_to,
+        lookback_days: model.lookback_days,
+        ridge_lambda: model.ridge_lambda,
+        training_summary: model.training_summary,
+        metrics: model.metrics,
+        coefficients: model.coefficients,
+        feature_names: model.feature_names,
+      },
+    });
+  } catch (err) {
+    console.error('Demand model status error:', err);
+    errors.internal(res, 'Failed to fetch demand model status');
+  }
+});
+
+/**
+ * POST /intelligence/demand-model/train
+ * Trigger demand model training (ADMIN only)
+ *
+ * Body (optional):
+ * - lookback_days: number (default from settings)
+ * - ridge_lambda: number (default from settings)
+ */
+router.post('/demand-model/train', requireAdmin, async (req, res) => {
+  try {
+    const settings = await getDemandModelSettings();
+
+    const lookbackDays = req.body.lookback_days || settings.lookbackDays;
+    const ridgeLambda = req.body.ridge_lambda || settings.ridgeLambda;
+
+    console.log(`[API] Training demand model: lookback=${lookbackDays}, lambda=${ridgeLambda}`);
+
+    const result = await trainDemandModelRun({
+      domainId: settings.domainId,
+      lookbackDays,
+      ridgeLambda,
+      minAsins: settings.minAsins,
+    });
+
+    sendSuccess(res, {
+      success: true,
+      message: 'Demand model trained successfully',
+      model: result,
+    });
+  } catch (err) {
+    console.error('Demand model training error:', err);
+
+    if (err.message.includes('Insufficient')) {
+      return errors.badRequest(res, err.message);
+    }
+
+    errors.internal(res, `Failed to train demand model: ${err.message}`);
+  }
+});
+
+/**
+ * GET /intelligence/demand-model/predict
+ * Get demand prediction for an ASIN
+ *
+ * Query params:
+ * - asin (required)
+ * - date (optional) - date to use for Keepa data lookup
+ */
+router.get('/demand-model/predict', requireStaff, async (req, res) => {
+  try {
+    const { asin, date } = req.query;
+
+    if (!asin) {
+      return errors.badRequest(res, 'asin query parameter is required');
+    }
+
+    const prediction = await predictUnitsPerDayForAsin({
+      asin,
+      date: date || null,
+    });
+
+    if (prediction.error) {
+      return sendSuccess(res, {
+        asin,
+        prediction: null,
+        error: prediction.error,
+        model: prediction.model,
+      });
+    }
+
+    sendSuccess(res, {
+      asin,
+      prediction: {
+        units_per_day: prediction.units_per_day_pred,
+        y_log: prediction.y_log_pred,
+      },
+      keepa_date: prediction.keepa_date,
+      debug_features: prediction.debug_features,
+      model: prediction.model,
+    });
+  } catch (err) {
+    console.error('Demand model prediction error:', err);
+    errors.internal(res, 'Failed to get demand prediction');
+  }
+});
+
+/**
+ * GET /intelligence/demand-model/history
+ * Get demand model training history (ADMIN only)
+ *
+ * Query params:
+ * - limit (default: 10)
+ */
+router.get('/demand-model/history', requireAdmin, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const settings = await getDemandModelSettings();
+
+    const { data, error } = await supabase
+      .from('keepa_demand_model_runs')
+      .select('id, model_name, trained_at, trained_from, trained_to, lookback_days, ridge_lambda, training_summary, metrics, is_active')
+      .eq('domain_id', settings.domainId)
+      .order('trained_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+
+    sendSuccess(res, {
+      domain_id: settings.domainId,
+      runs: data || [],
+    });
+  } catch (err) {
+    console.error('Demand model history error:', err);
+    errors.internal(res, 'Failed to fetch demand model history');
   }
 });
 

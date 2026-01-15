@@ -6,6 +6,11 @@
  * enforcing net margin >= minMarginPercent (prefer targetMarginPercent when possible).
  */
 import supabase from './supabase.js';
+import {
+  getActiveDemandModel,
+  predictUnitsPerDayFromMetrics,
+  getDemandModelSettings,
+} from './keepaDemandModel.js';
 
 /**
  * Compute demand score based on internal sales and Keepa metrics
@@ -32,6 +37,92 @@ function computeDemandScore(units30d, salesRank, offerCount) {
   } else {
     return 0.40 * internalScore + 0.50 * rankScore + 0.10 * offerScore;
   }
+}
+
+/**
+ * Compute blended units/day forecast using internal data and calibrated model
+ *
+ * Blending strategy:
+ * - w = clamp(units_90d / 30, 0, 1) - weight for internal data based on sample size
+ * - blended = w * internal_units_per_day + (1-w) * model_units_per_day
+ *
+ * Returns demand source for transparency:
+ * - 'INTERNAL': sufficient internal data (units_90d >= 30)
+ * - 'BLENDED': mix of internal and model
+ * - 'KEEPA_MODEL': primarily model-based (sparse internal data)
+ * - 'FALLBACK': no model, using rank heuristic
+ *
+ * @param {Object} params
+ * @param {number} params.units30d - Units sold in last 30 days
+ * @param {number} params.units90d - Units sold in last 90 days
+ * @param {number|null} params.salesRank - Keepa sales rank
+ * @param {number|null} params.offerCount - Keepa offer count
+ * @param {number|null} params.buyboxPricePence - Keepa buybox price
+ * @param {Object|null} params.demandModel - Active demand model (or null)
+ * @returns {Object} - {units_per_day, demand_source, model_prediction}
+ */
+function computeBlendedDemand({
+  units30d,
+  units90d,
+  salesRank,
+  offerCount,
+  buyboxPricePence,
+  demandModel,
+}) {
+  // Internal units per day (from 30-day sales)
+  const internalUnitsPerDay = units30d / 30;
+
+  // Weight for internal data based on 90-day sample size
+  // Full weight when we have 30+ units in 90 days
+  const w = Math.min(1, Math.max(0, units90d / 30));
+
+  // Get model prediction if available
+  let modelUnitsPerDay = null;
+  let modelPrediction = null;
+
+  if (demandModel && salesRank != null) {
+    const prediction = predictUnitsPerDayFromMetrics({
+      salesRank,
+      offerCount,
+      buyboxPricePence,
+      model: demandModel,
+    });
+
+    if (!prediction.error && prediction.units_per_day_pred != null) {
+      modelUnitsPerDay = prediction.units_per_day_pred;
+      modelPrediction = {
+        units_per_day_pred: prediction.units_per_day_pred,
+        y_log_pred: prediction.y_log_pred,
+        debug_features: prediction.debug_features,
+      };
+    }
+  }
+
+  // Determine demand source and compute blended value
+  let unitsPerDay;
+  let demandSource;
+
+  if (w >= 0.95) {
+    // Strong internal signal - use internal only
+    unitsPerDay = internalUnitsPerDay;
+    demandSource = 'INTERNAL';
+  } else if (modelUnitsPerDay != null) {
+    // Blend internal and model
+    unitsPerDay = w * internalUnitsPerDay + (1 - w) * modelUnitsPerDay;
+    demandSource = w > 0.3 ? 'BLENDED' : 'KEEPA_MODEL';
+  } else {
+    // No model - fallback to internal only (even if sparse)
+    unitsPerDay = internalUnitsPerDay;
+    demandSource = 'FALLBACK';
+  }
+
+  return {
+    units_per_day: unitsPerDay,
+    demand_source: demandSource,
+    internal_weight: w,
+    internal_units_per_day: internalUnitsPerDay,
+    model_prediction: modelPrediction,
+  };
 }
 
 /**
@@ -301,6 +392,25 @@ export async function buildAllocationPreview({
     }
   }
 
+  // Step 6b: Load demand model for calibrated predictions
+  let demandModel = null;
+  let demandModelInfo = null;
+  try {
+    const settings = await getDemandModelSettings();
+    if (settings.enabled) {
+      demandModel = await getActiveDemandModel(settings.domainId);
+      if (demandModel) {
+        demandModelInfo = {
+          id: demandModel.id,
+          model_name: demandModel.model_name,
+          trained_at: demandModel.trained_at,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('[Allocation] Failed to load demand model:', err.message);
+  }
+
   // Step 7: Fetch amazon_fees for fee_rate calculation (last 90 days)
   const feeRateBySku = {};
   if (skus.length > 0) {
@@ -398,7 +508,17 @@ export async function buildAllocationPreview({
     const units30d = salesData.units_30d;
     const units90d = salesData.units_90d;
 
-    // Demand score
+    // Compute blended demand using calibrated model when available
+    const blendedDemand = computeBlendedDemand({
+      units30d,
+      units90d,
+      salesRank: keepa?.sales_rank,
+      offerCount: keepa?.offer_count,
+      buyboxPricePence: keepa?.buybox_price_pence,
+      demandModel,
+    });
+
+    // Demand score (still using original formula for scoring/ranking)
     const demandScore = computeDemandScore(
       units30d,
       keepa?.sales_rank,
@@ -437,6 +557,13 @@ export async function buildAllocationPreview({
       score: Math.round(score * 1000) / 1000,
       eligible,
       recommended_qty: 0, // Will be set during allocation
+      // Calibrated demand forecasting
+      demand_forecast: {
+        units_per_day: Math.round(blendedDemand.units_per_day * 1000) / 1000,
+        source: blendedDemand.demand_source,
+        internal_weight: Math.round(blendedDemand.internal_weight * 100) / 100,
+        model_prediction: blendedDemand.model_prediction,
+      },
       _bom_composition: bomComposition[bomId], // Internal use for allocation
     });
   }
@@ -508,6 +635,20 @@ export async function buildAllocationPreview({
     c => c.eligible && c.recommended_qty === 0
   ).length;
 
+  // Count demand sources
+  const demandSourceCounts = {
+    INTERNAL: 0,
+    BLENDED: 0,
+    KEEPA_MODEL: 0,
+    FALLBACK: 0,
+  };
+  for (const c of cleanCandidates) {
+    const src = c.demand_forecast?.source;
+    if (src && demandSourceCounts[src] !== undefined) {
+      demandSourceCounts[src]++;
+    }
+  }
+
   return {
     pool: {
       component_id: poolComponent.id,
@@ -528,7 +669,9 @@ export async function buildAllocationPreview({
       blocked_by_margin_count: blockedByMargin,
       blocked_by_stock_count: blockedByStock,
       missing_keepa_count: missingKeepaCount,
+      demand_source_counts: demandSourceCounts,
     },
+    demand_model: demandModelInfo,
   };
 }
 
