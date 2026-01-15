@@ -683,16 +683,38 @@ router.get('/listings', requireAdmin, async (req, res) => {
 
     const { data: catalogItems, count, error } = await query;
 
+    // Handle missing table gracefully (migration not run yet)
+    if (error?.code === 'PGRST205' || error?.message?.includes('amazon_catalog')) {
+      console.warn('amazon_catalog table not found - returning empty listings');
+      return sendSuccess(res, {
+        listings: [],
+        total: 0,
+        mapped_count: 0,
+        unmapped_count: 0,
+        migration_needed: true,
+      });
+    }
+
     if (error) throw error;
 
     // Enrich with listing memory info
     // NOTE: Schema fix - boms uses bundle_sku/description, not name
     const asins = catalogItems?.map(c => c.asin) || [];
-    const { data: memoryMatches } = await supabase
-      .from('listing_memory')
-      .select('asin, bom_id, boms(id, bundle_sku, description)')
-      .in('asin', asins)
-      .eq('is_active', true);
+
+    // Skip memory lookup if no catalog items (avoid empty .in() query)
+    let memoryMatches = [];
+    if (asins.length > 0) {
+      const { data, error: memError } = await supabase
+        .from('listing_memory')
+        .select('asin, bom_id, boms(id, bundle_sku, description)')
+        .in('asin', asins)
+        .eq('is_active', true);
+
+      if (memError) {
+        console.error('Memory lookup error:', memError);
+      }
+      memoryMatches = data || [];
+    }
 
     const memoryByAsin = {};
     for (const match of memoryMatches || []) {
