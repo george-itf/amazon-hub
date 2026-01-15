@@ -11,13 +11,22 @@ const PAGE_SIZE = 1000;
 
 /**
  * GET /components
- * Returns all components with optional filters
- * Paginates through Supabase's 1000 row limit to fetch all
+ * Returns components with proper server-side pagination
+ * Uses single database query with offset/limit for efficiency
+ * Requires STAFF or ADMIN role
  */
-router.get('/', async (req, res) => {
-  const { active_only = 'true', limit = 99999, offset = 0 } = req.query;
-  const requestedLimit = parseInt(limit);
-  const requestedOffset = parseInt(offset);
+router.get('/', requireStaff, async (req, res) => {
+  const {
+    active_only = 'true',
+    limit = 100,  // Sensible default - don't load thousands at once
+    offset = 0,
+    search = '',
+    usage_filter = 'all'  // 'all', 'active', 'unassigned'
+  } = req.query;
+
+  // Cap limit to prevent memory issues
+  const requestedLimit = Math.min(parseInt(limit) || 100, 500);
+  const requestedOffset = parseInt(offset) || 0;
 
   try {
     // Build base query for counting
@@ -29,6 +38,10 @@ router.get('/', async (req, res) => {
       countQuery = countQuery.eq('is_active', true);
     }
 
+    if (search) {
+      countQuery = countQuery.or(`internal_sku.ilike.%${search}%,description.ilike.%${search}%,brand.ilike.%${search}%`);
+    }
+
     const { count: totalCount, error: countError } = await countQuery;
 
     if (countError) {
@@ -36,58 +49,45 @@ router.get('/', async (req, res) => {
       return errors.internal(res, 'Failed to fetch components');
     }
 
-    // Paginate through all results (bypasses Supabase 1000 row limit)
-    let allData = [];
-    let currentOffset = 0;
-    const targetCount = Math.min(requestedLimit, totalCount || 0);
-
-    while (allData.length < targetCount) {
-      let query = supabase
-        .from('components')
-        .select(`
-          *,
-          component_stock (
+    // Single paginated query - use database offset/limit directly
+    let query = supabase
+      .from('components')
+      .select(`
+        *,
+        component_stock (
+          id,
+          location,
+          on_hand,
+          reserved
+        ),
+        bom_components (
+          bom_id,
+          boms!inner (
             id,
-            location,
-            on_hand,
-            reserved
-          ),
-          bom_components (
-            bom_id,
-            boms!inner (
-              id,
-              is_active
-            )
+            is_active
           )
-        `)
-        .order('internal_sku', { ascending: true })
-        .range(currentOffset, currentOffset + PAGE_SIZE - 1);
+        )
+      `)
+      .order('internal_sku', { ascending: true })
+      .range(requestedOffset, requestedOffset + requestedLimit - 1);
 
-      if (active_only === 'true') {
-        query = query.eq('is_active', true);
-      }
-
-      const { data, error } = await query;
-
-      if (error) {
-        console.error('Components fetch error:', error);
-        return errors.internal(res, 'Failed to fetch components');
-      }
-
-      if (!data || data.length === 0) break;
-
-      allData = allData.concat(data);
-      currentOffset += PAGE_SIZE;
-
-      // Safety break
-      if (data.length < PAGE_SIZE) break;
+    if (active_only === 'true') {
+      query = query.eq('is_active', true);
     }
 
-    // Apply requested offset/limit
-    const slicedData = allData.slice(requestedOffset, requestedOffset + requestedLimit);
+    if (search) {
+      query = query.or(`internal_sku.ilike.%${search}%,description.ilike.%${search}%,brand.ilike.%${search}%`);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Components fetch error:', error);
+      return errors.internal(res, 'Failed to fetch components');
+    }
 
     // Add computed available stock and active BOM count
-    const componentsWithAvailable = slicedData.map(c => {
+    let componentsWithAvailable = (data || []).map(c => {
       const totalOnHand = (c.component_stock || []).reduce((sum, s) => sum + s.on_hand, 0);
       const totalReserved = (c.component_stock || []).reduce((sum, s) => sum + s.reserved, 0);
       // Count unique active BOMs this component is used in
@@ -106,6 +106,13 @@ router.get('/', async (req, res) => {
       };
     });
 
+    // Apply usage filter in-memory (for small paginated results this is fine)
+    if (usage_filter === 'active') {
+      componentsWithAvailable = componentsWithAvailable.filter(c => c.active_bom_count > 0);
+    } else if (usage_filter === 'unassigned') {
+      componentsWithAvailable = componentsWithAvailable.filter(c => c.active_bom_count === 0);
+    }
+
     sendSuccess(res, {
       components: componentsWithAvailable,
       total: totalCount,
@@ -121,8 +128,9 @@ router.get('/', async (req, res) => {
 /**
  * GET /components/:id
  * Get a single component with stock and movement history
+ * Requires STAFF or ADMIN role
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', requireStaff, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -285,8 +293,9 @@ router.put('/:id', requireAdmin, async (req, res) => {
 /**
  * GET /components/:id/movements
  * Get stock movements for a component
+ * Requires STAFF or ADMIN role
  */
-router.get('/:id/movements', async (req, res) => {
+router.get('/:id/movements', requireStaff, async (req, res) => {
   const { id } = req.params;
   const { limit = 100, offset = 0 } = req.query;
 
@@ -319,8 +328,9 @@ router.get('/:id/movements', async (req, res) => {
  * GET /components/:id/dependent-listings
  * Get all listings/BOMs that depend on this component
  * Shows impact analysis when component stock is low
+ * Requires STAFF or ADMIN role
  */
-router.get('/:id/dependent-listings', async (req, res) => {
+router.get('/:id/dependent-listings', requireStaff, async (req, res) => {
   const { id } = req.params;
   const { location = 'Warehouse' } = req.query;
 

@@ -489,6 +489,9 @@ export default function Dashboard() {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
 
+  // Track mounted state for cleanup
+  const mountedRef = React.useRef(true);
+
   const loadDashboard = useCallback(async (showRefresh = false) => {
     try {
       if (showRefresh) setRefreshing(true);
@@ -502,33 +505,47 @@ export default function Dashboard() {
         api.getAmazonStatus().catch(() => ({ connected: false })),
       ]);
 
+      // Only update state if still mounted
+      if (!mountedRef.current) return;
+
       setData(dashboardData);
       setAmazonStats(amzStats);
       setAmazonStatus(amzStatus);
 
       // Load pulse and heatmap in parallel (non-blocking)
       api.getDashboardPulse()
-        .then(setPulseData)
+        .then(data => { if (mountedRef.current) setPulseData(data); })
         .catch(err => console.warn('Pulse load error:', err))
-        .finally(() => setPulseLoading(false));
+        .finally(() => { if (mountedRef.current) setPulseLoading(false); });
 
       api.getStockHeatmap()
-        .then(setHeatmapData)
+        .then(data => { if (mountedRef.current) setHeatmapData(data); })
         .catch(err => console.warn('Heatmap load error:', err))
-        .finally(() => setHeatmapLoading(false));
+        .finally(() => { if (mountedRef.current) setHeatmapLoading(false); });
 
     } catch (err) {
+      // Don't update state if unmounted or cancelled
+      if (!mountedRef.current || err.code === 'CANCELLED') return;
       console.error('Dashboard load error:', err);
       setError(err.message || 'Failed to load dashboard');
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     loadDashboard();
   }, [loadDashboard]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const handleSyncAmazon = async () => {
     try {

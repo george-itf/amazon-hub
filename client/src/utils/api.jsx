@@ -30,15 +30,96 @@ export function clearStoredToken() {
 // Default request timeout (30 seconds)
 const DEFAULT_TIMEOUT = 30000;
 
+// Retry configuration
+const DEFAULT_MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
+const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
+
+// Request deduplication cache
+const pendingRequests = new Map();
+
+/**
+ * Sleep helper for retry delays with exponential backoff
+ */
+function sleep(ms, attempt = 0) {
+  const backoff = Math.min(ms * Math.pow(2, attempt), 10000); // Cap at 10s
+  return new Promise(resolve => setTimeout(resolve, backoff));
+}
+
+/**
+ * Check if an error is retryable
+ */
+function isRetryable(error, status) {
+  // Network errors are retryable
+  if (error.name === 'TypeError' && error.message.includes('fetch')) {
+    return true;
+  }
+  // Timeout errors are retryable
+  if (error.code === 'TIMEOUT') {
+    return true;
+  }
+  // Certain HTTP status codes are retryable
+  if (status && RETRYABLE_STATUS_CODES.includes(status)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Generate a cache key for request deduplication
+ */
+function getRequestKey(url, options) {
+  // Only dedupe GET requests
+  if (options.method && options.method !== 'GET') {
+    return null;
+  }
+  return `GET:${url}`;
+}
+
 /**
  * Helper to make an authenticated HTTP request.
  * Sends the stored token via Authorization header.
  * Parses JSON responses and throws on non-2xx statuses with structured error info.
+ * Supports retry logic, request cancellation, and deduplication.
  *
  * @param {string} url
  * @param {Object} options
+ * @param {AbortSignal} options.signal - External abort signal for cancellation
+ * @param {number} options.maxRetries - Max retry attempts (default: 3)
+ * @param {boolean} options.dedupe - Enable request deduplication for GET (default: true)
  */
 async function request(url, options = {}) {
+  const {
+    signal: externalSignal,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    dedupe = true,
+    ...restOptions
+  } = options;
+
+  // Check for request deduplication
+  const cacheKey = dedupe ? getRequestKey(url, options) : null;
+  if (cacheKey && pendingRequests.has(cacheKey)) {
+    // Return the pending promise for this identical request
+    return pendingRequests.get(cacheKey);
+  }
+
+  const requestPromise = executeRequest(url, restOptions, externalSignal, maxRetries);
+
+  // Cache the promise for deduplication
+  if (cacheKey) {
+    pendingRequests.set(cacheKey, requestPromise);
+    requestPromise.finally(() => {
+      pendingRequests.delete(cacheKey);
+    });
+  }
+
+  return requestPromise;
+}
+
+/**
+ * Internal request executor with retry logic
+ */
+async function executeRequest(url, options, externalSignal, maxRetries) {
   const token = getStoredToken();
   const headers = {
     'Content-Type': 'application/json',
@@ -55,58 +136,123 @@ async function request(url, options = {}) {
     headers['Idempotency-Key'] = options.idempotencyKey;
   }
 
-  // Set up request timeout with AbortController
   const timeout = options.timeout || DEFAULT_TIMEOUT;
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  let lastError;
 
-  let resp;
-  try {
-    resp = await fetch(`${API_BASE}${url}`, {
-      ...options,
-      headers,
-      signal: controller.signal,
-      body: options.body ? JSON.stringify(options.body) : undefined
-    });
-  } catch (err) {
-    clearTimeout(timeoutId);
-    if (err.name === 'AbortError') {
-      const error = new Error(`Request timeout after ${timeout}ms`);
-      error.code = 'TIMEOUT';
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // Check if externally cancelled before each attempt
+    if (externalSignal?.aborted) {
+      const error = new Error('Request cancelled');
+      error.code = 'CANCELLED';
       throw error;
     }
-    throw err;
-  } finally {
-    clearTimeout(timeoutId);
-  }
 
-  // Handle non-JSON responses
-  const contentType = resp.headers.get('content-type');
-  if (!contentType || !contentType.includes('application/json')) {
-    if (!resp.ok) {
-      throw new Error(`Request failed: ${resp.status}`);
+    // Create internal abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    // Link external signal to internal controller
+    const abortHandler = () => controller.abort();
+    if (externalSignal) {
+      externalSignal.addEventListener('abort', abortHandler);
     }
-    return resp.status === 204 ? null : await resp.text();
+
+    let resp;
+    try {
+      resp = await fetch(`${API_BASE}${url}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+
+      clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', abortHandler);
+      }
+
+      // Handle non-JSON responses
+      const contentType = resp.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        if (!resp.ok) {
+          const error = new Error(`Request failed: ${resp.status}`);
+          error.status = resp.status;
+          if (isRetryable(error, resp.status) && attempt < maxRetries) {
+            lastError = error;
+            await sleep(RETRY_DELAY_MS, attempt);
+            continue;
+          }
+          throw error;
+        }
+        return resp.status === 204 ? null : await resp.text();
+      }
+
+      const json = await resp.json();
+
+      if (!resp.ok) {
+        // Handle server error envelope: { ok: false, error: { code, message } }
+        const errorMessage = json.message
+          || json.error?.message
+          || (typeof json.error === 'string' ? json.error : null)
+          || `Request failed: ${resp.status}`;
+        const error = new Error(errorMessage);
+        error.status = resp.status;
+        error.code = json.code || json.error?.code;
+        error.correlationId = json.correlationId || json.correlation_id;
+        error.details = json.details || json.error?.details;
+
+        // Retry on retryable errors
+        if (isRetryable(error, resp.status) && attempt < maxRetries) {
+          lastError = error;
+          await sleep(RETRY_DELAY_MS, attempt);
+          continue;
+        }
+        throw error;
+      }
+
+      // Return data from success envelope
+      return json.data !== undefined ? json.data : json;
+
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', abortHandler);
+      }
+
+      // Handle abort errors
+      if (err.name === 'AbortError') {
+        // Check if it was external cancellation
+        if (externalSignal?.aborted) {
+          const error = new Error('Request cancelled');
+          error.code = 'CANCELLED';
+          throw error;
+        }
+        // It was a timeout
+        const error = new Error(`Request timeout after ${timeout}ms`);
+        error.code = 'TIMEOUT';
+
+        // Retry on timeout
+        if (attempt < maxRetries) {
+          lastError = error;
+          await sleep(RETRY_DELAY_MS, attempt);
+          continue;
+        }
+        throw error;
+      }
+
+      // Network errors - retry
+      if (isRetryable(err) && attempt < maxRetries) {
+        lastError = err;
+        await sleep(RETRY_DELAY_MS, attempt);
+        continue;
+      }
+
+      throw err;
+    }
   }
 
-  const json = await resp.json();
-
-  if (!resp.ok) {
-    // Handle server error envelope: { ok: false, error: { code, message } }
-    const errorMessage = json.message
-      || json.error?.message
-      || (typeof json.error === 'string' ? json.error : null)
-      || `Request failed: ${resp.status}`;
-    const error = new Error(errorMessage);
-    error.status = resp.status;
-    error.code = json.code || json.error?.code;
-    error.correlationId = json.correlationId || json.correlation_id;
-    error.details = json.details || json.error?.details;
-    throw error;
-  }
-
-  // Return data from success envelope
-  return json.data !== undefined ? json.data : json;
+  // Should not reach here, but throw last error if we do
+  throw lastError || new Error('Request failed after retries');
 }
 
 /**

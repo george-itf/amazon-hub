@@ -267,12 +267,19 @@ router.get('/bottlenecks', async (req, res) => {
       .select('*')
       .in('component_id', componentIds);
 
+    // OPTIMIZED: Pre-compute available stock per component using a Map (O(n) instead of O(n²))
+    const stockByComponent = new Map();
+    for (const s of stock || []) {
+      const current = stockByComponent.get(s.component_id) || 0;
+      stockByComponent.set(s.component_id, current + (s.on_hand - s.reserved));
+    }
+
     // Calculate bottleneck score for each component
     const bottlenecks = {};
 
     for (const bc of bomComponents || []) {
-      const compStock = (stock || []).filter(s => s.component_id === bc.component_id);
-      const available = compStock.reduce((sum, s) => sum + (s.on_hand - s.reserved), 0);
+      // O(1) lookup instead of O(n) filter
+      const available = stockByComponent.get(bc.component_id) || 0;
       const bundlesPossible = Math.floor(available / bc.qty_required);
 
       if (!bottlenecks[bc.component_id]) {

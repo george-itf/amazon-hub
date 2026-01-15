@@ -114,22 +114,58 @@ export default function InventoryPage() {
     }
   }, [customTabs, setPreference, prefsLoading]);
 
-  async function load() {
+  // Create a ref to track mount state for cleanup
+  const mountedRef = React.useRef(true);
+  const abortControllerRef = React.useRef(null);
+
+  const load = useCallback(async () => {
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     setLoading(true);
     setError(null);
     try {
-      const data = await getComponents({ limit: 99999 });
-      setComponents(data.components || []);
+      // Use sensible pagination - load first 500 items
+      // Client-side filtering works on paginated results
+      const data = await getComponents({
+        limit: 500,
+        search: searchQuery || undefined,
+        signal: abortControllerRef.current.signal
+      });
+      if (mountedRef.current) {
+        setComponents(data.components || []);
+      }
     } catch (err) {
+      // Don't set error state if request was cancelled
+      if (err.code === 'CANCELLED' || err.name === 'AbortError') {
+        return;
+      }
       console.error(err);
-      setError(err.message || 'Failed to load inventory');
+      if (mountedRef.current) {
+        setError(err.message || 'Failed to load inventory');
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
-  }
+  }, [searchQuery]);
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
   }, []);
 
   // Load component history when detail modal opens
