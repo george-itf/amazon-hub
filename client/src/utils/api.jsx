@@ -1034,3 +1034,57 @@ export async function confirmShipment(orderId, trackingNumber, options = {}) {
     },
   });
 }
+
+// ============ Analytics Hub API ============
+
+/**
+ * Get analytics hub KPI summary
+ * @param {Object} params - Query params (days_back, location)
+ */
+export async function getAnalyticsHubSummary(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/hub/summary${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get dead stock analysis
+ * @param {Object} params - Query params (days_threshold, min_value_pence, location, limit)
+ */
+export async function getAnalyticsHubDeadStock(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/hub/dead-stock${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get movers analysis (gainers, losers, new winners)
+ * @param {Object} params - Query params (min_change_percent, min_units, limit)
+ */
+export async function getAnalyticsHubMovers(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/hub/movers${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get profitability analysis by listing
+ * @param {Object} params - Query params (days_back, min_orders, sort_by, limit)
+ */
+export async function getAnalyticsHubProfitability(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/hub/profitability${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get stock risk analysis (days of cover, stockout risks)
+ * @param {Object} params - Query params (days_threshold, location, limit)
+ */
+export async function getAnalyticsHubStockRisk(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/hub/stock-risk${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get data quality warnings for analytics accuracy
+ */
+export async function getAnalyticsHubDataQuality() {
+  return request('/analytics/hub/data-quality');
+}

@@ -84,9 +84,10 @@ export default function Nav() {
   const analyticsItems = [
     {
       label: 'Analytics',
-      url: '/profit',
+      url: '/analytics-hub',
       icon: ChartVerticalFilledIcon,
       subNavigationItems: [
+        { label: 'Analytics Hub', url: '/analytics-hub' },
         { label: 'Profitability', url: '/profit' },
         { label: 'Activity Log', url: '/audit' },
       ],
