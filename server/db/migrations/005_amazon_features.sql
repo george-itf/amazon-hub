@@ -101,7 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_amazon_catalog_sales_rank ON amazon_catalog(sales
 
 CREATE TABLE IF NOT EXISTS amazon_shipments (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  order_id uuid REFERENCES orders(id),
+  order_id uuid UNIQUE REFERENCES orders(id),
   amazon_order_id text NOT NULL,
 
   -- Carrier info
@@ -161,7 +161,7 @@ CREATE INDEX IF NOT EXISTS idx_amazon_sync_log_started ON amazon_sync_log(starte
 CREATE TABLE IF NOT EXISTS amazon_settings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   setting_key text UNIQUE NOT NULL,
-  setting_value jsonb,
+  setting_value text,
   description text,
   updated_at timestamptz DEFAULT now(),
   updated_by_user_id uuid REFERENCES users(id)
@@ -170,12 +170,15 @@ CREATE TABLE IF NOT EXISTS amazon_settings (
 -- Insert default settings
 INSERT INTO amazon_settings (setting_key, setting_value, description)
 VALUES
-  ('auto_sync_enabled', 'false', 'Enable automatic order sync'),
-  ('auto_sync_interval_minutes', '30', 'Minutes between auto-syncs'),
+  ('order_sync_enabled', 'true', 'Enable automatic order sync'),
+  ('order_sync_interval_minutes', '30', 'Minutes between order auto-syncs'),
+  ('tracking_sync_enabled', 'true', 'Enable automatic tracking sync'),
+  ('tracking_sync_interval_minutes', '60', 'Minutes between tracking auto-syncs'),
+  ('catalog_sync_enabled', 'false', 'Enable automatic catalog sync'),
+  ('catalog_sync_interval_minutes', '360', 'Minutes between catalog auto-syncs'),
   ('sync_orders_days_back', '7', 'Default days to look back when syncing orders'),
   ('link_shopify_orders', 'true', 'Automatically link matching Shopify orders'),
-  ('default_carrier', '"Royal Mail"', 'Default shipping carrier for confirmations'),
-  ('auto_confirm_shipped', 'false', 'Automatically confirm shipping when order dispatched')
+  ('default_carrier', 'Royal Mail', 'Default shipping carrier for confirmations')
 ON CONFLICT (setting_key) DO NOTHING;
 
 -- ============================================================================

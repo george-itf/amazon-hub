@@ -626,10 +626,6 @@ export async function getAmazonOrderEnhancedDetails(orderId) {
   return request(`/amazon/order/${orderId}/details`);
 }
 
-export async function getAmazonInventory() {
-  return request('/amazon/inventory');
-}
-
 export async function getAmazonStats() {
   return request('/amazon/stats');
 }
