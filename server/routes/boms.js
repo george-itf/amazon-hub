@@ -91,6 +91,46 @@ router.get('/review', async (req, res) => {
 });
 
 /**
+ * POST /boms/review/reset-all
+ * Reset all APPROVED BOMs back to PENDING_REVIEW
+ * ADMIN only
+ */
+router.post('/review/reset-all', requireAdmin, async (req, res) => {
+  try {
+    const { data: updated, error } = await supabase
+      .from('boms')
+      .update({
+        review_status: 'PENDING_REVIEW',
+        reviewed_at: null
+      })
+      .eq('review_status', 'APPROVED')
+      .select('id, bundle_sku');
+
+    if (error) {
+      console.error('BOM reset error:', error);
+      return errors.internal(res, `Failed to reset BOMs: ${error.message}`);
+    }
+
+    await auditLog({
+      entityType: 'BOM',
+      entityId: 'BULK',
+      action: 'BULK_RESET',
+      changesSummary: `Reset ${updated?.length || 0} BOMs from APPROVED to PENDING_REVIEW`,
+      ...getAuditContext(req)
+    });
+
+    sendSuccess(res, {
+      reset: true,
+      count: updated?.length || 0,
+      boms: updated || []
+    });
+  } catch (err) {
+    console.error('BOM reset error:', err);
+    errors.internal(res, `Failed to reset BOMs: ${err.message}`);
+  }
+});
+
+/**
  * GET /boms/review/stats
  * Get BOM review queue statistics
  */
@@ -110,6 +150,130 @@ router.get('/review/stats', async (req, res) => {
   } catch (err) {
     console.error('BOM review stats error:', err);
     errors.internal(res, 'Failed to fetch BOM review statistics');
+  }
+});
+
+/**
+ * POST /boms/review/suggest-components
+ * Analyze listing title/SKU and suggest matching components
+ * Uses fuzzy matching on component SKUs, descriptions, and brands
+ */
+router.post('/review/suggest-components', async (req, res) => {
+  const { listing_title, sku, asin, bundle_sku } = req.body;
+
+  if (!listing_title && !sku && !bundle_sku) {
+    return errors.badRequest(res, 'At least one of listing_title, sku, or bundle_sku is required');
+  }
+
+  try {
+    // Fetch all components for matching
+    const { data: components, error: compError } = await supabase
+      .from('components')
+      .select('id, internal_sku, description, brand, cost_ex_vat_pence')
+      .eq('is_active', true);
+
+    if (compError) {
+      console.error('Component fetch error:', compError);
+      return errors.internal(res, 'Failed to fetch components');
+    }
+
+    // Build searchable text from inputs
+    const searchText = [
+      listing_title || '',
+      sku || '',
+      bundle_sku || ''
+    ].join(' ').toLowerCase();
+
+    // Score each component based on keyword matches
+    const suggestions = [];
+
+    for (const comp of components || []) {
+      let score = 0;
+      const matchReasons = [];
+
+      // Extract keywords from component
+      const skuParts = (comp.internal_sku || '').toLowerCase().split(/[-_\s]+/);
+      const descParts = (comp.description || '').toLowerCase().split(/[-_\s,]+/).filter(w => w.length > 2);
+      const brandLower = (comp.brand || '').toLowerCase();
+
+      // Match SKU parts (highest value)
+      for (const part of skuParts) {
+        if (part.length >= 3 && searchText.includes(part)) {
+          score += 30;
+          matchReasons.push(`SKU part "${part}" matched`);
+        }
+      }
+
+      // Match brand (high value)
+      if (brandLower && brandLower.length > 2 && searchText.includes(brandLower)) {
+        score += 25;
+        matchReasons.push(`Brand "${comp.brand}" matched`);
+      }
+
+      // Match description keywords
+      for (const word of descParts) {
+        if (searchText.includes(word)) {
+          score += 10;
+          matchReasons.push(`Keyword "${word}" matched`);
+        }
+      }
+
+      // Check for common product patterns
+      // Battery patterns: 6.0Ah, 5.0Ah, 4.0Ah, 3.0Ah, 2.0Ah, BL1860, BL1850, etc.
+      const batteryPatterns = [
+        /(\d\.?\d?\s*ah)/gi,
+        /bl\d{4}/gi,
+        /battery|batteries|batt/gi
+      ];
+      const batteryMatch = batteryPatterns.some(p => p.test(comp.description || comp.internal_sku));
+      const searchHasBattery = batteryPatterns.some(p => p.test(searchText));
+      if (batteryMatch && searchHasBattery) {
+        // Check for capacity match
+        const compCapacity = (comp.description || '').match(/(\d\.?\d?)\s*ah/i);
+        const searchCapacity = searchText.match(/(\d\.?\d?)\s*ah/i);
+        if (compCapacity && searchCapacity && compCapacity[1] === searchCapacity[1]) {
+          score += 40;
+          matchReasons.push(`Battery capacity ${compCapacity[0]} matched`);
+        }
+      }
+
+      // Check for tool/charger type patterns
+      const toolPatterns = /dhr|dga|dhp|dtd|dcf|dcd|dc18|charger/gi;
+      if (toolPatterns.test(comp.internal_sku) && toolPatterns.test(searchText)) {
+        score += 20;
+        matchReasons.push('Tool type pattern matched');
+      }
+
+      // Check for quantity indicators like "x2", "2x", "twin", "pair"
+      const quantityPatterns = /(\d)\s*x\s*|x\s*(\d)|twin|pair|double|triple/gi;
+      const quantityMatch = searchText.match(quantityPatterns);
+
+      if (score > 0) {
+        suggestions.push({
+          component_id: comp.id,
+          internal_sku: comp.internal_sku,
+          description: comp.description,
+          brand: comp.brand,
+          cost_ex_vat_pence: comp.cost_ex_vat_pence,
+          score,
+          match_reasons: [...new Set(matchReasons)],
+          suggested_qty: quantityMatch ? 2 : 1
+        });
+      }
+    }
+
+    // Sort by score descending, take top 10
+    suggestions.sort((a, b) => b.score - a.score);
+    const topSuggestions = suggestions.slice(0, 10);
+
+    sendSuccess(res, {
+      suggestions: topSuggestions,
+      search_text: searchText.substring(0, 200),
+      total_matches: suggestions.length
+    });
+  } catch (err) {
+    console.error('Component suggestion error:', err);
+    errors.internal(res, `Failed to suggest components: ${err.message}`);
   }
 });
 

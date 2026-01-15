@@ -16,7 +16,7 @@ import {
   Divider,
   EmptyState,
 } from '@shopify/polaris';
-import { getBomReviewQueue, getBomReviewStats, approveBom, rejectBom, getComponents } from '../utils/api.jsx';
+import { getBomReviewQueue, getBomReviewStats, approveBom, rejectBom, getComponents, resetAllBomReviews, suggestBomComponents } from '../utils/api.jsx';
 import KeepaMetrics, { KeepaMetricsCompact } from '../components/KeepaMetrics.jsx';
 
 /**
@@ -48,6 +48,9 @@ export default function BomReviewPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [successMessage, setSuccessMessage] = useState(null);
+  const [resetting, setResetting] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
 
   async function load() {
     setLoading(true);
@@ -178,6 +181,54 @@ export default function BomReviewPage() {
     }
   }
 
+  // Reset all BOMs to pending
+  async function handleResetAll() {
+    if (!window.confirm('Reset ALL approved BOMs back to pending review? This cannot be undone.')) {
+      return;
+    }
+    setResetting(true);
+    try {
+      const result = await resetAllBomReviews();
+      setSuccessMessage(`Reset ${result.count} BOMs back to pending review`);
+      await load();
+    } catch (err) {
+      setError(err.message || 'Failed to reset BOMs');
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  // Suggest components based on listing info
+  async function handleSuggestComponents() {
+    if (!selectedBom) return;
+    setSuggesting(true);
+    setSuggestions([]);
+    try {
+      const listings = getLinkedListings(selectedBom);
+      const result = await suggestBomComponents({
+        bundle_sku: selectedBom.bundle_sku,
+        listing_title: listings[0]?.title_fingerprint || selectedBom.description,
+        sku: listings[0]?.sku,
+        asin: listings[0]?.asin
+      });
+      setSuggestions(result.suggestions || []);
+      // Auto-apply suggestions with score > 50
+      if (result.suggestions?.length > 0) {
+        const newQuantities = { ...editForm.componentQuantities };
+        for (const sug of result.suggestions) {
+          if (sug.score >= 50) {
+            newQuantities[sug.component_id] = String(sug.suggested_qty || 1);
+          }
+        }
+        setEditForm(prev => ({ ...prev, componentQuantities: newQuantities }));
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to suggest components');
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
   // Get linked listings for a BOM
   const getLinkedListings = (bom) => {
     const listings = bom.listing_memory || [];
@@ -233,7 +284,15 @@ export default function BomReviewPage() {
     <Page
       title="BOM Review Queue"
       subtitle={`${stats.pending} pending · ${stats.approved} approved · ${stats.rejected} rejected`}
-      secondaryActions={[{ content: 'Refresh', onAction: load }]}
+      secondaryActions={[
+        { content: 'Refresh', onAction: load },
+        {
+          content: resetting ? 'Resetting...' : 'Reset All to Pending',
+          onAction: handleResetAll,
+          disabled: resetting || stats.approved === 0,
+          destructive: true,
+        }
+      ]}
     >
       <Layout>
         <Layout.Section>
@@ -385,14 +444,62 @@ export default function BomReviewPage() {
 
               {/* Components Editor */}
               <BlockStack gap="200">
-                <InlineStack align="space-between">
+                <InlineStack align="space-between" blockAlign="center">
                   <Text variant="headingSm">Components ({selectedCount} selected)</Text>
-                  {costPreview > 0 && (
-                    <Text variant="bodySm" tone="subdued">
-                      Est. cost: {formatPrice(costPreview)}
-                    </Text>
-                  )}
+                  <InlineStack gap="200">
+                    {costPreview > 0 && (
+                      <Text variant="bodySm" tone="subdued">
+                        Est. cost: {formatPrice(costPreview)}
+                      </Text>
+                    )}
+                    <Button
+                      size="slim"
+                      onClick={handleSuggestComponents}
+                      loading={suggesting}
+                    >
+                      Suggest Components
+                    </Button>
+                  </InlineStack>
                 </InlineStack>
+
+                {/* Show suggestions if any */}
+                {suggestions.length > 0 && (
+                  <Card>
+                    <BlockStack gap="200">
+                      <Text variant="headingSm" tone="success">Suggested Components</Text>
+                      {suggestions.map((sug) => (
+                        <InlineStack key={sug.component_id} gap="200" align="space-between" blockAlign="center">
+                          <BlockStack gap="050">
+                            <Text variant="bodySm" fontWeight="semibold">{sug.internal_sku}</Text>
+                            <Text variant="bodySm" tone="subdued">{sug.description}</Text>
+                            <Text variant="bodySm" tone="subdued">
+                              Match: {sug.match_reasons?.slice(0, 2).join(', ')}
+                            </Text>
+                          </BlockStack>
+                          <InlineStack gap="200" blockAlign="center">
+                            <Badge tone={sug.score >= 50 ? 'success' : 'info'}>
+                              Score: {sug.score}
+                            </Badge>
+                            <Button
+                              size="slim"
+                              onClick={() => {
+                                setEditForm(prev => ({
+                                  ...prev,
+                                  componentQuantities: {
+                                    ...prev.componentQuantities,
+                                    [sug.component_id]: String(sug.suggested_qty || 1)
+                                  }
+                                }));
+                              }}
+                            >
+                              Add ×{sug.suggested_qty || 1}
+                            </Button>
+                          </InlineStack>
+                        </InlineStack>
+                      ))}
+                    </BlockStack>
+                  </Card>
+                )}
 
                 <TextField
                   label="Search components"

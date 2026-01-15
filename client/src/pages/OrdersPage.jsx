@@ -19,7 +19,7 @@ import {
   Checkbox,
   ButtonGroup,
 } from '@shopify/polaris';
-import { importOrders, getOrders, createPickBatch, importHistoricalOrders, getAmazonOrderEnhancedDetails, syncAmazonOrders } from '../utils/api.jsx';
+import { importOrders, getOrders, createPickBatch, importHistoricalOrders, getAmazonOrderEnhancedDetails, syncAmazonOrders, reEvaluateOrders } from '../utils/api.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { KeepaMetricsCompact } from '../components/KeepaMetrics.jsx';
 
@@ -94,6 +94,10 @@ export default function OrdersPage() {
   const [syncingAmazon, setSyncingAmazon] = useState(false);
   const [amazonSyncResult, setAmazonSyncResult] = useState(null);
 
+  // Re-evaluate state
+  const [reEvaluating, setReEvaluating] = useState(false);
+  const [reEvaluateResult, setReEvaluateResult] = useState(null);
+
   // Historical import state
   const [historicalModal, setHistoricalModal] = useState(false);
   const [historicalForm, setHistoricalForm] = useState({
@@ -160,6 +164,21 @@ export default function OrdersPage() {
       setError(errorMsg);
     } finally {
       setSyncingAmazon(false);
+    }
+  }
+
+  async function handleReEvaluate() {
+    setReEvaluating(true);
+    setReEvaluateResult(null);
+    try {
+      const result = await reEvaluateOrders([]);  // Empty array means all orders
+      setReEvaluateResult(result);
+      await loadOrders();
+    } catch (err) {
+      const errorMsg = typeof err === 'string' ? err : (err?.message || 'Re-evaluation failed');
+      setError(errorMsg);
+    } finally {
+      setReEvaluating(false);
     }
   }
 
@@ -392,6 +411,11 @@ export default function OrdersPage() {
       secondaryActions={[
         { content: 'Refresh', onAction: loadOrders },
         { content: importing ? 'Importing...' : 'Import Shopify', onAction: handleImport, disabled: importing },
+        {
+          content: reEvaluating ? 'Re-evaluating...' : 'Re-match Orders',
+          onAction: handleReEvaluate,
+          disabled: reEvaluating,
+        },
         ...(isAdmin
           ? [{ content: 'Historical Import', onAction: () => setHistoricalModal(true) }]
           : []),
@@ -432,6 +456,18 @@ export default function OrdersPage() {
             <p>
               {amazonSyncResult.created} new | {amazonSyncResult.linked || 0} linked | {amazonSyncResult.updated} updated | {amazonSyncResult.skipped} unchanged
               {amazonSyncResult.errors?.length > 0 && ` | ${amazonSyncResult.errors.length} errors`}
+            </p>
+          </Banner>
+        )}
+
+        {reEvaluateResult && (
+          <Banner
+            title="Orders Re-matched"
+            tone="success"
+            onDismiss={() => setReEvaluateResult(null)}
+          >
+            <p>
+              {reEvaluateResult.orders_updated || 0} order(s) updated with new BOM matches
             </p>
           </Banner>
         )}

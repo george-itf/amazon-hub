@@ -129,18 +129,43 @@ export default function Nav() {
       {/* Brand Header */}
       <div style={{
         padding: '16px 20px',
-        borderBottom: '1px solid #E1E3E5',
+        borderBottom: '1px solid rgba(255,255,255,0.2)',
         marginBottom: '8px',
       }}>
         <BlockStack gap="100">
           <Text variant="headingMd" fontWeight="bold">
-            Amazon Hub
+            <span style={{ color: '#FF9900' }}>Amazon Hub</span>
           </Text>
-          <Text variant="bodySm" tone="subdued">
-            Seller Command Center
+          <Text variant="bodySm">
+            <span style={{ color: 'rgba(255,255,255,0.8)' }}>Seller Command Center</span>
           </Text>
         </BlockStack>
       </div>
+
+      {/* Custom CSS to fix navigation text colors */}
+      <style>{`
+        .Polaris-Navigation__SectionHeading {
+          color: rgba(255, 255, 255, 0.7) !important;
+        }
+        .Polaris-Navigation__Text {
+          color: white !important;
+        }
+        .Polaris-Navigation__Item:hover .Polaris-Navigation__Text {
+          color: white !important;
+        }
+        .Polaris-Navigation__SecondaryNavigation .Polaris-Navigation__Text {
+          color: rgba(255, 255, 255, 0.85) !important;
+        }
+        .Polaris-Navigation__Item--selected .Polaris-Navigation__Text {
+          color: white !important;
+        }
+        .Polaris-Navigation__Icon svg {
+          fill: rgba(255, 255, 255, 0.9) !important;
+        }
+        .Polaris-Navigation__Item--selected .Polaris-Navigation__Icon svg {
+          fill: white !important;
+        }
+      `}</style>
 
       {/* Core Workflow */}
       <Navigation.Section
