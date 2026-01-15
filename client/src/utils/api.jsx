@@ -222,6 +222,17 @@ export async function rejectBom(id, reason) {
   });
 }
 
+export async function resetAllBomReviews() {
+  return request('/boms/review/reset-all', { method: 'POST' });
+}
+
+export async function suggestBomComponents(data) {
+  return request('/boms/review/suggest-components', {
+    method: 'POST',
+    body: data
+  });
+}
+
 // ============ Listings API ============
 
 export async function getListings(params = {}) {
