@@ -50,6 +50,7 @@ router.get('/', requireStaff, async (req, res) => {
     }
 
     // Single paginated query - use database offset/limit directly
+    // Note: Using left join (no !inner) for bom_components to include components without BOM associations
     let query = supabase
       .from('components')
       .select(`
@@ -62,7 +63,7 @@ router.get('/', requireStaff, async (req, res) => {
         ),
         bom_components (
           bom_id,
-          boms!inner (
+          boms (
             id,
             is_active
           )
