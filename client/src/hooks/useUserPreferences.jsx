@@ -5,6 +5,7 @@ import {
   setUserPreference as apiSetPreference,
   deleteUserPreference as apiDeletePreference,
 } from '../utils/api.jsx';
+import { logError, ensureError } from '../utils/errorLogger.js';
 
 /**
  * Hook for managing user preferences with cross-device sync.
@@ -78,9 +79,9 @@ export function useUserPreferences() {
         }
       }
     } catch (err) {
-      console.error('Failed to load preferences:', err);
+      logError('Failed to load preferences', err);
       if (mountedRef.current) {
-        setError(err);
+        setError(ensureError(err, 'Failed to load preferences'));
         // On error, try to load from localStorage as fallback
         const localPrefs = {};
         for (const key of ['inventory_custom_tabs', 'listings_custom_tabs', 'amazon_hub_defaults']) {
@@ -137,10 +138,10 @@ export function useUserPreferences() {
       try {
         await apiSetPreference(key, value);
       } catch (err) {
-        console.error('Failed to sync preference to server:', err);
+        logError('Failed to sync preference to server', err);
         // Don't revert local state - localStorage serves as fallback
         // The preference will sync on next login or refresh
-        setError(err);
+        setError(ensureError(err, 'Failed to sync preference to server'));
       }
     }
   }, [isLoggedIn]);
@@ -170,8 +171,8 @@ export function useUserPreferences() {
       try {
         await apiDeletePreference(key);
       } catch (err) {
-        console.error('Failed to delete preference from server:', err);
-        setError(err);
+        logError('Failed to delete preference from server', err);
+        setError(ensureError(err, 'Failed to delete preference from server'));
       }
     }
   }, [isLoggedIn]);

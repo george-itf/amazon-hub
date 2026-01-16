@@ -10,6 +10,7 @@ import {
   setDefaultSavedView,
   reorderSavedViews,
 } from '../utils/api.jsx';
+import { logError } from '../utils/errorLogger.js';
 
 /**
  * useSavedViews - Hook for managing saved views on any page
@@ -113,7 +114,7 @@ export function useSavedViews(page, options = {}) {
         }
       }
     } catch (err) {
-      console.error('Failed to load views:', err);
+      logError('Failed to load views', err);
       setError(err.message || 'Failed to load views');
       // Fallback to just "All" view
       setViews([{ id: null, name: 'All', filters: {}, columns: [], sort: {}, is_default: true }]);
@@ -202,7 +203,7 @@ export function useSavedViews(page, options = {}) {
 
       return newView;
     } catch (err) {
-      console.error('Failed to save view:', err);
+      logError('Failed to save view', err);
       throw err;
     } finally {
       setSaving(false);
@@ -223,7 +224,7 @@ export function useSavedViews(page, options = {}) {
       await loadViews();
       return updatedView;
     } catch (err) {
-      console.error('Failed to update view:', err);
+      logError('Failed to update view', err);
       throw err;
     } finally {
       setSaving(false);
@@ -249,7 +250,7 @@ export function useSavedViews(page, options = {}) {
 
       await loadViews();
     } catch (err) {
-      console.error('Failed to delete view:', err);
+      logError('Failed to delete view', err);
       throw err;
     } finally {
       setSaving(false);
@@ -270,7 +271,7 @@ export function useSavedViews(page, options = {}) {
       await loadViews();
       return updatedView;
     } catch (err) {
-      console.error('Failed to share view:', err);
+      logError('Failed to share view', err);
       throw err;
     } finally {
       setSaving(false);
@@ -291,7 +292,7 @@ export function useSavedViews(page, options = {}) {
       await loadViews();
       return updatedView;
     } catch (err) {
-      console.error('Failed to unshare view:', err);
+      logError('Failed to unshare view', err);
       throw err;
     } finally {
       setSaving(false);
@@ -312,7 +313,7 @@ export function useSavedViews(page, options = {}) {
       await loadViews();
       return updatedView;
     } catch (err) {
-      console.error('Failed to set default view:', err);
+      logError('Failed to set default view', err);
       throw err;
     } finally {
       setSaving(false);
@@ -332,7 +333,7 @@ export function useSavedViews(page, options = {}) {
       await reorderSavedViews(page, viewIds);
       await loadViews();
     } catch (err) {
-      console.error('Failed to reorder views:', err);
+      logError('Failed to reorder views', err);
       throw err;
     } finally {
       setSaving(false);

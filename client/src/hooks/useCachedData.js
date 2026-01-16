@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import * as dataCache from '../utils/dataCache.js';
+import { logError, ensureError } from '../utils/errorLogger.js';
 
 /**
  * Custom hook for data fetching with caching and stale-while-revalidate
@@ -96,9 +97,9 @@ export function useCachedData(key, fetchFn, options = {}) {
 
       // Only set error if we don't have cached data
       if (!dataCache.get(key, namespace)?.data) {
-        setError(err);
+        setError(ensureError(err, `Failed to fetch data for ${key}`));
       }
-      console.error(`useCachedData error for ${key}:`, err);
+      logError(`useCachedData error for ${key}`, err);
     } finally {
       if (mountedRef.current) {
         setLoading(false);
