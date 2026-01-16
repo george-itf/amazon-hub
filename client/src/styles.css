@@ -1,56 +1,126 @@
 @import '@shopify/polaris/build/esm/styles.css';
 
 /*
- * Global styles to align the Hub UI with Invicta's branding.  These
- * overrides adjust the background colours, typography and accent
- * colours used by Shopify Polaris.  Polaris uses CSS variables
- * internally; overriding them at the :root level allows you to
- * customise colours without invasive changes.  Feel free to adjust
- * these values to more closely match your storefront.
+ * Amazon Hub Design System
+ * Clean, minimal design with consistent visual language
+ *
+ * Color Palette:
+ * - Primary: Amazon Orange (#FF9900)
+ * - Success: Green (#059669)
+ * - Warning: Amber (#D97706)
+ * - Critical: Red (#DC2626)
+ * - Info: Blue (#3B82F6)
+ * - Neutral: Gray scale
  */
 
+/* ============================================
+   CSS VARIABLES - Design Tokens
+   ============================================ */
 :root {
-  /* Base background colour for content areas */
-  --p-background: #f5f5f5;
-  /* Base surface colour for cards and tables */
-  --p-surface: #ffffff;
-  /* Text colour for primary content */
-  --p-text: #0d0d0d;
-  /* Critical / accent colour (Invicta red) */
-  --p-interactive-critical: #d32f2f;
-  --p-interactive-critical-hovered: #b71c1c;
+  /* Brand Colors */
+  --hub-primary: #FF9900;
+  --hub-primary-hover: #E68A00;
+  --hub-primary-light: #FFF3E0;
+
+  /* Semantic Colors */
+  --hub-success: #059669;
+  --hub-success-light: #D1FAE5;
+  --hub-warning: #D97706;
+  --hub-warning-light: #FEF3C7;
+  --hub-critical: #DC2626;
+  --hub-critical-light: #FEE2E2;
+  --hub-info: #3B82F6;
+  --hub-info-light: #DBEAFE;
+
+  /* Neutral Colors */
+  --hub-bg: #F8FAFC;
+  --hub-surface: #FFFFFF;
+  --hub-surface-hover: #F1F5F9;
+  --hub-border: #E2E8F0;
+  --hub-border-strong: #CBD5E1;
+  --hub-text: #1E293B;
+  --hub-text-secondary: #64748B;
+  --hub-text-muted: #94A3B8;
+
+  /* Navigation */
+  --hub-nav-bg: #1E293B;
+  --hub-nav-hover: #334155;
+  --hub-nav-active: #FF9900;
+
+  /* Spacing Scale */
+  --hub-space-xs: 4px;
+  --hub-space-sm: 8px;
+  --hub-space-md: 16px;
+  --hub-space-lg: 24px;
+  --hub-space-xl: 32px;
+  --hub-space-2xl: 48px;
+
+  /* Border Radius */
+  --hub-radius-sm: 4px;
+  --hub-radius-md: 8px;
+  --hub-radius-lg: 12px;
+  --hub-radius-xl: 16px;
+
+  /* Shadows */
+  --hub-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --hub-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --hub-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+
+  /* Transitions */
+  --hub-transition-fast: 0.15s ease;
+  --hub-transition-normal: 0.2s ease;
+
+  /* Polaris Overrides */
+  --p-background: var(--hub-bg);
+  --p-surface: var(--hub-surface);
+  --p-text: var(--hub-text);
+  --p-interactive-critical: var(--hub-primary);
+  --p-interactive-critical-hovered: var(--hub-primary-hover);
 }
 
+/* ============================================
+   BASE STYLES
+   ============================================ */
 body {
-  background-color: var(--p-background);
-  color: var(--p-text);
+  background-color: var(--hub-bg);
+  color: var(--hub-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Darken the navigation menu to match the Invicta admin aesthetic */
+/* ============================================
+   NAVIGATION
+   ============================================ */
 .Polaris-Navigation {
-  background-color: #202020 !important;
+  background-color: var(--hub-nav-bg) !important;
 }
 
 .Polaris-Navigation__PrimaryNavigation {
-  background-color: #202020 !important;
+  background-color: var(--hub-nav-bg) !important;
+}
+
+.Polaris-Frame__Navigation {
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: var(--hub-nav-bg) !important;
 }
 
 .Polaris-Navigation__Item {
   color: #ffffff !important;
   background-color: transparent !important;
+  border-radius: var(--hub-radius-md);
+  margin: 2px 8px;
+  transition: background-color var(--hub-transition-fast);
 }
 
 .Polaris-Navigation__Item:hover,
-.Polaris-Navigation__Item:focus,
-.Polaris-Navigation__Item:active {
-  background-color: #383838 !important;
+.Polaris-Navigation__Item:focus {
+  background-color: var(--hub-nav-hover) !important;
   color: #ffffff !important;
 }
 
-/* Fix all inner wrappers on hover */
 .Polaris-Navigation__Item:hover *,
-.Polaris-Navigation__Item:focus *,
-.Polaris-Navigation__Item:active * {
+.Polaris-Navigation__Item:focus * {
   color: #ffffff !important;
   background-color: transparent !important;
 }
@@ -60,23 +130,13 @@ body {
   background-color: transparent !important;
 }
 
-.Polaris-Navigation__ItemWrapper:hover,
-.Polaris-Navigation__ItemInnerWrapper:hover {
-  background-color: transparent !important;
-}
-
 .Polaris-Navigation__Item--selected,
 .Polaris-Navigation__Item--selected:hover,
 .Polaris-Navigation__Item--selected:focus {
-  background-color: var(--p-interactive-critical) !important;
+  background-color: var(--hub-nav-active) !important;
   color: #ffffff !important;
 }
 
-.Polaris-Navigation__Item--selected:hover {
-  background-color: var(--p-interactive-critical-hovered) !important;
-}
-
-/* Fix text and icon colors in navigation */
 .Polaris-Navigation__Text,
 .Polaris-Navigation__Icon,
 .Polaris-Navigation__Item svg {
@@ -84,44 +144,420 @@ body {
   fill: currentColor !important;
 }
 
-/* Section headers in navigation */
 .Polaris-Navigation__SectionHeading {
-  color: #999999 !important;
+  color: var(--hub-text-muted) !important;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.Polaris-Frame__Navigation {
-  border-right: none;
-  background-color: #202020 !important;
-}
-
-/* Prevent white flash during navigation */
+/* ============================================
+   FRAME & LAYOUT
+   ============================================ */
 .Polaris-Frame__Main {
-  background-color: var(--p-background);
+  background-color: var(--hub-bg);
   min-height: 100vh;
 }
 
 .Polaris-Frame__Content {
-  background-color: var(--p-background);
+  background-color: var(--hub-bg);
 }
 
-/* Ensure page content area has consistent background */
 .Polaris-Page {
-  background-color: var(--p-background);
+  background-color: var(--hub-bg);
+  max-width: 1400px;
 }
 
-/* Spinner loading states - ensure consistent background */
-.Polaris-Spinner {
-  margin: 20px auto;
-}
-
-/* Card styling - ensure they don't flash white unexpectedly */
+/* ============================================
+   CARDS - Clean minimal style
+   ============================================ */
 .Polaris-Card {
-  background-color: var(--p-surface);
+  background-color: var(--hub-surface);
+  border-radius: var(--hub-radius-lg);
+  box-shadow: var(--hub-shadow-sm);
+  border: 1px solid var(--hub-border);
+  transition: box-shadow var(--hub-transition-fast);
 }
 
-/* Smooth transition for loading states */
+.Polaris-Card:hover {
+  box-shadow: var(--hub-shadow-md);
+}
+
+/* Remove default Polaris card padding for custom layouts */
+.Polaris-LegacyCard__Section {
+  padding: var(--hub-space-md);
+}
+
+/* ============================================
+   BADGES - Consistent color coding
+   ============================================ */
+.Polaris-Badge--toneSuccess {
+  background-color: var(--hub-success-light) !important;
+  color: var(--hub-success) !important;
+}
+
+.Polaris-Badge--toneWarning {
+  background-color: var(--hub-warning-light) !important;
+  color: var(--hub-warning) !important;
+}
+
+.Polaris-Badge--toneCritical {
+  background-color: var(--hub-critical-light) !important;
+  color: var(--hub-critical) !important;
+}
+
+.Polaris-Badge--toneInfo {
+  background-color: var(--hub-info-light) !important;
+  color: var(--hub-info) !important;
+}
+
+/* ============================================
+   DATA TABLES - Clean styling
+   ============================================ */
+.Polaris-DataTable {
+  border-radius: var(--hub-radius-md);
+  overflow: hidden;
+}
+
+.Polaris-DataTable__Table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.Polaris-DataTable__Cell {
+  border-bottom: 1px solid var(--hub-border);
+  padding: var(--hub-space-sm) var(--hub-space-md);
+}
+
+.Polaris-DataTable__Cell--header {
+  background-color: var(--hub-bg);
+  font-weight: 600;
+  color: var(--hub-text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.Polaris-DataTable__TableRow:hover .Polaris-DataTable__Cell {
+  background-color: var(--hub-surface-hover);
+}
+
+/* ============================================
+   BUTTONS - Primary orange accent
+   ============================================ */
+.Polaris-Button--variantPrimary {
+  background-color: var(--hub-primary) !important;
+  border-color: var(--hub-primary) !important;
+}
+
+.Polaris-Button--variantPrimary:hover {
+  background-color: var(--hub-primary-hover) !important;
+  border-color: var(--hub-primary-hover) !important;
+}
+
+/* ============================================
+   FORMS
+   ============================================ */
+.Polaris-TextField__Input {
+  border-radius: var(--hub-radius-md);
+}
+
+.Polaris-TextField__Backdrop {
+  border-radius: var(--hub-radius-md);
+}
+
+.Polaris-Select__Backdrop {
+  border-radius: var(--hub-radius-md);
+}
+
+/* ============================================
+   MODALS - Clean look
+   ============================================ */
+.Polaris-Modal-Dialog__Modal {
+  border-radius: var(--hub-radius-xl);
+  box-shadow: var(--hub-shadow-lg);
+}
+
+.Polaris-Modal-Header {
+  border-bottom: 1px solid var(--hub-border);
+}
+
+.Polaris-Modal-Footer {
+  border-top: 1px solid var(--hub-border);
+}
+
+/* ============================================
+   TABS - Clean underline style
+   ============================================ */
+.Polaris-Tabs__Tab--selected {
+  border-bottom-color: var(--hub-primary) !important;
+}
+
+.Polaris-Tabs__Tab--selected .Polaris-Tabs__Title {
+  color: var(--hub-primary) !important;
+}
+
+/* ============================================
+   BANNERS - Softer colors
+   ============================================ */
+.Polaris-Banner--toneSuccess {
+  background-color: var(--hub-success-light);
+  border-left: 4px solid var(--hub-success);
+}
+
+.Polaris-Banner--toneWarning {
+  background-color: var(--hub-warning-light);
+  border-left: 4px solid var(--hub-warning);
+}
+
+.Polaris-Banner--toneCritical {
+  background-color: var(--hub-critical-light);
+  border-left: 4px solid var(--hub-critical);
+}
+
+.Polaris-Banner--toneInfo {
+  background-color: var(--hub-info-light);
+  border-left: 4px solid var(--hub-info);
+}
+
+/* ============================================
+   SPINNERS & LOADING
+   ============================================ */
+.Polaris-Spinner {
+  margin: var(--hub-space-lg) auto;
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+/* Stat Cards */
+.hub-stat-card {
+  padding: var(--hub-space-md);
+  background: var(--hub-surface);
+  border-radius: var(--hub-radius-lg);
+  border: 1px solid var(--hub-border);
+  transition: all var(--hub-transition-fast);
+}
+
+.hub-stat-card:hover {
+  box-shadow: var(--hub-shadow-md);
+  border-color: var(--hub-border-strong);
+}
+
+.hub-stat-card--clickable {
+  cursor: pointer;
+}
+
+.hub-stat-card--highlighted {
+  background: var(--hub-primary-light);
+  border-color: var(--hub-primary);
+}
+
+.hub-stat-card--success {
+  border-left: 4px solid var(--hub-success);
+}
+
+.hub-stat-card--warning {
+  border-left: 4px solid var(--hub-warning);
+}
+
+.hub-stat-card--critical {
+  border-left: 4px solid var(--hub-critical);
+}
+
+/* Grid Layouts */
+.hub-grid {
+  display: grid;
+  gap: var(--hub-space-md);
+}
+
+.hub-grid--2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.hub-grid--3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.hub-grid--4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* Quick Action Buttons */
+.hub-quick-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hub-space-xs);
+  padding: var(--hub-space-xs) var(--hub-space-sm);
+  border-radius: var(--hub-radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--hub-transition-fast);
+  border: none;
+  background: transparent;
+  color: var(--hub-text-secondary);
+}
+
+.hub-quick-action:hover {
+  background: var(--hub-surface-hover);
+  color: var(--hub-text);
+}
+
+.hub-quick-action--primary {
+  color: var(--hub-primary);
+}
+
+.hub-quick-action--primary:hover {
+  background: var(--hub-primary-light);
+}
+
+/* Section Headers */
+.hub-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--hub-space-md);
+}
+
+/* KPI Display */
+.hub-kpi {
+  text-align: center;
+  padding: var(--hub-space-md);
+}
+
+.hub-kpi__value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--hub-text);
+}
+
+.hub-kpi__label {
+  font-size: 12px;
+  color: var(--hub-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: var(--hub-space-xs);
+}
+
+.hub-kpi--success .hub-kpi__value {
+  color: var(--hub-success);
+}
+
+.hub-kpi--warning .hub-kpi__value {
+  color: var(--hub-warning);
+}
+
+.hub-kpi--critical .hub-kpi__value {
+  color: var(--hub-critical);
+}
+
+/* ============================================
+   RESPONSIVE DESIGN
+   ============================================ */
+
+/* Tablet and below */
+@media (max-width: 1024px) {
+  .hub-grid--4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .hub-grid--3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .Polaris-Page {
+    padding-left: var(--hub-space-md);
+    padding-right: var(--hub-space-md);
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .hub-grid--4,
+  .hub-grid--3,
+  .hub-grid--2 {
+    grid-template-columns: 1fr;
+  }
+
+  .Polaris-DataTable {
+    overflow-x: auto;
+  }
+
+  .Polaris-DataTable__Table {
+    min-width: 600px;
+  }
+
+  .hub-kpi__value {
+    font-size: 24px;
+  }
+
+  /* Stack navigation header on mobile */
+  .Polaris-Page__Header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--hub-space-sm);
+  }
+
+  .Polaris-Modal-Dialog__Modal {
+    margin: var(--hub-space-sm);
+    max-height: calc(100vh - var(--hub-space-md));
+  }
+}
+
+/* Small Mobile */
+@media (max-width: 480px) {
+  .hub-stat-card {
+    padding: var(--hub-space-sm);
+  }
+
+  .Polaris-Card {
+    border-radius: var(--hub-radius-md);
+  }
+
+  .Polaris-LegacyCard__Section {
+    padding: var(--hub-space-sm);
+  }
+}
+
+/* ============================================
+   TRANSITIONS & ANIMATIONS
+   ============================================ */
 .Polaris-Page,
 .Polaris-Card,
 .Polaris-Frame__Content {
-  transition: opacity 0.15s ease-in-out;
+  transition: opacity var(--hub-transition-fast);
+}
+
+/* Smooth loading fade */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.hub-fade-in {
+  animation: fadeIn var(--hub-transition-normal);
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+@media print {
+  .Polaris-Navigation,
+  .Polaris-Frame__Navigation,
+  .Polaris-Button,
+  .Polaris-Tabs {
+    display: none !important;
+  }
+
+  .Polaris-Frame__Main {
+    margin-left: 0 !important;
+  }
+
+  .Polaris-Card {
+    box-shadow: none;
+    border: 1px solid #ddd;
+  }
 }

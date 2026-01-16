@@ -155,7 +155,7 @@ export default function AsinAnalyzerPage() {
     }
   };
 
-  // Handle BOM selection change
+  // Handle BOM recipe assignment change
   const handleBomChange = (resultIndex, bomId, bomSku) => {
     setResults(prev => {
       const updated = [...prev];
@@ -780,7 +780,7 @@ export default function AsinAnalyzerPage() {
                     {!selectedResult.bom_suggestion?.suggested_bom_id && (
                       <Banner>
                         <Text variant="bodySm">
-                          <strong>Map a BOM:</strong> COGS cannot be calculated without a BOM mapping.
+                          <strong>Assign a Recipe:</strong> COGS cannot be calculated until a BOM recipe is assigned to this listing.
                         </Text>
                       </Banner>
                     )}

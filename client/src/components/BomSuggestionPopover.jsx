@@ -14,7 +14,11 @@ import { getBomCandidates } from '../utils/api.jsx';
 
 /**
  * BOM Suggestion Popover Component
- * Shows suggested BOMs for an ASIN and allows selection
+ * Shows suggested BOMs (recipes) for an ASIN and allows assignment.
+ *
+ * Note: A BOM (Bill of Materials) is a "recipe" - a fixed definition of
+ * what components are included in a product. A listing IS ASSIGNED to
+ * exactly one BOM, it does not "select" from interchangeable options.
  */
 export default function BomSuggestionPopover({
   asin,
@@ -87,7 +91,7 @@ export default function BomSuggestionPopover({
             )}
           </>
         ) : (
-          <Text variant="bodySm" tone="subdued">Select BOM</Text>
+          <Text variant="bodySm" tone="subdued">No Recipe Assigned</Text>
         )}
       </InlineStack>
     </Button>
@@ -104,7 +108,7 @@ export default function BomSuggestionPopover({
       <Popover.Pane>
         <div style={{ padding: '12px', minWidth: '300px', maxWidth: '400px' }}>
           <BlockStack gap="300">
-            <Text variant="headingSm">BOM Suggestions for {asin}</Text>
+            <Text variant="headingSm">Recipe Matches for {asin}</Text>
 
             {loading && (
               <InlineStack gap="200" blockAlign="center">
@@ -170,17 +174,17 @@ export default function BomSuggestionPopover({
             )}
 
             {!loading && candidates.length === 0 && !error && (
-              <Text tone="subdued">No matching BOMs found. Create a new BOM or map manually.</Text>
+              <Text tone="subdued">No matching recipes found. Create a new BOM recipe or assign manually.</Text>
             )}
 
-            {/* Clear selection option */}
+            {/* Clear assignment option */}
             {currentBomId && (
               <Button
                 plain
                 destructive
                 onClick={() => handleSelect(null, null)}
               >
-                Clear BOM selection
+                Remove Recipe Assignment
               </Button>
             )}
           </BlockStack>

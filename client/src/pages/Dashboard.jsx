@@ -61,24 +61,17 @@ function formatRelativeTime(dateString) {
 }
 
 /**
- * Metric Card Component - Clean stat display
+ * Metric Card Component - Clean stat display using hub design system
  */
 function MetricCard({ title, value, subtitle, trend, trendUp, onClick, highlighted, loading }) {
+  const cardClasses = [
+    'hub-stat-card',
+    onClick && 'hub-stat-card--clickable',
+    highlighted && 'hub-stat-card--highlighted',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div
-      onClick={onClick}
-      style={{
-        padding: '20px',
-        backgroundColor: highlighted ? '#FFF7ED' : '#FFFFFF',
-        borderRadius: '12px',
-        border: highlighted ? '2px solid #F97316' : '1px solid #E5E7EB',
-        cursor: onClick ? 'pointer' : 'default',
-        transition: 'all 0.2s ease',
-        height: '100%',
-      }}
-      onMouseOver={(e) => onClick && (e.currentTarget.style.borderColor = '#6366F1')}
-      onMouseOut={(e) => onClick && (e.currentTarget.style.borderColor = highlighted ? '#F97316' : '#E5E7EB')}
-    >
+    <div className={cardClasses} onClick={onClick}>
       <BlockStack gap="200">
         <Text variant="bodySm" tone="subdued">{title}</Text>
         {loading ? (
@@ -91,9 +84,7 @@ function MetricCard({ title, value, subtitle, trend, trendUp, onClick, highlight
                 {subtitle && <Text variant="bodySm" tone="subdued">{subtitle}</Text>}
                 {trend && (
                   <InlineStack gap="100" blockAlign="center">
-                    <div style={{ color: trendUp ? '#059669' : '#DC2626' }}>
-                      <Icon source={trendUp ? ArrowUpIcon : ArrowDownIcon} />
-                    </div>
+                    <Icon source={trendUp ? ArrowUpIcon : ArrowDownIcon} tone={trendUp ? 'success' : 'critical'} />
                     <Text variant="bodySm" tone={trendUp ? 'success' : 'critical'}>
                       {trend}
                     </Text>
@@ -109,21 +100,19 @@ function MetricCard({ title, value, subtitle, trend, trendUp, onClick, highlight
 }
 
 /**
- * Order Pipeline Stage
+ * Order Pipeline Stage - Visual workflow step
  */
 function PipelineStage({ label, count, color, onClick, active }) {
   return (
     <div
       onClick={onClick}
+      className={`hub-stat-card hub-stat-card--clickable ${active ? 'hub-stat-card--highlighted' : ''}`}
       style={{
         flex: 1,
-        padding: '16px',
-        backgroundColor: active ? color + '15' : '#F9FAFB',
-        borderRadius: '8px',
-        cursor: 'pointer',
-        border: active ? `2px solid ${color}` : '1px solid #E5E7EB',
         textAlign: 'center',
-        transition: 'all 0.2s ease',
+        borderLeftColor: active ? color : undefined,
+        borderLeftWidth: active ? '4px' : undefined,
+        borderLeftStyle: active ? 'solid' : undefined,
       }}
     >
       <BlockStack gap="100" inlineAlign="center">
@@ -137,39 +126,34 @@ function PipelineStage({ label, count, color, onClick, active }) {
 }
 
 /**
- * Alert Item Component
+ * Alert Item Component - Uses design system alert styling
  */
 function AlertItem({ type, title, description, action, onAction }) {
-  const colors = {
-    critical: { bg: '#FEF2F2', border: '#DC2626', icon: AlertCircleIcon },
-    warning: { bg: '#FFFBEB', border: '#D97706', icon: AlertCircleIcon },
-    info: { bg: '#EFF6FF', border: '#3B82F6', icon: ClockIcon },
+  const typeToClass = {
+    critical: 'hub-stat-card--critical',
+    warning: 'hub-stat-card--warning',
+    info: 'hub-stat-card--success',
   };
-  const style = colors[type] || colors.info;
+  const icons = {
+    critical: AlertCircleIcon,
+    warning: AlertCircleIcon,
+    info: ClockIcon,
+  };
 
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '12px 16px',
-      backgroundColor: style.bg,
-      borderLeft: `4px solid ${style.border}`,
-      borderRadius: '0 8px 8px 0',
-      marginBottom: '8px',
-    }}>
-      <InlineStack gap="300" blockAlign="center">
-        <div style={{ color: style.border }}>
-          <Icon source={style.icon} />
-        </div>
-        <BlockStack gap="050">
-          <Text variant="bodyMd" fontWeight="semibold">{title}</Text>
-          {description && <Text variant="bodySm" tone="subdued">{description}</Text>}
-        </BlockStack>
+    <div className={`hub-stat-card ${typeToClass[type] || typeToClass.info}`} style={{ marginBottom: '8px' }}>
+      <InlineStack gap="300" blockAlign="center" align="space-between">
+        <InlineStack gap="300" blockAlign="center">
+          <Icon source={icons[type] || ClockIcon} tone={type === 'critical' ? 'critical' : type === 'warning' ? 'caution' : 'success'} />
+          <BlockStack gap="050">
+            <Text variant="bodyMd" fontWeight="semibold">{title}</Text>
+            {description && <Text variant="bodySm" tone="subdued">{description}</Text>}
+          </BlockStack>
+        </InlineStack>
+        {action && (
+          <Button size="slim" onClick={onAction}>{action}</Button>
+        )}
       </InlineStack>
-      {action && (
-        <Button size="slim" onClick={onAction}>{action}</Button>
-      )}
     </div>
   );
 }

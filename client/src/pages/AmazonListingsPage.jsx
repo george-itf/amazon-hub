@@ -576,9 +576,9 @@ export default function AmazonListingsPage() {
     });
   }, [filteredListings, listingSettingsMap, selectedListings, boms]);
 
-  // BOM options for selects
+  // BOM recipe options for assignment dropdown
   const bomOptions = [
-    { label: '— No BOM —', value: '' },
+    { label: '— No Recipe Assigned —', value: '' },
     ...boms.map(b => ({ label: `${b.bundle_sku} - ${truncate(b.description || '', 40)}`, value: b.id })),
   ];
 
@@ -701,12 +701,12 @@ export default function AmazonListingsPage() {
               onChange={setStatusFilter}
             />
             <Select
-              label="BOM"
+              label="Recipe"
               labelHidden
               options={[
-                { label: 'All', value: 'all' },
-                { label: 'With BOM', value: 'with_bom' },
-                { label: 'Without BOM', value: 'without_bom' },
+                { label: 'All Recipes', value: 'all' },
+                { label: 'Recipe Assigned', value: 'with_bom' },
+                { label: 'No Recipe', value: 'without_bom' },
               ]}
               value={bomFilter}
               onChange={setBomFilter}
@@ -870,10 +870,11 @@ export default function AmazonListingsPage() {
                 multiline={2}
               />
               <Select
-                label="BOM"
+                label="Product Recipe (BOM)"
                 options={bomOptions}
                 value={createForm.bom_id}
                 onChange={(v) => setCreateForm(f => ({ ...f, bom_id: v }))}
+                helpText="Assign the recipe that defines what's in this product"
               />
             </FormLayout>
           </BlockStack>
@@ -957,15 +958,15 @@ export default function AmazonListingsPage() {
 
               <Divider />
 
-              {/* BOM Selection */}
+              {/* Product Recipe (BOM) Assignment */}
               <BlockStack gap="400">
-                <Text variant="headingSm">Bill of Materials (BOM)</Text>
+                <Text variant="headingSm">Product Recipe (BOM)</Text>
                 <Select
-                  label="Assigned BOM"
+                  label="Assigned Recipe"
                   options={bomOptions}
                   value={detailForm.bom_id}
                   onChange={(v) => setDetailForm(f => ({ ...f, bom_id: v }))}
-                  helpText="Select the BOM that defines the components for this listing"
+                  helpText="Assign the BOM recipe that defines what components are included in this listing"
                 />
                 {selectedBom && (
                   <Card>
