@@ -217,6 +217,84 @@ app.get('/', (req, res) => {
 // Auth routes (no auth middleware, rate limited)
 app.use('/auth', authLimiter, authRoutes);
 
+// Public Keepa status endpoint (no auth required for monitoring/diagnostics)
+// Mounted before auth middleware so it's accessible without a token
+app.get('/keepa/status', async (req, res) => {
+  try {
+    const { getKeepaSettings, getCacheStats } = await import('./services/keepaService.js');
+
+    const settings = await getKeepaSettings();
+
+    // Get tokens spent
+    const { data: hourData } = await supabase
+      .from('keepa_request_log')
+      .select('tokens_spent')
+      .gte('requested_at', new Date(Date.now() - 60 * 60 * 1000).toISOString())
+      .eq('status', 'SUCCESS');
+
+    const { data: dayData } = await supabase
+      .from('keepa_request_log')
+      .select('tokens_spent')
+      .gte('requested_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .eq('status', 'SUCCESS');
+
+    const tokensSpentHour = (hourData || []).reduce((sum, r) => sum + (r.tokens_spent || 0), 0);
+    const tokensSpentDay = (dayData || []).reduce((sum, r) => sum + (r.tokens_spent || 0), 0);
+
+    // Get cache stats
+    const { count: cacheCount } = await supabase
+      .from('keepa_products_cache')
+      .select('*', { count: 'exact', head: true });
+
+    const { count: staleCount } = await supabase
+      .from('keepa_products_cache')
+      .select('*', { count: 'exact', head: true })
+      .lt('expires_at', new Date().toISOString());
+
+    // Get latest account balance
+    const { data: latestBalance } = await supabase
+      .from('keepa_account_balance')
+      .select('*')
+      .order('recorded_at', { ascending: false })
+      .limit(1);
+
+    const accountBalance = latestBalance?.[0] || null;
+    const cacheHitStats = getCacheStats();
+
+    sendSuccess(res, {
+      configured: !!process.env.KEEPA_API_KEY,
+      domain_id: settings.domain_id,
+      budget: {
+        max_tokens_per_hour: settings.max_tokens_per_hour,
+        max_tokens_per_day: settings.max_tokens_per_day,
+        min_reserve: settings.min_reserve,
+        tokens_spent_hour: tokensSpentHour,
+        tokens_spent_day: tokensSpentDay,
+        tokens_remaining_hour: settings.max_tokens_per_hour - tokensSpentHour,
+        tokens_remaining_day: settings.max_tokens_per_day - tokensSpentDay
+      },
+      account: accountBalance ? {
+        tokens_left: accountBalance.tokens_left,
+        refill_rate: accountBalance.refill_rate,
+        last_updated: accountBalance.recorded_at,
+      } : null,
+      cache: {
+        total_products: cacheCount || 0,
+        stale_products: staleCount || 0,
+        min_refresh_minutes: settings.min_refresh_minutes,
+        session_hit_rate: cacheHitStats.hitRate,
+      },
+    });
+  } catch (err) {
+    console.error('Keepa status error:', err);
+    sendSuccess(res, {
+      configured: !!process.env.KEEPA_API_KEY,
+      error: 'Failed to fetch detailed status',
+      message: err.message
+    });
+  }
+});
+
 // Apply authentication middleware to all subsequent routes
 app.use(authMiddleware);
 

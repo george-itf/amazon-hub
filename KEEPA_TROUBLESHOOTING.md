@@ -98,6 +98,7 @@ curl -X POST https://amazon-hub-production.up.railway.app/keepa/refresh \
 
 #### Step 1: Check Configuration
 ```bash
+# This endpoint is public and doesn't require authentication
 curl https://amazon-hub-production.up.railway.app/keepa/status
 ```
 
