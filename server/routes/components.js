@@ -23,8 +23,8 @@ router.get('/', async (req, res) => {
     usage_filter = 'all'  // 'all', 'active', 'unassigned'
   } = req.query;
 
-  // Cap limit to prevent memory issues
-  const requestedLimit = Math.min(parseInt(limit) || 100, 500);
+  // Cap limit to prevent memory issues - increased to 5000 for inventory page
+  const requestedLimit = Math.min(parseInt(limit) || 100, 5000);
   const requestedOffset = parseInt(offset) || 0;
 
   console.log('[Components GET /] Request params:', {
@@ -38,13 +38,28 @@ router.get('/', async (req, res) => {
   });
 
   try {
-    // Build base query for counting
+    // Build base query for counting - check total in database first
+    let totalCountQuery = supabase
+      .from('components')
+      .select('*', { count: 'exact', head: true });
+
+    const { count: absoluteTotal, error: absoluteError } = await totalCountQuery;
+    console.log('[Components GET /] Absolute total components in DB:', absoluteTotal);
+
+    if (absoluteError) {
+      console.error('Components absolute count error:', absoluteError);
+    }
+
+    // Build base query for counting with filters
     let countQuery = supabase
       .from('components')
       .select('*', { count: 'exact', head: true });
 
     if (active_only === 'true') {
       countQuery = countQuery.eq('is_active', true);
+      console.log('[Components GET /] Filtering by is_active = true');
+    } else {
+      console.log('[Components GET /] NOT filtering by is_active (loading ALL)');
     }
 
     if (search) {
@@ -90,6 +105,12 @@ router.get('/', async (req, res) => {
     }
 
     const { data, error } = await query;
+
+    console.log('[Components GET /] Query returned:', {
+      dataLength: data?.length || 0,
+      hasError: !!error,
+      errorMessage: error?.message || null
+    });
 
     if (error) {
       console.error('Components fetch error:', error);
