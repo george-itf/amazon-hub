@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, memo, useMemo } from 'react';
 import {
   Page,
   Layout,
@@ -62,8 +62,9 @@ function formatRelativeTime(dateString) {
 
 /**
  * Metric Card Component - Clean stat display using hub design system
+ * Memoized to prevent unnecessary re-renders
  */
-function MetricCard({ title, value, subtitle, trend, trendUp, onClick, highlighted, loading }) {
+const MetricCard = memo(function MetricCard({ title, value, subtitle, trend, trendUp, onClick, highlighted, loading }) {
   const cardClasses = [
     'hub-stat-card',
     onClick && 'hub-stat-card--clickable',
@@ -97,12 +98,13 @@ function MetricCard({ title, value, subtitle, trend, trendUp, onClick, highlight
       </BlockStack>
     </div>
   );
-}
+});
 
 /**
  * Order Pipeline Stage - Visual workflow step
+ * Memoized to prevent unnecessary re-renders
  */
-function PipelineStage({ label, count, color, onClick, active }) {
+const PipelineStage = memo(function PipelineStage({ label, count, color, onClick, active }) {
   return (
     <div
       onClick={onClick}
@@ -123,12 +125,13 @@ function PipelineStage({ label, count, color, onClick, active }) {
       </BlockStack>
     </div>
   );
-}
+});
 
 /**
  * Alert Item Component - Uses design system alert styling
+ * Memoized to prevent unnecessary re-renders
  */
-function AlertItem({ type, title, description, action, onAction }) {
+const AlertItem = memo(function AlertItem({ type, title, description, action, onAction }) {
   const typeToClass = {
     critical: 'hub-stat-card--critical',
     warning: 'hub-stat-card--warning',
@@ -156,12 +159,13 @@ function AlertItem({ type, title, description, action, onAction }) {
       </InlineStack>
     </div>
   );
-}
+});
 
 /**
  * Order Row Component - Uses design system CSS variables
+ * Memoized to prevent unnecessary re-renders when other parts of dashboard update
  */
-function OrderRow({ order, onClick }) {
+const OrderRow = memo(function OrderRow({ order, onClick }) {
   const isToday = order.order_date &&
     new Date(order.order_date).toDateString() === new Date().toDateString();
 
@@ -212,12 +216,12 @@ function OrderRow({ order, onClick }) {
       </InlineStack>
     </div>
   );
-}
+});
 
 /**
- * Status Badge Component
+ * Status Badge Component - Memoized
  */
-function StatusBadge({ status }) {
+const StatusBadge = memo(function StatusBadge({ status }) {
   const statusConfig = {
     READY_TO_PICK: { label: 'Ready', tone: 'success' },
     NEEDS_REVIEW: { label: 'Review', tone: 'warning' },
@@ -228,12 +232,13 @@ function StatusBadge({ status }) {
   };
   const config = statusConfig[status] || { label: status, tone: 'info' };
   return <Badge tone={config.tone}>{config.label}</Badge>;
-}
+});
 
 /**
  * Pulse Ticker Component - Revenue + Estimated Profit
+ * Memoized to prevent unnecessary re-renders
  */
-function PulseTicker({ data, loading }) {
+const PulseTicker = memo(function PulseTicker({ data, loading }) {
   if (loading) {
     return (
       <Card>
@@ -303,12 +308,13 @@ function PulseTicker({ data, loading }) {
       </BlockStack>
     </Card>
   );
-}
+});
 
 /**
  * Stock Heatmap Component - 10x10 grid showing days of coverage
+ * Memoized to prevent expensive re-renders
  */
-function StockHeatmap({ data, loading, onClick }) {
+const StockHeatmap = memo(function StockHeatmap({ data, loading, onClick }) {
   if (loading) {
     return (
       <Card>
@@ -427,7 +433,7 @@ function StockHeatmap({ data, loading, onClick }) {
       </BlockStack>
     </Card>
   );
-}
+});
 
 /**
  * Dashboard - Amazon Seller Command Center
