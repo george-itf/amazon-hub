@@ -2,7 +2,6 @@ import express from 'express';
 import crypto from 'crypto';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import { auditLog, getAuditContext } from '../services/audit.js';
 import { fingerprintTitle, normalizeAsin, normalizeSku } from '../utils/identityNormalization.js';
 
@@ -476,7 +475,7 @@ router.get('/:id', async (req, res) => {
  * Create a new listing memory entry
  * ADMIN only
  */
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', async (req, res) => {
   const { asin, sku, title, bom_id } = req.body;
 
   if (!asin && !sku && !title) {
@@ -603,7 +602,7 @@ router.post('/', requireAdmin, async (req, res) => {
  * Update a listing memory entry (primarily to change BOM assignment)
  * ADMIN only
  */
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { bom_id, is_active } = req.body;
 
@@ -680,7 +679,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
  * Supersede a listing memory entry with a new one
  * ADMIN only
  */
-router.post('/:id/supersede', requireAdmin, async (req, res) => {
+router.post('/:id/supersede', async (req, res) => {
   const { id } = req.params;
   const { asin, sku, title, bom_id, note } = req.body;
 
@@ -829,7 +828,7 @@ router.get('/search/query', async (req, res) => {
  * Marks all listings for manual review and BOM assignment
  * ADMIN role required
  */
-router.post('/admin/reset-all-boms', requireAdmin, async (req, res) => {
+router.post('/admin/reset-all-boms', async (req, res) => {
   const { confirm } = req.body;
 
   if (confirm !== 'RESET_ALL_BOMS') {

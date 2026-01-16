@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireStaff } from '../middleware/auth.js';
 import { auditLog, getAuditContext } from '../services/audit.js';
 
 const router = express.Router();
@@ -88,7 +87,7 @@ router.get('/:listingMemoryId', async (req, res) => {
  * PUT /listing-settings/:listingMemoryId
  * UPSERT listing settings (create or update)
  */
-router.put('/:listingMemoryId', requireStaff, async (req, res) => {
+router.put('/:listingMemoryId', async (req, res) => {
   const { listingMemoryId } = req.params;
   const {
     price_override_pence,
@@ -229,7 +228,7 @@ router.put('/:listingMemoryId', requireStaff, async (req, res) => {
  * DELETE /listing-settings/:listingMemoryId
  * Delete listing settings
  */
-router.delete('/:listingMemoryId', requireStaff, async (req, res) => {
+router.delete('/:listingMemoryId', async (req, res) => {
   const { listingMemoryId } = req.params;
 
   try {

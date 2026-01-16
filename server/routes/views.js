@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireStaff } from '../middleware/auth.js';
 import { auditLog, getAuditContext } from '../services/audit.js';
 
 const router = express.Router();
@@ -206,7 +205,7 @@ router.get('/:id', async (req, res) => {
  * Body: { page, name, filters, columns?, sort?, is_default? }
  * Legacy support: { context, name, config }
  */
-router.post('/', requireStaff, async (req, res) => {
+router.post('/', async (req, res) => {
   // Support both new 'page' and legacy 'context'
   const page = req.body.page || CONTEXT_TO_PAGE[req.body.context] || req.body.context;
   const name = req.body.name;
@@ -306,7 +305,7 @@ router.post('/', requireStaff, async (req, res) => {
  * Update a view (only own views)
  * Body: { name?, filters?, columns?, sort?, is_default? }
  */
-router.put('/:id', requireStaff, async (req, res) => {
+router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { name, filters, config, columns, sort, is_default, sort_order } = req.body;
 
@@ -394,7 +393,7 @@ router.put('/:id', requireStaff, async (req, res) => {
  * DELETE /views/:id
  * Delete a view (only own views)
  */
-router.delete('/:id', requireStaff, async (req, res) => {
+router.delete('/:id', async (req, res) => {
   const { id } = req.params;
   const userId = getUserId(req);
 
@@ -466,7 +465,7 @@ router.delete('/:id', requireStaff, async (req, res) => {
  * POST /views/:id/share
  * Share a personal view (makes it visible to all users)
  */
-router.post('/:id/share', requireStaff, async (req, res) => {
+router.post('/:id/share', async (req, res) => {
   const { id } = req.params;
   const userId = getUserId(req);
 
@@ -539,7 +538,7 @@ router.post('/:id/share', requireStaff, async (req, res) => {
  * POST /views/:id/unshare
  * Unshare a shared view (makes it personal again)
  */
-router.post('/:id/unshare', requireStaff, async (req, res) => {
+router.post('/:id/unshare', async (req, res) => {
   const { id } = req.params;
   const userId = getUserId(req);
 
@@ -612,7 +611,7 @@ router.post('/:id/unshare', requireStaff, async (req, res) => {
  * Body: { page, view_ids: [] }
  * Legacy support: { context, view_ids: [] }
  */
-router.post('/reorder', requireStaff, async (req, res) => {
+router.post('/reorder', async (req, res) => {
   const page = req.body.page || CONTEXT_TO_PAGE[req.body.context] || req.body.context;
   const { view_ids } = req.body;
 
@@ -691,7 +690,7 @@ router.post('/reorder', requireStaff, async (req, res) => {
  * POST /views/:id/set-default
  * Set a view as the default for the current user on its page
  */
-router.post('/:id/set-default', requireStaff, async (req, res) => {
+router.post('/:id/set-default', async (req, res) => {
   const { id } = req.params;
   const userId = getUserId(req);
 

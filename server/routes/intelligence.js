@@ -2,7 +2,6 @@ import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
 import { buildAllocationPreview, getPoolCandidates } from '../services/allocationEngine.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import spApiClient from '../services/spApi.js';
 import { recordSystemEvent } from '../services/audit.js';
 import {
@@ -521,7 +520,7 @@ router.get('/allocation/preview', async (req, res) => {
  * - buffer_units (default: 1)
  * - dry_run (default: true) - If true, compute but don't apply
  */
-router.post('/allocation/apply', requireAdmin, async (req, res) => {
+router.post('/allocation/apply', async (req, res) => {
   try {
     const {
       pool_component_id: poolComponentId,
@@ -864,7 +863,7 @@ router.get('/demand-model/status', async (req, res) => {
  * - lookback_days: number (default from settings)
  * - ridge_lambda: number (default from settings)
  */
-router.post('/demand-model/train', requireAdmin, async (req, res) => {
+router.post('/demand-model/train', async (req, res) => {
   try {
     const settings = await getDemandModelSettings();
 
@@ -904,7 +903,7 @@ router.post('/demand-model/train', requireAdmin, async (req, res) => {
  * - asin (required)
  * - date (optional) - date to use for Keepa data lookup
  */
-router.get('/demand-model/predict', requireStaff, async (req, res) => {
+router.get('/demand-model/predict', async (req, res) => {
   try {
     const { asin, date } = req.query;
 
@@ -949,7 +948,7 @@ router.get('/demand-model/predict', requireStaff, async (req, res) => {
  * Query params:
  * - limit (default: 10)
  */
-router.get('/demand-model/history', requireAdmin, async (req, res) => {
+router.get('/demand-model/history', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit, 10) || 10;
     const settings = await getDemandModelSettings();

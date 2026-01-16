@@ -7,7 +7,6 @@ import spApiClient from '../services/spApi.js';
 import supabase from '../services/supabase.js';
 import scheduler from '../services/scheduler.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin } from '../middleware/auth.js';
 import { recordSystemEvent } from '../services/audit.js';
 import { normalizeAsin, fingerprintTitle } from '../utils/identityNormalization.js';
 import { processAmazonOrder, createResultsTracker } from '../utils/amazonOrderProcessor.js';
@@ -72,7 +71,7 @@ router.get('/status', async (req, res) => {
  * Sync orders from Amazon
  * ADMIN only
  */
-router.post('/sync/orders', requireAdmin, async (req, res) => {
+router.post('/sync/orders', async (req, res) => {
   const { daysBack = 7, statuses } = req.body;
 
   if (!spApiClient.isConfigured()) {
@@ -135,7 +134,7 @@ router.post('/sync/orders', requireAdmin, async (req, res) => {
  * GET /amazon/orders/recent
  * Get recent orders from Amazon (preview without importing)
  */
-router.get('/orders/recent', requireAdmin, async (req, res) => {
+router.get('/orders/recent', async (req, res) => {
   const { daysBack = 3 } = req.query;
 
   if (!spApiClient.isConfigured()) {
@@ -174,7 +173,7 @@ router.get('/orders/recent', requireAdmin, async (req, res) => {
  * GET /amazon/order/:orderId
  * Get details for a specific Amazon order
  */
-router.get('/order/:orderId', requireAdmin, async (req, res) => {
+router.get('/order/:orderId', async (req, res) => {
   const { orderId } = req.params;
 
   if (!spApiClient.isConfigured()) {
@@ -199,7 +198,7 @@ router.get('/order/:orderId', requireAdmin, async (req, res) => {
  * POST /amazon/shipment/confirm
  * Confirm shipment for an FBM order (sends tracking to Amazon)
  */
-router.post('/shipment/confirm', requireAdmin, async (req, res) => {
+router.post('/shipment/confirm', async (req, res) => {
   const { orderId, carrierCode, carrierName, trackingNumber, shipDate } = req.body;
 
   if (!orderId || !carrierCode || !trackingNumber) {
@@ -272,7 +271,7 @@ router.post('/shipment/confirm', requireAdmin, async (req, res) => {
  * GET /amazon/orders/pending-shipment
  * Get Amazon orders that need shipment confirmation
  */
-router.get('/orders/pending-shipment', requireAdmin, async (req, res) => {
+router.get('/orders/pending-shipment', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('orders')
@@ -324,7 +323,7 @@ router.get('/orders/pending-shipment', requireAdmin, async (req, res) => {
  * POST /amazon/sync/fees
  * Sync financial events (fees) from Amazon
  */
-router.post('/sync/fees', requireAdmin, async (req, res) => {
+router.post('/sync/fees', async (req, res) => {
   const { daysBack = 30 } = req.body;
 
   if (!spApiClient.isConfigured()) {
@@ -440,7 +439,7 @@ router.post('/sync/fees', requireAdmin, async (req, res) => {
  * GET /amazon/catalog/:asin
  * Get catalog data for an ASIN
  */
-router.get('/catalog/:asin', requireAdmin, async (req, res) => {
+router.get('/catalog/:asin', async (req, res) => {
   const { asin } = req.params;
   const { refresh = false } = req.query;
 
@@ -505,7 +504,7 @@ router.get('/catalog/:asin', requireAdmin, async (req, res) => {
  * POST /amazon/sync/catalog
  * Batch sync catalog data for ASINs from recent orders
  */
-router.post('/sync/catalog', requireAdmin, async (req, res) => {
+router.post('/sync/catalog', async (req, res) => {
   const { asins, daysBack = 30 } = req.body;
 
   if (!spApiClient.isConfigured()) {
@@ -613,7 +612,7 @@ router.post('/sync/catalog', requireAdmin, async (req, res) => {
  * GET /amazon/catalog
  * Get all cached catalog items with optional filtering
  */
-router.get('/catalog', requireAdmin, async (req, res) => {
+router.get('/catalog', async (req, res) => {
   const { search, limit = 50, offset = 0, needsSync } = req.query;
 
   try {
@@ -656,7 +655,7 @@ router.get('/catalog', requireAdmin, async (req, res) => {
  * GET /amazon/listings
  * Get Amazon listings with their BOM mappings
  */
-router.get('/listings', requireAdmin, async (req, res) => {
+router.get('/listings', async (req, res) => {
   const { search, mapped, limit = 50, offset = 0 } = req.query;
 
   try {
@@ -756,7 +755,7 @@ router.get('/listings', requireAdmin, async (req, res) => {
  * POST /amazon/listings/:asin/map
  * Map an Amazon listing to a BOM
  */
-router.post('/listings/:asin/map', requireAdmin, async (req, res) => {
+router.post('/listings/:asin/map', async (req, res) => {
   const { asin } = req.params;
   const { bomId } = req.body;
 
@@ -851,7 +850,7 @@ router.post('/listings/:asin/map', requireAdmin, async (req, res) => {
  * GET /amazon/settings
  * Get Amazon integration settings
  */
-router.get('/settings', requireAdmin, async (req, res) => {
+router.get('/settings', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('amazon_settings')
@@ -876,7 +875,7 @@ router.get('/settings', requireAdmin, async (req, res) => {
  * PUT /amazon/settings
  * Update Amazon integration settings
  */
-router.put('/settings', requireAdmin, async (req, res) => {
+router.put('/settings', async (req, res) => {
   const updates = req.body;
 
   try {
@@ -901,7 +900,7 @@ router.put('/settings', requireAdmin, async (req, res) => {
  * GET /amazon/sync/history
  * Get sync history
  */
-router.get('/sync/history', requireAdmin, async (req, res) => {
+router.get('/sync/history', async (req, res) => {
   const { limit = 20 } = req.query;
 
   try {
@@ -924,7 +923,7 @@ router.get('/sync/history', requireAdmin, async (req, res) => {
  * GET /amazon/order/:orderId/details
  * Get enhanced order details including fees and profit
  */
-router.get('/order/:orderId/details', requireAdmin, async (req, res) => {
+router.get('/order/:orderId/details', async (req, res) => {
   const { orderId } = req.params;
 
   try {
@@ -1033,7 +1032,7 @@ router.get('/order/:orderId/details', requireAdmin, async (req, res) => {
  * GET /amazon/scheduler/status
  * Get auto-sync scheduler status
  */
-router.get('/scheduler/status', requireAdmin, (req, res) => {
+router.get('/scheduler/status', (req, res) => {
   sendSuccess(res, scheduler.getStatus());
 });
 
@@ -1041,7 +1040,7 @@ router.get('/scheduler/status', requireAdmin, (req, res) => {
  * POST /amazon/scheduler/settings
  * Update scheduler settings
  */
-router.post('/scheduler/settings', requireAdmin, async (req, res) => {
+router.post('/scheduler/settings', async (req, res) => {
   const { orderSyncEnabled, orderSyncInterval, trackingSyncEnabled, trackingSyncInterval, catalogSyncEnabled, catalogSyncInterval } = req.body;
 
   try {
@@ -1094,7 +1093,7 @@ router.post('/scheduler/settings', requireAdmin, async (req, res) => {
  * Push safe allocated quantities to Amazon FBM listings
  * Requires ADMIN and Idempotency-Key header
  */
-router.post('/inventory/push', requireAdmin, async (req, res) => {
+router.post('/inventory/push', async (req, res) => {
   const {
     location = 'Warehouse',
     dry_run = true,
@@ -1323,7 +1322,7 @@ router.post('/inventory/push', requireAdmin, async (req, res) => {
  * GET /amazon/stats
  * Get Amazon-specific statistics including sales dashboard data
  */
-router.get('/stats', requireAdmin, async (req, res) => {
+router.get('/stats', async (req, res) => {
   try {
     // Get order counts by status
     const { data: orderStats } = await supabase

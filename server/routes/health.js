@@ -5,7 +5,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireStaff } from '../middleware/auth.js';
 import royalMailClient from '../services/royalMail.js';
 
 const router = express.Router();
@@ -18,7 +17,7 @@ const router = express.Router();
  * - Last demand model trained_at
  * - Last Royal Mail batch outcome
  */
-router.get('/system', requireStaff, async (req, res) => {
+router.get('/system', async (req, res) => {
   const { days_back = 30 } = req.query;
   const lookbackDate = new Date();
   lookbackDate.setDate(lookbackDate.getDate() - parseInt(days_back));
@@ -199,7 +198,7 @@ router.get('/system', requireStaff, async (req, res) => {
  * GET /health/events
  * Get recent system events for the timeline view
  */
-router.get('/events', requireStaff, async (req, res) => {
+router.get('/events', async (req, res) => {
   const { limit = 50, event_type, severity } = req.query;
 
   try {

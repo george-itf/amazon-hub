@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import { auditLog, getAuditContext, recordSystemEvent } from '../services/audit.js';
 import { fingerprintTitle, normalizeAsin, normalizeSku } from '../utils/identityNormalization.js';
 import crypto from 'crypto';
@@ -190,7 +189,7 @@ router.get('/:id', async (req, res) => {
  * Optionally save as a rule for future automatic resolution
  * ADMIN only
  */
-router.post('/:id/resolve', requireAdmin, async (req, res) => {
+router.post('/:id/resolve', async (req, res) => {
   const { id } = req.params;
   const { bom_id, save_as_rule = false, identity_overrides, note } = req.body;
 
@@ -437,7 +436,7 @@ router.post('/:id/resolve', requireAdmin, async (req, res) => {
  * POST /review/:id/skip
  * Skip a review item (mark as skipped, can be revisited)
  */
-router.post('/:id/skip', requireStaff, async (req, res) => {
+router.post('/:id/skip', async (req, res) => {
   const { id } = req.params;
   const { note } = req.body;
 
@@ -479,7 +478,7 @@ router.post('/:id/skip', requireStaff, async (req, res) => {
  * Put a skipped or resolved item back in the queue
  * ADMIN only
  */
-router.post('/:id/requeue', requireAdmin, async (req, res) => {
+router.post('/:id/requeue', async (req, res) => {
   const { id } = req.params;
 
   try {

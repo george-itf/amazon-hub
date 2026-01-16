@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import { resolveListing, resolveListingWithDetails } from '../utils/memoryResolution.js';
 import { normalizeAsin, normalizeSku, fingerprintTitle } from '../utils/identityNormalization.js';
 import { parseTitle, compareIntents, suggestComponents } from '../utils/deterministicParser.js';

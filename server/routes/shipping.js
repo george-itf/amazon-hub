@@ -7,7 +7,6 @@ import supabase from '../services/supabase.js';
 import royalMailClient, { SERVICE_CODES } from '../services/royalMail.js';
 import spApiClient from '../services/spApi.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import { recordSystemEvent } from '../services/audit.js';
 import { processBatch, withRetry } from '../utils/queueThrottle.js';
 import { createShopifyFulfillment } from '../services/shopify.js';
@@ -77,7 +76,7 @@ router.get('/services', (req, res) => {
  * GET /shipping/orders/ready
  * Get orders ready to ship (picked but not shipped)
  */
-router.get('/orders/ready', requireStaff, async (req, res) => {
+router.get('/orders/ready', async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('orders')
@@ -139,7 +138,7 @@ router.get('/orders/ready', requireStaff, async (req, res) => {
  * POST /shipping/label/create
  * Create a shipping label via Royal Mail Click & Drop
  */
-router.post('/label/create', requireStaff, async (req, res) => {
+router.post('/label/create', async (req, res) => {
   const { orderId, serviceCode = 'TPN' } = req.body;
 
   if (!orderId) {
@@ -207,7 +206,7 @@ router.post('/label/create', requireStaff, async (req, res) => {
  * POST /shipping/sync-tracking
  * Sync tracking numbers from Royal Mail and confirm on Amazon
  */
-router.post('/sync-tracking', requireAdmin, async (req, res) => {
+router.post('/sync-tracking', async (req, res) => {
   const { daysBack = 7, autoConfirmAmazon = true } = req.body;
 
   if (!royalMailClient.isConfigured()) {
@@ -310,7 +309,7 @@ router.post('/sync-tracking', requireAdmin, async (req, res) => {
  * POST /shipping/confirm/:orderId
  * Manually confirm shipment with tracking
  */
-router.post('/confirm/:orderId', requireStaff, async (req, res) => {
+router.post('/confirm/:orderId', async (req, res) => {
   const { orderId } = req.params;
   const { trackingNumber, carrierCode = 'Royal Mail', confirmOnAmazon = true } = req.body;
 
@@ -395,7 +394,7 @@ router.post('/confirm/:orderId', requireStaff, async (req, res) => {
  * POST /shipping/confirm-bulk
  * Bulk confirm shipments with tracking numbers
  */
-router.post('/confirm-bulk', requireStaff, async (req, res) => {
+router.post('/confirm-bulk', async (req, res) => {
   const { shipments, confirmOnAmazon = true } = req.body;
 
   if (!Array.isArray(shipments) || shipments.length === 0) {
@@ -494,7 +493,7 @@ router.post('/confirm-bulk', requireStaff, async (req, res) => {
  * GET /shipping/tracking/:orderId
  * Get tracking info for an order
  */
-router.get('/tracking/:orderId', requireStaff, async (req, res) => {
+router.get('/tracking/:orderId', async (req, res) => {
   const { orderId } = req.params;
 
   try {
@@ -525,7 +524,7 @@ router.get('/tracking/:orderId', requireStaff, async (req, res) => {
  * Batch create shipping labels via Royal Mail Click & Drop
  * Supports dry_run mode for cost simulation
  */
-router.post('/batch-create', requireStaff, async (req, res) => {
+router.post('/batch-create', async (req, res) => {
   const { order_ids, dry_run = false, service_code } = req.body;
 
   if (!Array.isArray(order_ids) || order_ids.length === 0) {
@@ -862,7 +861,7 @@ router.post('/batch-create', requireStaff, async (req, res) => {
  * Validates selected orders and returns preflight summary
  * Returns: { eligible_count, ineligible_orders: [], estimated_cost_pence, warnings: [] }
  */
-router.post('/batch-validate', requireStaff, async (req, res) => {
+router.post('/batch-validate', async (req, res) => {
   const { order_ids, service_code } = req.body;
 
   if (!Array.isArray(order_ids) || order_ids.length === 0) {
@@ -1012,7 +1011,7 @@ router.post('/batch-validate', requireStaff, async (req, res) => {
  * GET /shipping/batches
  * Get recent batch operations from system_events
  */
-router.get('/batches', requireStaff, async (req, res) => {
+router.get('/batches', async (req, res) => {
   const { limit = 20 } = req.query;
 
   try {
@@ -1051,7 +1050,7 @@ router.get('/batches', requireStaff, async (req, res) => {
  * GET /shipping/labels
  * Get shipping labels with optional filters
  */
-router.get('/labels', requireStaff, async (req, res) => {
+router.get('/labels', async (req, res) => {
   const { order_id, status, limit = 50 } = req.query;
 
   try {
@@ -1095,7 +1094,7 @@ router.get('/labels', requireStaff, async (req, res) => {
  * GET /shipping/today-cost
  * Get today's total shipping cost
  */
-router.get('/today-cost', requireStaff, async (req, res) => {
+router.get('/today-cost', async (req, res) => {
   try {
     const today = new Date();
     today.setHours(0, 0, 0, 0);

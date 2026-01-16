@@ -11,7 +11,6 @@ import express from 'express';
 import fetch from 'node-fetch';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireStaff } from '../middleware/auth.js';
 import {
   getActiveDemandModel,
   predictUnitsPerDayFromMetrics,
@@ -359,7 +358,7 @@ function determineSuggestedAction(result) {
 // POST /asin/analyze - Multi-ASIN Batch Analysis
 // ============================================================================
 
-router.post('/analyze', requireStaff, async (req, res) => {
+router.post('/analyze', async (req, res) => {
   const {
     asins = [],
     location = 'Warehouse',
@@ -733,7 +732,7 @@ router.post('/analyze', requireStaff, async (req, res) => {
 // GET /asin/bom-candidates - BOM Suggestions for ASIN
 // ============================================================================
 
-router.get('/bom-candidates', requireStaff, async (req, res) => {
+router.get('/bom-candidates', async (req, res) => {
   const { asin, title: providedTitle } = req.query;
 
   if (!asin) {
@@ -809,7 +808,7 @@ router.get('/bom-candidates', requireStaff, async (req, res) => {
 // POST /asin/reverse-search - Find Opportunities from Component
 // ============================================================================
 
-router.post('/reverse-search', requireStaff, async (req, res) => {
+router.post('/reverse-search', async (req, res) => {
   const {
     component_id,
     location = 'Warehouse',

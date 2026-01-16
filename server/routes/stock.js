@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin } from '../middleware/auth.js';
 import { requireIdempotencyKey } from '../middleware/idempotency.js';
 import { auditLog, getAuditContext } from '../services/audit.js';
 
@@ -12,7 +11,7 @@ const router = express.Router();
  * Receive stock for a component at a location
  * ADMIN only, requires idempotency key
  */
-router.post('/receive', requireAdmin, requireIdempotencyKey, async (req, res) => {
+router.post('/receive', requireIdempotencyKey, async (req, res) => {
   const { component_id, location = 'Warehouse', qty, note } = req.body;
 
   if (!component_id) {
@@ -67,7 +66,7 @@ router.post('/receive', requireAdmin, requireIdempotencyKey, async (req, res) =>
  * Adjust stock for a component (damage, shrink, correction)
  * ADMIN only, requires idempotency key
  */
-router.post('/adjust', requireAdmin, requireIdempotencyKey, async (req, res) => {
+router.post('/adjust', requireIdempotencyKey, async (req, res) => {
   const { component_id, location = 'Warehouse', on_hand_delta, reason, note } = req.body;
   const idempotencyKey = req.headers['idempotency-key'];
 
@@ -271,7 +270,7 @@ router.get('/:componentId/movements', async (req, res) => {
  * Undo a stock adjustment within 2-minute window
  * ADMIN only
  */
-router.post('/undo/:movementId', requireAdmin, async (req, res) => {
+router.post('/undo/:movementId', async (req, res) => {
   const { movementId } = req.params;
   const UNDO_WINDOW_MS = 2 * 60 * 1000; // 2 minutes
 

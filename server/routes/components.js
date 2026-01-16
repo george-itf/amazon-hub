@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import { auditLog, getAuditContext } from '../services/audit.js';
 
 const router = express.Router();
@@ -187,7 +186,7 @@ router.get('/:id', async (req, res) => {
  * Create a new component
  * ADMIN only
  */
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', async (req, res) => {
   const { internal_sku, description, brand, cost_ex_vat_pence, weight_grams } = req.body;
 
   if (!internal_sku) {
@@ -236,7 +235,7 @@ router.post('/', requireAdmin, async (req, res) => {
  * Update a component
  * ADMIN only
  */
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { description, brand, cost_ex_vat_pence, weight_grams, is_active } = req.body;
 
