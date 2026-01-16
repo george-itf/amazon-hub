@@ -808,12 +808,6 @@ export default function AsinAnalyzerPage() {
 
               {/* Actions */}
               <InlineStack gap="200">
-                <Button
-                  variant="primary"
-                  disabled={!selectedResult.actions?.can_create_listing_memory}
-                >
-                  Create Listing Mapping
-                </Button>
                 <Button>Add to Review Queue</Button>
               </InlineStack>
             </BlockStack>

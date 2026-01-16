@@ -960,13 +960,6 @@ export async function getAmazonListings(params = {}) {
   return request(`/amazon/listings${query ? `?${query}` : ''}`);
 }
 
-export async function mapAmazonListing(asin, bomId) {
-  return request(`/amazon/listings/${asin}/map`, {
-    method: 'POST',
-    body: { bomId },
-  });
-}
-
 export async function getSchedulerStatus() {
   return request('/amazon/scheduler/status');
 }

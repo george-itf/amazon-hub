@@ -342,12 +342,6 @@ export default function AmazonListingsPage() {
   const [removeBomModal, setRemoveBomModal] = useState({ open: false });
   const [removingBom, setRemovingBom] = useState(false);
 
-  // Create mapping rule modal
-  const [createModal, setCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState({ asin: '', sku: '', title: '', bom_id: '' });
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState(null);
-
   // Load data
   async function load() {
     setLoading(true);
@@ -853,33 +847,6 @@ export default function AmazonListingsPage() {
     }
   }
 
-  // Create mapping rule
-  async function handleCreateMapping() {
-    setCreating(true);
-    setCreateError(null);
-    try {
-      if (!createForm.asin && !createForm.sku && !createForm.title) {
-        setCreateError('Please provide at least one identifier (ASIN, SKU, or Title)');
-        setCreating(false);
-        return;
-      }
-      await createListing({
-        asin: createForm.asin || null,
-        sku: createForm.sku || null,
-        title: createForm.title || null,
-        bom_id: createForm.bom_id || null,
-      });
-      setSuccessMessage(`Mapping rule created for ${createForm.asin || createForm.sku || 'title'}`);
-      setCreateForm({ asin: '', sku: '', title: '', bom_id: '' });
-      setCreateModal(false);
-      await load();
-    } catch (err) {
-      setCreateError(err?.message || 'Failed to create mapping');
-    } finally {
-      setCreating(false);
-    }
-  }
-
   // Handle saved view save
   const handleSaveView = useCallback(async (name, isShared) => {
     try {
@@ -904,11 +871,6 @@ export default function AmazonListingsPage() {
     <Page
       title="Amazon Listings"
       subtitle={`${stats.total} listings - ${stats.withBom} with BOM - ${stats.withOverrides} with overrides`}
-      primaryAction={{
-        content: 'Add Mapping Rule',
-        onAction: () => setCreateModal(true),
-        icon: PlusIcon,
-      }}
       secondaryActions={[
         { content: 'Refresh', onAction: load, icon: RefreshIcon },
       ]}
@@ -1030,11 +992,7 @@ export default function AmazonListingsPage() {
           // Empty state
           emptyState={{
             heading: 'No listings found',
-            description: 'Try adjusting your search or filters, or add a mapping rule.',
-            action: {
-              content: 'Add Mapping Rule',
-              onAction: () => setCreateModal(true),
-            },
+            description: 'Try adjusting your search or filters.',
           }}
 
           // URL sync
@@ -1153,63 +1111,6 @@ export default function AmazonListingsPage() {
               </p>
             </Banner>
             <Text variant="bodyMd">Are you sure you want to proceed?</Text>
-          </BlockStack>
-        </Modal.Section>
-      </Modal>
-
-      {/* Create Mapping Rule Modal */}
-      <Modal
-        open={createModal}
-        onClose={() => setCreateModal(false)}
-        title="Add Mapping Rule"
-        primaryAction={{
-          content: 'Create',
-          onAction: handleCreateMapping,
-          loading: creating,
-          disabled: !createForm.bom_id || (!createForm.asin && !createForm.sku && !createForm.title),
-        }}
-        secondaryActions={[{ content: 'Cancel', onAction: () => setCreateModal(false) }]}
-      >
-        <Modal.Section>
-          <BlockStack gap="400">
-            {createError && (
-              <Banner tone="critical" onDismiss={() => setCreateError(null)}>
-                <p>{createError}</p>
-              </Banner>
-            )}
-            <Banner tone="info">
-              <p>Create a mapping rule to link an Amazon ASIN/SKU to a BOM. Orders matching these identifiers will be automatically resolved.</p>
-            </Banner>
-            <FormLayout>
-              <TextField
-                label="ASIN"
-                value={createForm.asin}
-                onChange={(v) => setCreateForm(f => ({ ...f, asin: v }))}
-                placeholder="e.g., B08N5WRWNW"
-                autoComplete="off"
-              />
-              <TextField
-                label="SKU"
-                value={createForm.sku}
-                onChange={(v) => setCreateForm(f => ({ ...f, sku: v }))}
-                placeholder="e.g., INV-TOOL-001"
-                autoComplete="off"
-              />
-              <TextField
-                label="Title"
-                value={createForm.title}
-                onChange={(v) => setCreateForm(f => ({ ...f, title: v }))}
-                placeholder="Product title for fuzzy matching"
-                multiline={2}
-              />
-              <Select
-                label="BOM Assignment"
-                options={bomOptions}
-                value={createForm.bom_id}
-                onChange={(v) => setCreateForm(f => ({ ...f, bom_id: v }))}
-                helpText="Assign the BOM that defines what components are in this product"
-              />
-            </FormLayout>
           </BlockStack>
         </Modal.Section>
       </Modal>
