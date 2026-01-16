@@ -85,19 +85,19 @@ export default function LoginPage() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      backgroundColor: '#F6F6F7',
-      padding: '20px',
+      backgroundColor: 'var(--hub-bg)',
+      padding: 'var(--hub-space-lg)',
     }}>
       <div style={{ maxWidth: '400px', width: '100%' }}>
         <BlockStack gap="400">
           {/* Logo/Header */}
-          <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+          <div style={{ textAlign: 'center', marginBottom: 'var(--hub-space-md)' }}>
             <div style={{
               width: '60px',
               height: '60px',
-              backgroundColor: '#F26522',
-              borderRadius: '12px',
-              margin: '0 auto 16px',
+              backgroundColor: 'var(--hub-primary)',
+              borderRadius: 'var(--hub-radius-lg)',
+              margin: '0 auto var(--hub-space-md)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

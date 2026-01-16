@@ -209,11 +209,11 @@ export default function ShippingPage() {
       }}
     >
       <Layout>
-        {/* Status Cards */}
+        {/* Status Cards - Using design system */}
         <Layout.Section>
-          <InlineStack gap="400" wrap>
+          <div className="hub-grid hub-grid--3">
             {/* API Status Card */}
-            <Card>
+            <div className={`hub-stat-card ${apiStatus.connected ? 'hub-stat-card--success' : 'hub-stat-card--critical'}`}>
               <BlockStack gap="200">
                 <InlineStack gap="200" align="center">
                   {apiStatus.connected ? (
@@ -227,10 +227,10 @@ export default function ShippingPage() {
                   {apiStatus.connected ? 'Connected' : apiStatus.configured ? 'Disconnected' : 'Not Configured'}
                 </Badge>
               </BlockStack>
-            </Card>
+            </div>
 
             {/* Last Batch Card */}
-            <Card>
+            <div className="hub-stat-card">
               <BlockStack gap="200">
                 <Text variant="headingSm">Last Batch</Text>
                 {lastBatch ? (
@@ -247,10 +247,10 @@ export default function ShippingPage() {
                   <Text variant="bodySm" tone="subdued">No batches yet</Text>
                 )}
               </BlockStack>
-            </Card>
+            </div>
 
             {/* Today's Cost Card */}
-            <Card>
+            <div className="hub-stat-card">
               <BlockStack gap="200">
                 <Text variant="headingSm">Today's Shipping</Text>
                 <Text variant="headingLg" fontWeight="bold">
@@ -260,8 +260,8 @@ export default function ShippingPage() {
                   {todayCost.label_count} labels
                 </Text>
               </BlockStack>
-            </Card>
-          </InlineStack>
+            </div>
+          </div>
         </Layout.Section>
 
         {/* Error Banner */}

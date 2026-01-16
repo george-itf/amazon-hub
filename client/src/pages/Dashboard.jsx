@@ -159,7 +159,7 @@ function AlertItem({ type, title, description, action, onAction }) {
 }
 
 /**
- * Order Row Component
+ * Order Row Component - Uses design system CSS variables
  */
 function OrderRow({ order, onClick }) {
   const isToday = order.order_date &&
@@ -172,15 +172,22 @@ function OrderRow({ order, onClick }) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '12px 16px',
-        backgroundColor: isToday ? '#F0FDF4' : '#FAFAFA',
-        borderRadius: '8px',
+        padding: 'var(--hub-space-sm) var(--hub-space-md)',
+        backgroundColor: isToday ? 'var(--hub-success-light)' : 'var(--hub-bg)',
+        borderRadius: 'var(--hub-radius-md)',
+        border: '1px solid var(--hub-border)',
         cursor: 'pointer',
-        transition: 'background-color 0.15s ease',
-        marginBottom: '8px',
+        transition: 'all var(--hub-transition-fast)',
+        marginBottom: 'var(--hub-space-sm)',
       }}
-      onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#F3F4F6'}
-      onMouseOut={(e) => e.currentTarget.style.backgroundColor = isToday ? '#F0FDF4' : '#FAFAFA'}
+      onMouseOver={(e) => {
+        e.currentTarget.style.backgroundColor = 'var(--hub-surface-hover)';
+        e.currentTarget.style.borderColor = 'var(--hub-border-strong)';
+      }}
+      onMouseOut={(e) => {
+        e.currentTarget.style.backgroundColor = isToday ? 'var(--hub-success-light)' : 'var(--hub-bg)';
+        e.currentTarget.style.borderColor = 'var(--hub-border)';
+      }}
     >
       <BlockStack gap="100">
         <InlineStack gap="200" blockAlign="center">
@@ -249,73 +256,46 @@ function PulseTicker({ data, loading }) {
       <BlockStack gap="400">
         <InlineStack align="space-between">
           <Text variant="headingMd" fontWeight="bold">Pulse</Text>
-          <Badge tone="info">Live</Badge>
+          <Badge tone="success">Live</Badge>
         </InlineStack>
 
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '16px',
-        }}>
-          {/* Today */}
-          <div style={{
-            padding: '16px',
-            backgroundColor: '#F0FDF4',
-            borderRadius: '8px',
-            textAlign: 'center',
-          }}>
+        <div className="hub-grid hub-grid--3">
+          {/* Today - Primary highlight */}
+          <div className="hub-stat-card hub-stat-card--success" style={{ textAlign: 'center' }}>
             <BlockStack gap="200" inlineAlign="center">
               <Text variant="bodySm" tone="subdued">Today</Text>
-              <Text variant="headingLg" fontWeight="bold">
+              <Text variant="headingXl" fontWeight="bold">
                 {formatPrice(revenue?.today || 0)}
               </Text>
-              <InlineStack gap="100" blockAlign="center">
-                <Text variant="bodySm" tone="success">
-                  +{formatPrice(estimated_profit?.today || 0)} profit
-                </Text>
-              </InlineStack>
+              <Badge tone="success">+{formatPrice(estimated_profit?.today || 0)} profit</Badge>
               <Text variant="bodySm" tone="subdued">{orders?.today || 0} orders</Text>
             </BlockStack>
           </div>
 
           {/* This Week */}
-          <div style={{
-            padding: '16px',
-            backgroundColor: '#EFF6FF',
-            borderRadius: '8px',
-            textAlign: 'center',
-          }}>
+          <div className="hub-stat-card" style={{ textAlign: 'center' }}>
             <BlockStack gap="200" inlineAlign="center">
               <Text variant="bodySm" tone="subdued">This Week</Text>
               <Text variant="headingLg" fontWeight="bold">
                 {formatPrice(revenue?.week || 0)}
               </Text>
-              <InlineStack gap="100" blockAlign="center">
-                <Text variant="bodySm" tone="success">
-                  +{formatPrice(estimated_profit?.week || 0)} profit
-                </Text>
-              </InlineStack>
+              <Text variant="bodySm" tone="success">
+                +{formatPrice(estimated_profit?.week || 0)} profit
+              </Text>
               <Text variant="bodySm" tone="subdued">{orders?.week || 0} orders</Text>
             </BlockStack>
           </div>
 
           {/* This Month */}
-          <div style={{
-            padding: '16px',
-            backgroundColor: '#FEF3C7',
-            borderRadius: '8px',
-            textAlign: 'center',
-          }}>
+          <div className="hub-stat-card" style={{ textAlign: 'center' }}>
             <BlockStack gap="200" inlineAlign="center">
               <Text variant="bodySm" tone="subdued">This Month</Text>
               <Text variant="headingLg" fontWeight="bold">
                 {formatPrice(revenue?.month || 0)}
               </Text>
-              <InlineStack gap="100" blockAlign="center">
-                <Text variant="bodySm" tone="success">
-                  +{formatPrice(estimated_profit?.month || 0)} profit
-                </Text>
-              </InlineStack>
+              <Text variant="bodySm" tone="success">
+                +{formatPrice(estimated_profit?.month || 0)} profit
+              </Text>
               <Text variant="bodySm" tone="subdued">{orders?.month || 0} orders</Text>
             </BlockStack>
           </div>
@@ -346,14 +326,14 @@ function StockHeatmap({ data, loading, onClick }) {
 
   const { components, buckets, summary } = data;
 
-  // Get bucket color
+  // Get bucket color using design system variables
   const getBucketColor = (bucket) => {
     switch (bucket) {
-      case 'critical': return '#DC2626'; // Red
-      case 'low': return '#F59E0B';      // Orange
-      case 'medium': return '#3B82F6';   // Blue
-      case 'healthy': return '#10B981';  // Green
-      default: return '#9CA3AF';
+      case 'critical': return 'var(--hub-critical)';
+      case 'low': return 'var(--hub-warning)';
+      case 'medium': return 'var(--hub-info)';
+      case 'healthy': return 'var(--hub-success)';
+      default: return 'var(--hub-text-muted)';
     }
   };
 
@@ -421,19 +401,19 @@ function StockHeatmap({ data, loading, onClick }) {
         {/* Legend */}
         <InlineStack gap="400" align="center">
           <InlineStack gap="100" blockAlign="center">
-            <div style={{ width: '12px', height: '12px', backgroundColor: '#DC2626', borderRadius: '2px' }} />
+            <div style={{ width: '12px', height: '12px', backgroundColor: 'var(--hub-critical)', borderRadius: 'var(--hub-radius-sm)' }} />
             <Text variant="bodySm">0-7d</Text>
           </InlineStack>
           <InlineStack gap="100" blockAlign="center">
-            <div style={{ width: '12px', height: '12px', backgroundColor: '#F59E0B', borderRadius: '2px' }} />
+            <div style={{ width: '12px', height: '12px', backgroundColor: 'var(--hub-warning)', borderRadius: 'var(--hub-radius-sm)' }} />
             <Text variant="bodySm">7-14d</Text>
           </InlineStack>
           <InlineStack gap="100" blockAlign="center">
-            <div style={{ width: '12px', height: '12px', backgroundColor: '#3B82F6', borderRadius: '2px' }} />
+            <div style={{ width: '12px', height: '12px', backgroundColor: 'var(--hub-info)', borderRadius: 'var(--hub-radius-sm)' }} />
             <Text variant="bodySm">14-30d</Text>
           </InlineStack>
           <InlineStack gap="100" blockAlign="center">
-            <div style={{ width: '12px', height: '12px', backgroundColor: '#10B981', borderRadius: '2px' }} />
+            <div style={{ width: '12px', height: '12px', backgroundColor: 'var(--hub-success)', borderRadius: 'var(--hub-radius-sm)' }} />
             <Text variant="bodySm">30+d</Text>
           </InlineStack>
         </InlineStack>
@@ -673,11 +653,7 @@ export default function Dashboard() {
         )}
 
         {/* Sales Metrics Row - Uses same data source as Pulse for consistency */}
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          gap: '16px',
-        }}>
+        <div className="hub-grid hub-grid--4">
           <MetricCard
             title="Today's Orders"
             value={pulseData?.orders?.today || 0}
@@ -719,37 +695,37 @@ export default function Dashboard() {
             </InlineStack>
             <div style={{
               display: 'flex',
-              gap: '12px',
+              gap: 'var(--hub-space-sm)',
               alignItems: 'stretch',
             }}>
               <PipelineStage
                 label="Needs Review"
                 count={reviewCount}
-                color="#D97706"
+                color="var(--hub-warning)"
                 active={reviewCount > 0}
                 onClick={() => navigate('/listings?tab=review')}
               />
-              <div style={{ display: 'flex', alignItems: 'center', color: '#9CA3AF' }}>→</div>
+              <div style={{ display: 'flex', alignItems: 'center', color: 'var(--hub-text-muted)' }}>→</div>
               <PipelineStage
                 label="Ready to Pick"
                 count={pendingCount}
-                color="#2563EB"
+                color="var(--hub-info)"
                 active={pendingCount > 0}
                 onClick={() => navigate('/shipping')}
               />
-              <div style={{ display: 'flex', alignItems: 'center', color: '#9CA3AF' }}>→</div>
+              <div style={{ display: 'flex', alignItems: 'center', color: 'var(--hub-text-muted)' }}>→</div>
               <PipelineStage
                 label="Picked"
                 count={pickedCount}
-                color="#7C3AED"
+                color="var(--hub-primary)"
                 active={pickedCount > 0}
                 onClick={() => navigate('/shipping')}
               />
-              <div style={{ display: 'flex', alignItems: 'center', color: '#9CA3AF' }}>→</div>
+              <div style={{ display: 'flex', alignItems: 'center', color: 'var(--hub-text-muted)' }}>→</div>
               <PipelineStage
                 label="Shipped Today"
                 count={shippedToday}
-                color="#059669"
+                color="var(--hub-success)"
                 active={false}
                 onClick={() => navigate('/shipping')}
               />
@@ -780,12 +756,13 @@ export default function Dashboard() {
                 {readyToPick.length === 0 ? (
                   <div style={{
                     textAlign: 'center',
-                    padding: '40px 20px',
-                    backgroundColor: '#F9FAFB',
-                    borderRadius: '8px',
+                    padding: 'var(--hub-space-2xl) var(--hub-space-lg)',
+                    backgroundColor: 'var(--hub-bg)',
+                    borderRadius: 'var(--hub-radius-md)',
+                    border: '1px dashed var(--hub-border)',
                   }}>
                     <BlockStack gap="200" inlineAlign="center">
-                      <div style={{ color: '#10B981' }}>
+                      <div style={{ color: 'var(--hub-success)' }}>
                         <Icon source={CheckCircleIcon} />
                       </div>
                       <Text variant="headingMd">All caught up!</Text>

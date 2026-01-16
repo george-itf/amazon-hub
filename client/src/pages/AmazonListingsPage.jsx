@@ -615,33 +615,33 @@ export default function AmazonListingsPage() {
           </Banner>
         )}
 
-        {/* Stats Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
-          <Card>
+        {/* Stats Cards - Using design system */}
+        <div className="hub-grid hub-grid--4">
+          <div className="hub-stat-card">
             <BlockStack gap="200">
               <Text variant="bodySm" tone="subdued">Total Listings</Text>
               <Text variant="headingLg" fontWeight="bold">{stats.total}</Text>
             </BlockStack>
-          </Card>
-          <Card>
+          </div>
+          <div className="hub-stat-card hub-stat-card--success">
             <BlockStack gap="200">
-              <Text variant="bodySm" tone="subdued">With BOM</Text>
+              <Text variant="bodySm" tone="subdued">Recipe Assigned</Text>
               <Text variant="headingLg" fontWeight="bold" tone="success">{stats.withBom}</Text>
               <ProgressBar progress={stats.total ? (stats.withBom / stats.total) * 100 : 0} tone="success" size="small" />
             </BlockStack>
-          </Card>
-          <Card>
+          </div>
+          <div className="hub-stat-card">
             <BlockStack gap="200">
               <Text variant="bodySm" tone="subdued">Active</Text>
               <Text variant="headingLg" fontWeight="bold">{stats.active}</Text>
             </BlockStack>
-          </Card>
-          <Card>
+          </div>
+          <div className="hub-stat-card">
             <BlockStack gap="200">
               <Text variant="bodySm" tone="subdued">With Overrides</Text>
               <Text variant="headingLg" fontWeight="bold">{stats.withOverrides}</Text>
             </BlockStack>
-          </Card>
+          </div>
         </div>
 
         {/* Custom Tabs */}
@@ -650,24 +650,38 @@ export default function AmazonListingsPage() {
             <Tabs tabs={tabs} selected={selectedTabIndex} onSelect={setSelectedTabIndex} />
 
             {customTabs.length > 0 && (
-              <InlineStack gap="200">
-                <Text variant="bodySm" tone="subdued">Custom tabs:</Text>
+              <InlineStack gap="200" blockAlign="center">
+                <Text variant="bodySm" tone="subdued">Custom filters:</Text>
                 {customTabs.map((tab, index) => (
-                  <Badge key={index} tone="info">
-                    {tab.name}
+                  <div
+                    key={index}
+                    className="hub-stat-card"
+                    style={{
+                      padding: 'var(--hub-space-xs) var(--hub-space-sm)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 'var(--hub-space-xs)',
+                    }}
+                  >
+                    <Text variant="bodySm">{tab.name}</Text>
                     <button
                       onClick={() => handleRemoveTab(index)}
                       style={{
                         background: 'none',
                         border: 'none',
                         cursor: 'pointer',
-                        marginLeft: '4px',
-                        color: '#666',
+                        padding: '2px 4px',
+                        color: 'var(--hub-text-secondary)',
+                        borderRadius: 'var(--hub-radius-sm)',
+                        fontSize: '14px',
+                        lineHeight: 1,
                       }}
+                      onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--hub-critical-light)'}
+                      onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                     >
                       ×
                     </button>
-                  </Badge>
+                  </div>
                 ))}
               </InlineStack>
             )}

@@ -88,29 +88,33 @@ function formatDaysAgo(dateStr) {
 }
 
 /**
- * KPI Card Component
+ * KPI Card Component - Uses design system
  */
 function KPICard({ title, value, subtitle, tone, icon, onClick }) {
+  const toneToClass = {
+    success: 'hub-stat-card--success',
+    warning: 'hub-stat-card--warning',
+    critical: 'hub-stat-card--critical',
+  };
+
   return (
-    <Card>
-      <div
-        style={{ cursor: onClick ? 'pointer' : 'default' }}
-        onClick={onClick}
-      >
-        <BlockStack gap="200">
-          <InlineStack align="space-between" blockAlign="center">
-            <Text variant="bodySm" tone="subdued">{title}</Text>
-            {icon && <Icon source={icon} tone="subdued" />}
-          </InlineStack>
-          <Text variant="heading2xl" fontWeight="bold" tone={tone}>
-            {value}
-          </Text>
-          {subtitle && (
-            <Text variant="bodySm" tone="subdued">{subtitle}</Text>
-          )}
-        </BlockStack>
-      </div>
-    </Card>
+    <div
+      className={`hub-stat-card ${onClick ? 'hub-stat-card--clickable' : ''} ${toneToClass[tone] || ''}`}
+      onClick={onClick}
+    >
+      <BlockStack gap="200">
+        <InlineStack align="space-between" blockAlign="center">
+          <Text variant="bodySm" tone="subdued">{title}</Text>
+          {icon && <Icon source={icon} tone="subdued" />}
+        </InlineStack>
+        <Text variant="heading2xl" fontWeight="bold" tone={tone}>
+          {value}
+        </Text>
+        {subtitle && (
+          <Text variant="bodySm" tone="subdued">{subtitle}</Text>
+        )}
+      </BlockStack>
+    </div>
   );
 }
 

@@ -459,36 +459,40 @@ export default function InventoryPage() {
           </Banner>
         )}
 
-        {/* Stats Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
-          <Card>
+        {/* Stats Cards - Using design system grid and stat card styles */}
+        <div className="hub-grid hub-grid--4">
+          <div className="hub-stat-card">
             <BlockStack gap="200">
               <Text variant="bodySm" tone="subdued">Total Items</Text>
               <Text variant="headingLg" fontWeight="bold">{stats.total}</Text>
+              <Text variant="bodySm" tone="subdued">{formatPrice(stats.totalValue)} value</Text>
             </BlockStack>
-          </Card>
-          <Card>
+          </div>
+          <div className="hub-stat-card hub-stat-card--success">
             <BlockStack gap="200">
               <Text variant="bodySm" tone="subdued">In Stock</Text>
               <Text variant="headingLg" fontWeight="bold" tone="success">{stats.inStock}</Text>
+              <Text variant="bodySm" tone="subdued">10+ units available</Text>
             </BlockStack>
-          </Card>
-          <Card>
+          </div>
+          <div className="hub-stat-card hub-stat-card--warning">
             <BlockStack gap="200">
               <Text variant="bodySm" tone="subdued">Low Stock</Text>
               <Text variant="headingLg" fontWeight="bold" tone={stats.lowStock > 0 ? 'caution' : undefined}>
                 {stats.lowStock}
               </Text>
+              <Text variant="bodySm" tone="subdued">1-10 units remaining</Text>
             </BlockStack>
-          </Card>
-          <Card>
+          </div>
+          <div className="hub-stat-card hub-stat-card--critical">
             <BlockStack gap="200">
               <Text variant="bodySm" tone="subdued">Out of Stock</Text>
               <Text variant="headingLg" fontWeight="bold" tone={stats.outOfStock > 0 ? 'critical' : undefined}>
                 {stats.outOfStock}
               </Text>
+              <Text variant="bodySm" tone="subdued">Need restocking</Text>
             </BlockStack>
-          </Card>
+          </div>
         </div>
 
         {/* Custom Tabs */}
@@ -498,26 +502,40 @@ export default function InventoryPage() {
               {/* Tab content handled below */}
             </Tabs>
 
-            {/* Tab removal buttons for custom tabs */}
+            {/* Tab removal buttons for custom tabs - Using Tag pattern for removable items */}
             {customTabs.length > 0 && (
-              <InlineStack gap="200">
-                <Text variant="bodySm" tone="subdued">Custom tabs:</Text>
+              <InlineStack gap="200" blockAlign="center">
+                <Text variant="bodySm" tone="subdued">Custom filters:</Text>
                 {customTabs.map((tab, index) => (
-                  <Badge key={index} tone="info">
-                    {tab.name}
+                  <div
+                    key={index}
+                    className="hub-stat-card"
+                    style={{
+                      padding: 'var(--hub-space-xs) var(--hub-space-sm)',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 'var(--hub-space-xs)',
+                    }}
+                  >
+                    <Text variant="bodySm">{tab.name}</Text>
                     <button
                       onClick={() => handleRemoveTab(index)}
                       style={{
                         background: 'none',
                         border: 'none',
                         cursor: 'pointer',
-                        marginLeft: '4px',
-                        color: '#666',
+                        padding: '2px 4px',
+                        color: 'var(--hub-text-secondary)',
+                        borderRadius: 'var(--hub-radius-sm)',
+                        fontSize: '14px',
+                        lineHeight: 1,
                       }}
+                      onMouseOver={(e) => e.currentTarget.style.backgroundColor = 'var(--hub-critical-light)'}
+                      onMouseOut={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                     >
                       ×
                     </button>
-                  </Badge>
+                  </div>
                 ))}
               </InlineStack>
             )}

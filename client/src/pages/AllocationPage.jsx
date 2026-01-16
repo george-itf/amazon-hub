@@ -72,23 +72,23 @@ function KPICard({ title, value, subtitle, tone, icon }) {
 }
 
 /**
- * Pool Selection Card Component
+ * Pool Selection Card Component - Uses design system
  */
 function PoolCard({ pool, selected, onSelect }) {
   const isLowStock = pool.available < 10;
   const isOutOfStock = pool.available === 0;
 
+  const statusClass = isOutOfStock
+    ? 'hub-stat-card--critical'
+    : isLowStock
+      ? 'hub-stat-card--warning'
+      : '';
+
   return (
     <div
       onClick={() => onSelect(pool)}
-      style={{
-        padding: '12px',
-        border: `2px solid ${selected ? 'var(--p-color-border-emphasis)' : 'var(--p-color-border-secondary)'}`,
-        borderRadius: '8px',
-        cursor: 'pointer',
-        backgroundColor: selected ? 'var(--p-color-bg-surface-secondary)' : 'transparent',
-        transition: 'all 0.15s ease',
-      }}
+      className={`hub-stat-card hub-stat-card--clickable ${selected ? 'hub-stat-card--highlighted' : ''} ${statusClass}`}
+      style={{ marginBottom: 'var(--hub-space-sm)' }}
     >
       <BlockStack gap="200">
         <InlineStack align="space-between" blockAlign="center">
@@ -103,7 +103,7 @@ function PoolCard({ pool, selected, onSelect }) {
           </Text>
         )}
         <InlineStack gap="200">
-          <Badge tone="info">{pool.bom_count} BOMs</Badge>
+          <Badge tone="info">{pool.bom_count} recipes</Badge>
           <Text variant="bodySm" tone="subdued">
             {pool.boms?.slice(0, 3).map(b => b.bundle_sku).join(', ')}
             {pool.boms?.length > 3 ? ` +${pool.boms.length - 3} more` : ''}
