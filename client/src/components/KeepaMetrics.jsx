@@ -12,6 +12,7 @@ import {
   ProgressBar,
 } from '@shopify/polaris';
 import { getKeepaProduct, getKeepaMetrics, getKeepaStatus } from '../utils/api.jsx';
+import { logError } from '../utils/errorLogger.js';
 
 /**
  * Extract current value from Keepa CSV array
@@ -632,7 +633,7 @@ export function KeepaStatusCard() {
         const data = await getKeepaStatus();
         setStatus(data);
       } catch (err) {
-        console.error('Failed to load Keepa status:', err);
+        logError('Failed to load Keepa status', err);
       } finally {
         setLoading(false);
       }
