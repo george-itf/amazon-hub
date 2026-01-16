@@ -962,6 +962,18 @@ export async function getAmazonListings(params = {}) {
   return request(`/amazon/listings${query ? `?${query}` : ''}`);
 }
 
+export async function getAmazonListingDetails(sku) {
+  return request(`/amazon/listing/${encodeURIComponent(sku)}/details`);
+}
+
+export async function syncAmazonPricing(listingIds = [], limit = 50) {
+  return request('/amazon/listings/sync-pricing', {
+    method: 'POST',
+    body: { listing_ids: listingIds, limit },
+    timeout: 120000, // 2 minute timeout for pricing sync
+  });
+}
+
 export async function getSchedulerStatus() {
   return request('/amazon/scheduler/status');
 }
