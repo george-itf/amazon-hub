@@ -13,7 +13,7 @@ import supabase from './supabase.js';
 
 // Keepa API configuration
 const KEEPA_API_BASE = 'https://api.keepa.com';
-const KEEPA_TOKENS_PER_PRODUCT = 1;
+export const KEEPA_TOKENS_PER_PRODUCT = 1;
 
 // Cache tracking for metrics
 let cacheStats = {
