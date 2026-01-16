@@ -379,6 +379,36 @@ export default function AmazonListingsPage() {
 
   // Component search state for BOM editor
   const [componentSearchQuery, setComponentSearchQuery] = useState('');
+  const [componentSearchResults, setComponentSearchResults] = useState([]);
+  const [searchingComponents, setSearchingComponents] = useState(false);
+  const debouncedComponentSearch = useDebounce(componentSearchQuery, 300);
+
+  // Search components when query changes (server-side search)
+  useEffect(() => {
+    async function searchComponents() {
+      if (!debouncedComponentSearch || debouncedComponentSearch.length < 2) {
+        setComponentSearchResults([]);
+        return;
+      }
+
+      setSearchingComponents(true);
+      try {
+        const data = await getComponents({
+          active_only: 'false',
+          search: debouncedComponentSearch,
+          limit: 50,
+        });
+        setComponentSearchResults(data.components || []);
+      } catch (err) {
+        console.error('Component search failed:', err);
+        setComponentSearchResults([]);
+      } finally {
+        setSearchingComponents(false);
+      }
+    }
+
+    searchComponents();
+  }, [debouncedComponentSearch]);
 
   // Load data
   async function load() {
@@ -389,7 +419,7 @@ export default function AmazonListingsPage() {
         getListings(),
         getBoms(),
         getShippingOptions().catch(() => ({ options: [] })),
-        getComponents({ active_only: 'false', limit: 5000 }).catch(() => ({ components: [] })),
+        getComponents({ active_only: 'false', limit: 100 }).catch(() => ({ components: [] })),
       ]);
       setListings(listingData.listings || []);
       setBoms(bomData.boms || []);
@@ -726,8 +756,17 @@ export default function AmazonListingsPage() {
 
   // Add component to BOM
   function handleAddComponent(componentId) {
-    const component = components.find(c => c.id === componentId);
+    // Check both pre-loaded components and search results
+    let component = components.find(c => c.id === componentId);
+    if (!component) {
+      component = componentSearchResults.find(c => c.id === componentId);
+    }
     if (!component) return;
+
+    // Add component to components state if not already there (for cost calculations)
+    if (!components.find(c => c.id === componentId)) {
+      setComponents(prev => [...prev, component]);
+    }
 
     setDetailForm(prev => ({
       ...prev,
@@ -1275,7 +1314,21 @@ export default function AmazonListingsPage() {
               {/* BOM Components */}
               <BlockStack gap="400">
                 <InlineStack align="space-between" blockAlign="center">
-                  <Text variant="headingSm">Bill of Materials</Text>
+                  <BlockStack gap="100">
+                    <Text variant="headingSm">Bill of Materials</Text>
+                    {detailForm.bom_components.length > 0 && (() => {
+                      const totalCost = detailForm.bom_components.reduce((sum, bc) => {
+                        const component = components.find(c => c.id === bc.component_id);
+                        const cost = component?.cost_ex_vat_pence || 0;
+                        return sum + (cost * bc.qty_required);
+                      }, 0);
+                      return (
+                        <Text variant="bodySm" tone="subdued">
+                          {detailForm.bom_components.length} component{detailForm.bom_components.length !== 1 ? 's' : ''} • Total Cost: {formatPrice(totalCost)}
+                        </Text>
+                      );
+                    })()}
+                  </BlockStack>
                   {detailForm.bom_components.length > 0 && (
                     <Badge tone="info">{detailForm.bom_components.length} component{detailForm.bom_components.length !== 1 ? 's' : ''}</Badge>
                   )}
@@ -1296,6 +1349,16 @@ export default function AmazonListingsPage() {
                               <BlockStack gap="100">
                                 <Text variant="bodyMd" fontWeight="semibold">{bc.internal_sku}</Text>
                                 <Text variant="bodySm" tone="subdued">{bc.description}</Text>
+                                {(() => {
+                                  const component = components.find(c => c.id === bc.component_id);
+                                  const unitCost = component?.cost_ex_vat_pence || 0;
+                                  const totalCost = unitCost * bc.qty_required;
+                                  return (
+                                    <Text variant="bodySm" tone="subdued">
+                                      {formatPrice(unitCost)} each × {bc.qty_required} = {formatPrice(totalCost)}
+                                    </Text>
+                                  );
+                                })()}
                               </BlockStack>
                             </div>
                             <InlineStack gap="200" blockAlign="center">
@@ -1330,29 +1393,28 @@ export default function AmazonListingsPage() {
                     label="Search & Add Components"
                     value={componentSearchQuery}
                     onChange={setComponentSearchQuery}
-                    placeholder="Search by SKU or description..."
+                    placeholder="Search by SKU, description, or brand (min 2 chars)..."
                     autoComplete="off"
                     clearButton
-                    onClearButtonClick={() => setComponentSearchQuery('')}
+                    onClearButtonClick={() => {
+                      setComponentSearchQuery('');
+                      setComponentSearchResults([]);
+                    }}
                   />
 
-                  {componentSearchQuery && (
+                  {componentSearchQuery && componentSearchQuery.length >= 2 && (
                     <Card>
-                      <BlockStack gap="200">
-                        {components
-                          .filter(c => {
-                            // Filter out already added components
-                            if (detailForm.bom_components.some(bc => bc.component_id === c.id)) return false;
-                            // Search filter
-                            const query = componentSearchQuery.toLowerCase();
-                            return (
-                              c.internal_sku?.toLowerCase().includes(query) ||
-                              c.description?.toLowerCase().includes(query) ||
-                              c.brand?.toLowerCase().includes(query)
-                            );
-                          })
-                          .slice(0, 20)
-                          .map((c, index) => (
+                      {searchingComponents ? (
+                        <div style={{ padding: '24px', textAlign: 'center' }}>
+                          <Spinner size="small" />
+                          <Text variant="bodySm" tone="subdued">Searching all components...</Text>
+                        </div>
+                      ) : (
+                        <BlockStack gap="200">
+                          {componentSearchResults
+                            .filter(c => !detailForm.bom_components.some(bc => bc.component_id === c.id))
+                            .slice(0, 20)
+                            .map((c, index) => (
                             <div key={c.id}>
                               {index > 0 && <Divider />}
                               <div
@@ -1392,36 +1454,26 @@ export default function AmazonListingsPage() {
                               </div>
                             </div>
                           ))}
-                        {components.filter(c => {
-                          if (detailForm.bom_components.some(bc => bc.component_id === c.id)) return false;
-                          const query = componentSearchQuery.toLowerCase();
-                          return (
-                            c.internal_sku?.toLowerCase().includes(query) ||
-                            c.description?.toLowerCase().includes(query) ||
-                            c.brand?.toLowerCase().includes(query)
-                          );
-                        }).length === 0 && (
-                          <div style={{ padding: '12px', textAlign: 'center' }}>
-                            <Text variant="bodySm" tone="subdued">No components found</Text>
-                          </div>
-                        )}
-                        {components.filter(c => {
-                          if (detailForm.bom_components.some(bc => bc.component_id === c.id)) return false;
-                          const query = componentSearchQuery.toLowerCase();
-                          return (
-                            c.internal_sku?.toLowerCase().includes(query) ||
-                            c.description?.toLowerCase().includes(query) ||
-                            c.brand?.toLowerCase().includes(query)
-                          );
-                        }).length > 20 && (
-                          <div style={{ padding: '12px', textAlign: 'center' }}>
-                            <Text variant="bodySm" tone="subdued">
-                              Showing first 20 results. Keep typing to narrow down...
-                            </Text>
-                          </div>
-                        )}
-                      </BlockStack>
+                          {componentSearchResults.filter(c => !detailForm.bom_components.some(bc => bc.component_id === c.id)).length === 0 && (
+                            <div style={{ padding: '12px', textAlign: 'center' }}>
+                              <Text variant="bodySm" tone="subdued">No components found matching "{componentSearchQuery}"</Text>
+                            </div>
+                          )}
+                          {componentSearchResults.filter(c => !detailForm.bom_components.some(bc => bc.component_id === c.id)).length > 20 && (
+                            <div style={{ padding: '12px', textAlign: 'center' }}>
+                              <Text variant="bodySm" tone="subdued">
+                                Showing first 20 results. Keep typing to narrow down...
+                              </Text>
+                            </div>
+                          )}
+                        </BlockStack>
+                      )}
                     </Card>
+                  )}
+                  {componentSearchQuery && componentSearchQuery.length < 2 && (
+                    <Text variant="bodySm" tone="subdued">
+                      Type at least 2 characters to search all 2000+ components
+                    </Text>
                   )}
                 </BlockStack>
 
