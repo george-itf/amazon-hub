@@ -39,8 +39,8 @@ CREATE INDEX IF NOT EXISTS idx_component_stock_on_hand ON component_stock(on_han
 -- Active components filtering
 CREATE INDEX IF NOT EXISTS idx_components_is_active ON components(is_active);
 
--- SKU lookups
-CREATE INDEX IF NOT EXISTS idx_components_sku ON components(sku);
+-- SKU lookups (column is internal_sku, not sku)
+CREATE INDEX IF NOT EXISTS idx_components_internal_sku ON components(internal_sku);
 
 -- ============================================
 -- BOMs table indexes
@@ -111,15 +111,14 @@ CREATE INDEX IF NOT EXISTS idx_system_events_created_at ON system_events(created
 CREATE INDEX IF NOT EXISTS idx_system_events_event_type ON system_events(event_type);
 
 -- ============================================
--- Demand Model tables indexes
+-- Keepa Demand Model tables indexes
 -- ============================================
 
--- Active model lookup
-CREATE INDEX IF NOT EXISTS idx_demand_models_is_active ON demand_models(is_active);
+-- Active model lookup (table is keepa_demand_model_runs, not demand_models)
+CREATE INDEX IF NOT EXISTS idx_keepa_demand_model_runs_is_active ON keepa_demand_model_runs(is_active);
 
--- Forecast lookups by model and component
-CREATE INDEX IF NOT EXISTS idx_demand_forecasts_model_id ON demand_forecasts(model_id);
-CREATE INDEX IF NOT EXISTS idx_demand_forecasts_component_id ON demand_forecasts(component_id);
+-- ASIN features cache lookup by date
+CREATE INDEX IF NOT EXISTS idx_keepa_demand_asin_features_date ON keepa_demand_model_asin_features_cache(date DESC);
 
 -- ============================================
 -- Partial indexes for common filter patterns
