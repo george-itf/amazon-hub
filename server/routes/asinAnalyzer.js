@@ -48,8 +48,12 @@ async function fetchFromKeepaApi(asins) {
     const asinList = asins.join(',');
     const url = `${KEEPA_API_BASE}/product?key=${apiKey}&domain=${KEEPA_DOMAIN_UK}&asin=${asinList}&stats=1&offers=20`;
 
-    console.log(`[AsinAnalyzer] Fetching ${asins.length} ASINs from Keepa API`);
+    console.log(`[AsinAnalyzer] Fetching ${asins.length} ASINs from Keepa API:`, asins);
+    console.log(`[AsinAnalyzer] Keepa URL: ${KEEPA_API_BASE}/product?key=***&domain=${KEEPA_DOMAIN_UK}&asin=${asinList}&stats=1&offers=20`);
+
     const response = await fetch(url);
+
+    console.log(`[AsinAnalyzer] Keepa response status: ${response.status}`);
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -59,7 +63,15 @@ async function fetchFromKeepaApi(asins) {
 
     const data = await response.json();
 
+    console.log(`[AsinAnalyzer] Keepa response data:`, {
+      productsCount: data.products?.length || 0,
+      tokensConsumed: data.tokensConsumed || 0,
+      hasError: !!data.error,
+      errorMessage: data.error || null
+    });
+
     if (!data.products || data.products.length === 0) {
+      console.warn('[AsinAnalyzer] Keepa returned no products');
       return { products: {}, tokensUsed: data.tokensConsumed || 0 };
     }
 
@@ -603,13 +615,18 @@ router.post('/analyze', async (req, res) => {
       let profitPence = null;
       let feesPence = null;
 
-      if (pricePence && cogsPence > 0) {
+      // Calculate fees if we have a price (even without COGS)
+      if (pricePence) {
         feesPence = Math.round(pricePence * feeRate);
-        profitPence = pricePence - cogsPence - feesPence;
-        marginPercent = (profitPence / pricePence) * 100;
+
+        // Only calculate profit and margin if we have COGS
+        if (cogsPence > 0) {
+          profitPence = pricePence - cogsPence - feesPence;
+          marginPercent = (profitPence / pricePence) * 100;
+        }
       }
 
-      // Calculate min prices for margins
+      // Calculate min prices for margins (only if we have COGS)
       const minPrice10 = cogsPence > 0
         ? calculateTargetPrice({
             costPence: cogsPence,
