@@ -16,7 +16,9 @@ export {
   InvictaLoading,
   InvictaPageLoading,
   InvictaTableLoading,
-  InvictaInlineLoading
+  InvictaInlineLoading,
+  InvictaStatCardLoading,
+  InvictaDashboardLoading
 } from './InvictaLoading.jsx';
 export { InvictaTimeline, InvictaActivityFeed } from './InvictaTimeline.jsx';
 

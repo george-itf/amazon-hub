@@ -75,4 +75,48 @@ export function InvictaInlineLoading({ size = 'small' }) {
   );
 }
 
+/**
+ * InvictaStatCardLoading - Loading skeleton for stat/KPI cards
+ */
+export function InvictaStatCardLoading({ count = 4 }) {
+  return (
+    <div className="hub-grid hub-grid--4" style={{ gap: 'var(--hub-space-md)' }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <Card key={i}>
+          <BlockStack gap="200">
+            <SkeletonBodyText lines={1} />
+            <SkeletonDisplayText size="medium" />
+            <SkeletonBodyText lines={1} />
+          </BlockStack>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * InvictaDashboardLoading - Full dashboard skeleton with stats and charts
+ */
+export function InvictaDashboardLoading() {
+  return (
+    <BlockStack gap="400">
+      <InvictaStatCardLoading count={4} />
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 'var(--hub-space-md)' }}>
+        <Card>
+          <BlockStack gap="200">
+            <SkeletonDisplayText size="small" />
+            <div style={{ height: '200px', background: 'var(--hub-bg-secondary)', borderRadius: 'var(--hub-radius-md)' }} />
+          </BlockStack>
+        </Card>
+        <Card>
+          <BlockStack gap="200">
+            <SkeletonDisplayText size="small" />
+            <SkeletonBodyText lines={6} />
+          </BlockStack>
+        </Card>
+      </div>
+    </BlockStack>
+  );
+}
+
 export default InvictaLoading;
