@@ -80,7 +80,7 @@ router.post('/analyze', requireStaff, async (req, res) => {
         const apiKey = process.env.KEEPA_API_KEY;
         if (apiKey) {
           try {
-            const keepaUrl = `https://api.keepa.com/product?key=${apiKey}&domain=${settings.domain_id || 3}&asin=${asin.toUpperCase()}`;
+            const keepaUrl = `https://api.keepa.com/product?key=${apiKey}&domain=${settings.domain_id || 2}&asin=${asin.toUpperCase()}`;
             const response = await fetch(keepaUrl);
             const data = await response.json();
 

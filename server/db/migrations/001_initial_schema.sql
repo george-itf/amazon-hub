@@ -434,7 +434,7 @@ CREATE INDEX IF NOT EXISTS idx_return_lines_disposition ON return_lines(disposit
 -- Keepa Products Cache
 CREATE TABLE IF NOT EXISTS keepa_products_cache (
   asin text PRIMARY KEY,
-  domain_id integer NOT NULL DEFAULT 3,
+  domain_id integer NOT NULL DEFAULT 2,  -- UK (amazon.co.uk)
   payload_json jsonb,
   fetched_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL,
@@ -494,7 +494,7 @@ INSERT INTO keepa_settings (setting_key, setting_value) VALUES
   ('max_tokens_per_day', '6000'),
   ('min_reserve', '200'),
   ('min_refresh_minutes', '720'),
-  ('domain_id', '3')
+  ('domain_id', '2')  -- UK (amazon.co.uk)
 ON CONFLICT (setting_key) DO NOTHING;
 
 -- ============================================================================

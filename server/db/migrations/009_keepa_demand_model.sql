@@ -6,7 +6,7 @@
 -- Model training runs (audit + rollback capability)
 CREATE TABLE IF NOT EXISTS keepa_demand_model_runs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  domain_id integer NOT NULL DEFAULT 3,
+  domain_id integer NOT NULL DEFAULT 2,  -- UK (amazon.co.uk)
   model_name text NOT NULL DEFAULT 'rank_loglinear_ridge_v1',
   lookback_days integer NOT NULL,
   trained_from date NOT NULL,

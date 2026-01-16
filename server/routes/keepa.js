@@ -26,7 +26,7 @@ async function getKeepaSettings() {
       max_tokens_per_day: 6000,
       min_reserve: 200,
       min_refresh_minutes: 720,
-      domain_id: 3
+      domain_id: 2  // UK (amazon.co.uk)
     };
   }
 

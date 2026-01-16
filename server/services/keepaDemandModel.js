@@ -31,7 +31,7 @@ const DEFAULT_SETTINGS = {
   demand_model_lookback_days: '60',
   demand_model_min_asins: '50',
   demand_model_ridge_lambda: '1',
-  domain_id: '3',
+  domain_id: '2',  // UK (amazon.co.uk)
 };
 
 // ============================================================================
@@ -60,7 +60,7 @@ export async function getDemandModelSettings() {
       lookbackDays: parseInt(settings.demand_model_lookback_days, 10) || 60,
       minAsins: parseInt(settings.demand_model_min_asins, 10) || 50,
       ridgeLambda: parseFloat(settings.demand_model_ridge_lambda) || 1,
-      domainId: parseInt(settings.domain_id, 10) || 3,
+      domainId: parseInt(settings.domain_id, 10) || 2,  // UK default
     };
   } catch (err) {
     console.error('[DemandModel] Failed to load settings:', err);
@@ -70,7 +70,7 @@ export async function getDemandModelSettings() {
       lookbackDays: 60,
       minAsins: 50,
       ridgeLambda: 1,
-      domainId: 3,
+      domainId: 2,  // UK (amazon.co.uk)
     };
   }
 }
@@ -78,7 +78,7 @@ export async function getDemandModelSettings() {
 /**
  * Get active demand model for a domain
  */
-export async function getActiveDemandModel(domainId = 3) {
+export async function getActiveDemandModel(domainId = 2) {  // UK default
   try {
     const { data, error } = await supabase
       .from('keepa_demand_model_runs')
@@ -315,14 +315,14 @@ async function buildTrainingData(domainId, lookbackDays) {
  * Train a new demand model run
  *
  * @param {Object} options
- * @param {number} options.domainId - Keepa domain ID (default: 3 = UK)
+ * @param {number} options.domainId - Keepa domain ID (default: 2 = UK amazon.co.uk)
  * @param {number} options.lookbackDays - Days to look back for training
  * @param {number} options.ridgeLambda - Ridge regularization parameter
  * @param {number} options.minAsins - Minimum ASINs required to train
  * @returns {Object} - Training result with model info and metrics
  */
 export async function trainDemandModelRun({
-  domainId = 3,
+  domainId = 2,  // UK (amazon.co.uk)
   lookbackDays = 60,
   ridgeLambda = 1,
   minAsins = 50,

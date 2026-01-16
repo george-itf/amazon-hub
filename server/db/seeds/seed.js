@@ -233,7 +233,7 @@ async function seed() {
       { setting_key: 'max_tokens_per_day', setting_value: '6000' },
       { setting_key: 'min_reserve', setting_value: '200' },
       { setting_key: 'min_refresh_minutes', setting_value: '720' },
-      { setting_key: 'domain_id', setting_value: '3' }, // UK
+      { setting_key: 'domain_id', setting_value: '2' }, // UK (amazon.co.uk)
     ];
 
     for (const setting of keepaSettings) {
