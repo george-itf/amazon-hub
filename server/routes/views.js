@@ -53,48 +53,64 @@ router.get('/', async (req, res) => {
   const userId = getUserId(req);
 
   try {
-    // Build query to get user's views + shared views
+    // First, check if user_id column exists (for migration compatibility)
+    const { data: columnCheck, error: columnError } = await supabase
+      .from('ui_views')
+      .select('*')
+      .limit(1);
+
+    const hasUserIdColumn = columnCheck && columnCheck.length > 0 ? 'user_id' in columnCheck[0] : false;
+    const hasPageColumn = columnCheck && columnCheck.length > 0 ? 'page' in columnCheck[0] : false;
+    const contextColumn = hasPageColumn ? 'page' : 'context';
+
+    // Build query based on schema
     let query = supabase
       .from('ui_views')
-      .select(`
-        id,
-        user_id,
-        page,
-        name,
-        filters,
-        columns,
-        sort,
-        is_shared,
-        is_default,
-        sort_order,
-        created_by,
-        created_at,
-        updated_at
-      `)
-      .eq('page', page);
+      .select('*')
+      .eq(contextColumn, page);
 
-    // If user is authenticated, get their views + shared views
-    // Otherwise, only get shared views
-    if (userId) {
-      query = query.or(`user_id.eq.${userId},is_shared.eq.true`);
-    } else {
-      query = query.eq('is_shared', true);
+    // Filter by user_id and is_shared only if columns exist
+    if (hasUserIdColumn) {
+      if (userId) {
+        query = query.or(`user_id.eq.${userId},is_shared.eq.true`);
+      } else {
+        query = query.eq('is_shared', true);
+      }
     }
 
     const { data, error } = await query.order('sort_order', { ascending: true });
 
     if (error) {
       console.error('Views fetch error:', error);
-      return errors.internal(res, 'Failed to fetch views');
+      // Return empty views array instead of failing
+      return sendSuccess(res, {
+        views: [{
+          id: null,
+          name: 'All',
+          filters: {},
+          config: {},
+          columns: [],
+          sort: {},
+          is_default: true,
+          is_shared: false,
+          is_owner: false,
+          sort_order: -1,
+        }],
+        personal_views: [],
+        shared_views: [],
+        page,
+        context: page,
+      });
     }
 
     // Transform data: add is_owner flag and map legacy 'config' to 'filters'
     const views = (data || []).map(view => ({
       ...view,
-      is_owner: userId ? view.user_id === userId : false,
+      page: view.page || view.context,  // Handle both column names
+      is_owner: hasUserIdColumn && userId ? view.user_id === userId : false,
       // Legacy support: expose filters as both 'filters' and 'config'
-      config: view.filters || {},
-      filters: view.filters || {}
+      config: view.filters || view.config || {},
+      filters: view.filters || view.config || {}
     }));
 
     // Separate personal and shared views
@@ -125,7 +141,25 @@ router.get('/', async (req, res) => {
     });
   } catch (err) {
     console.error('Views fetch error:', err);
-    errors.internal(res, 'Failed to fetch views');
+    // Return empty views array with "All" view as fallback
+    sendSuccess(res, {
+      views: [{
+        id: null,
+        name: 'All',
+        filters: {},
+        config: {},
+        columns: [],
+        sort: {},
+        is_default: true,
+        is_shared: false,
+        is_owner: false,
+        sort_order: -1,
+      }],
+      personal_views: [],
+      shared_views: [],
+      page,
+      context: page,
+    });
   }
 });
 
