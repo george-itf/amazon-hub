@@ -93,7 +93,29 @@ async function logKeepaRequest(endpoint, asinsCount, tokensEstimated, status, to
 }
 
 /**
+ * Record Keepa account balance from API response
+ * Tracks tokensLeft for monitoring actual Keepa account status
+ */
+async function recordAccountBalance(data, endpoint) {
+  try {
+    if (data.tokensLeft !== undefined) {
+      await supabase.from('keepa_account_balance').insert({
+        tokens_left: data.tokensLeft,
+        refill_rate: data.refillRate || null,
+        refill_in_ms: data.refillIn || null,
+        token_flow_reduction: data.tokenFlowReduction || null,
+        request_endpoint: endpoint,
+      });
+    }
+  } catch (err) {
+    // Non-critical, just log
+    console.error('Failed to record Keepa account balance:', err.message);
+  }
+}
+
+/**
  * Fetch product from Keepa API
+ * Uses &stats=90 parameter (free) for additional price statistics
  */
 async function fetchFromKeepa(asins, domainId) {
   const apiKey = process.env.KEEPA_API_KEY;
@@ -102,7 +124,8 @@ async function fetchFromKeepa(asins, domainId) {
   }
 
   const asinList = Array.isArray(asins) ? asins.join(',') : asins;
-  const url = `${KEEPA_API_BASE}/product?key=${apiKey}&domain=${domainId}&asin=${asinList}`;
+  // Added &stats=90 for free price statistics (min/max/avg over 90 days)
+  const url = `${KEEPA_API_BASE}/product?key=${apiKey}&domain=${domainId}&asin=${asinList}&stats=90`;
 
   const startTime = Date.now();
   const response = await fetch(url);
@@ -113,7 +136,18 @@ async function fetchFromKeepa(asins, domainId) {
   }
 
   const data = await response.json();
-  return { data, latencyMs, tokensSpent: data.tokensConsumed || asins.length };
+
+  // Record account balance for monitoring
+  await recordAccountBalance(data, '/product');
+
+  return {
+    data,
+    latencyMs,
+    tokensSpent: data.tokensConsumed || asins.length,
+    tokensLeft: data.tokensLeft,
+    refillRate: data.refillRate,
+    refillIn: data.refillIn,
+  };
 }
 
 /**
@@ -162,7 +196,7 @@ router.get('/product/:asin', async (req, res) => {
 
     // Fetch from Keepa
     try {
-      const { data, latencyMs, tokensSpent } = await fetchFromKeepa([asin.toUpperCase()], settings.domain_id);
+      const { data, latencyMs, tokensSpent, tokensLeft } = await fetchFromKeepa([asin.toUpperCase()], settings.domain_id);
 
       await logKeepaRequest('/product', 1, KEEPA_TOKENS_PER_PRODUCT, 'SUCCESS', tokensSpent, latencyMs);
 
@@ -191,7 +225,8 @@ router.get('/product/:asin', async (req, res) => {
         fetched_at: new Date().toISOString(),
         expires_at: expiresAt.toISOString(),
         from_cache: false,
-        tokens_spent: tokensSpent
+        tokens_spent: tokensSpent,
+        tokens_left: tokensLeft,  // Actual Keepa account balance
       });
     } catch (fetchError) {
       await logKeepaRequest('/product', 1, KEEPA_TOKENS_PER_PRODUCT, 'FAILED', null, null, fetchError.message);
@@ -240,7 +275,7 @@ router.post('/refresh', requireAdmin, async (req, res) => {
 
     // Fetch from Keepa
     const normalizedAsins = asins.map(a => a.toUpperCase());
-    const { data, latencyMs, tokensSpent } = await fetchFromKeepa(normalizedAsins, settings.domain_id);
+    const { data, latencyMs, tokensSpent, tokensLeft } = await fetchFromKeepa(normalizedAsins, settings.domain_id);
 
     await logKeepaRequest('/refresh', asins.length, tokensNeeded, 'SUCCESS', tokensSpent, latencyMs);
 
@@ -290,6 +325,7 @@ router.post('/refresh', requireAdmin, async (req, res) => {
     sendSuccess(res, {
       refreshed: results.length,
       tokens_spent: tokensSpent,
+      tokens_left: tokensLeft,  // Actual Keepa account balance
       results
     });
   } catch (err) {
@@ -335,6 +371,7 @@ router.get('/metrics/:asin', async (req, res) => {
 /**
  * GET /keepa/status
  * Get Keepa integration status (no secrets)
+ * Includes actual Keepa account balance from API responses
  */
 router.get('/status', async (req, res) => {
   try {
@@ -361,6 +398,15 @@ router.get('/status', async (req, res) => {
       .order('requested_at', { ascending: false })
       .limit(1);
 
+    // Get latest Keepa account balance from API responses
+    const { data: latestBalance } = await supabase
+      .from('keepa_account_balance')
+      .select('*')
+      .order('recorded_at', { ascending: false })
+      .limit(1);
+
+    const accountBalance = latestBalance?.[0] || null;
+
     sendSuccess(res, {
       configured: !!process.env.KEEPA_API_KEY,
       domain_id: settings.domain_id,
@@ -373,6 +419,14 @@ router.get('/status', async (req, res) => {
         tokens_remaining_hour: settings.max_tokens_per_hour - tokensSpentHour,
         tokens_remaining_day: settings.max_tokens_per_day - tokensSpentDay
       },
+      // Actual Keepa account balance from API responses
+      account: accountBalance ? {
+        tokens_left: accountBalance.tokens_left,
+        refill_rate: accountBalance.refill_rate,
+        refill_in_ms: accountBalance.refill_in_ms,
+        token_flow_reduction: accountBalance.token_flow_reduction,
+        last_updated: accountBalance.recorded_at,
+      } : null,
       cache: {
         total_products: cacheCount || 0,
         stale_products: staleCount || 0,
@@ -431,17 +485,25 @@ router.put('/settings', requireAdmin, async (req, res) => {
 });
 
 // ============================================================================
-// KEEPA CSV INDEX MAPPING (aligned with profit.js usage)
+// KEEPA CSV INDEX MAPPING (aligned with Keepa API documentation)
 // ============================================================================
-// Keepa CSV array indices:
-//   csv[0]  = Amazon price
-//   csv[1]  = New 3rd party (marketplace new) price
-//   csv[2]  = Used price
-//   csv[3]  = Sales Rank
-//   csv[11] = New offer count
-//   csv[16] = Rating (multiply by 10 in Keepa format)
-//   csv[17] = Review count
-//   csv[18] = Buy Box price
+// Keepa CSV array indices (price types):
+//   csv[0]  = AMAZON: Amazon price
+//   csv[1]  = NEW: Marketplace New price (combined FBA+FBM)
+//   csv[2]  = USED: Marketplace Used price
+//   csv[3]  = SALES: Sales Rank
+//   csv[7]  = NEW_FBM_SHIPPING: FBM price with shipping
+//   csv[10] = NEW_FBA: FBA-specific price (for margin analysis)
+//   csv[11] = COUNT_NEW: New offer count
+//   csv[16] = RATING: Rating (multiply by 10 in Keepa format, e.g., 45 = 4.5 stars)
+//   csv[17] = COUNT_REVIEWS: Review count
+//   csv[18] = BUY_BOX_SHIPPING: Buy Box price with shipping
+//
+// Stats object (from &stats=90 parameter - FREE):
+//   stats.current[18] = Current Buy Box price
+//   stats.min[18]     = Minimum Buy Box price over period
+//   stats.max[18]     = Maximum Buy Box price over period
+//   stats.avg[18]     = Average Buy Box price over period
 // ============================================================================
 
 /**
@@ -517,9 +579,14 @@ function latestRatingFromCsv(csvArray) {
  * - new 3P price: csv[1]
  * - used price: csv[2]
  * - sales rank: csv[3]
+ * - fba price: csv[10] (NEW_FBA - for margin analysis)
+ * - fbm price: csv[7] (NEW_FBM_SHIPPING)
  * - offer count: csv[11]
  * - rating: csv[16]
  * - review count: csv[17]
+ *
+ * Also extracts stats from &stats=90 parameter (free):
+ * - stats.min[18], stats.max[18], stats.avg[18] for Buy Box price statistics
  */
 async function storeKeepaMetrics(asin, product) {
   try {
@@ -527,6 +594,7 @@ async function storeKeepaMetrics(asin, product) {
 
     const today = new Date().toISOString().split('T')[0];
     const csv = product.csv;
+    const stats = product.stats || {};
 
     // Extract buybox price with fallback to Amazon price (matching profit.js behavior)
     const buyboxPrice = latestPriceFromCsv(csv[18]) || latestPriceFromCsv(csv[0]);
@@ -542,6 +610,15 @@ async function storeKeepaMetrics(asin, product) {
       offer_count: latestIntFromCsv(csv[11]),
       rating: latestRatingFromCsv(csv[16]),
       review_count: latestIntFromCsv(csv[17]),
+      // FBA-specific pricing for margin analysis (csv[10] = NEW_FBA)
+      fba_price_pence: latestPriceFromCsv(csv[10]),
+      // FBM pricing with shipping (csv[7] = NEW_FBM_SHIPPING)
+      fbm_price_pence: latestPriceFromCsv(csv[7]),
+      // Stats from &stats=90 parameter (free) - Buy Box price statistics
+      // Index 18 = BUY_BOX_SHIPPING price type
+      stats_min_price_90d: stats.min?.[18] > 0 ? stats.min[18] : null,
+      stats_max_price_90d: stats.max?.[18] > 0 ? stats.max[18] : null,
+      stats_avg_price_90d: stats.avg?.[18] > 0 ? Math.round(stats.avg[18]) : null,
     };
 
     await supabase.from('keepa_metrics_daily').upsert(metrics);

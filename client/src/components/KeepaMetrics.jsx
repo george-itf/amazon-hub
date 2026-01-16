@@ -27,12 +27,17 @@ function extractLatestFromCsv(csvArray) {
 
 /**
  * Transform raw Keepa product data to usable format
- * Keepa CSV indices: 0=Amazon, 1=New, 2=Used, 3=SalesRank, 11=OfferCount, 16=Rating, 17=Reviews, 18=BuyBox
+ * Keepa CSV indices:
+ *   0=Amazon, 1=New, 2=Used, 3=SalesRank, 7=FBM+Shipping, 10=FBA
+ *   11=OfferCount, 16=Rating, 17=Reviews, 18=BuyBox
+ * Stats object (from &stats=90):
+ *   stats.min[18], stats.max[18], stats.avg[18] for Buy Box price statistics
  */
 function transformKeepaData(rawData) {
   if (!rawData) return null;
 
   const csv = rawData.csv || [];
+  const stats = rawData.stats || {};
 
   return {
     title: rawData.title || null,
@@ -41,6 +46,10 @@ function transformKeepaData(rawData) {
     buybox_price_pence: extractLatestFromCsv(csv[18]) || extractLatestFromCsv(csv[0]),
     amazon_price_pence: extractLatestFromCsv(csv[0]),
     new_price_pence: extractLatestFromCsv(csv[1]),
+    // FBA-specific price for margin analysis (csv[10] = NEW_FBA)
+    fba_price_pence: extractLatestFromCsv(csv[10]),
+    // FBM price with shipping (csv[7] = NEW_FBM_SHIPPING)
+    fbm_price_pence: extractLatestFromCsv(csv[7]),
     sales_rank: extractLatestFromCsv(csv[3]),
     offer_count: extractLatestFromCsv(csv[11]),
     rating: extractLatestFromCsv(csv[16]) ? extractLatestFromCsv(csv[16]) / 10 : null,
@@ -48,6 +57,10 @@ function transformKeepaData(rawData) {
     image_url: rawData.imagesCSV
       ? `https://images-na.ssl-images-amazon.com/images/I/${rawData.imagesCSV.split(',')[0]}`
       : null,
+    // Price statistics from &stats=90 parameter (free)
+    stats_min_price_90d: stats.min?.[18] > 0 ? stats.min[18] : null,
+    stats_max_price_90d: stats.max?.[18] > 0 ? stats.max[18] : null,
+    stats_avg_price_90d: stats.avg?.[18] > 0 ? Math.round(stats.avg[18]) : null,
   };
 }
 
@@ -500,6 +513,18 @@ export default function KeepaMetrics({ asin, showCharts = true, compact = false 
                 Amazon: {formatPrice(payload.amazon_price_pence)}
               </Text>
             )}
+            {/* FBA-specific price for margin analysis */}
+            {payload.fba_price_pence && (
+              <Text variant="bodySm" tone="subdued">
+                FBA: {formatPrice(payload.fba_price_pence)}
+              </Text>
+            )}
+            {/* 90-day price range from stats */}
+            {payload.stats_min_price_90d && payload.stats_max_price_90d && (
+              <Text variant="bodySm" tone="subdued">
+                90d range: {formatPrice(payload.stats_min_price_90d)} - {formatPrice(payload.stats_max_price_90d)}
+              </Text>
+            )}
           </BlockStack>
 
           {/* Sales Rank */}
@@ -683,6 +708,24 @@ export function KeepaStatusCard() {
             size="small"
           />
         </BlockStack>
+
+        {/* Keepa Account Balance (from API responses) */}
+        {status.account && (
+          <>
+            <Divider />
+            <BlockStack gap="100">
+              <InlineStack align="space-between">
+                <Text variant="bodySm" tone="subdued">Keepa Account Balance</Text>
+                <Text variant="bodySm" fontWeight="semibold">{status.account.tokens_left?.toLocaleString()} tokens</Text>
+              </InlineStack>
+              {status.account.refill_rate && (
+                <Text variant="bodySm" tone="subdued">
+                  Refill: {status.account.refill_rate}/min
+                </Text>
+              )}
+            </BlockStack>
+          </>
+        )}
 
         {/* Cache Stats */}
         {status.cache && (
