@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, memo } from 'react';
 import {
   Page,
   Layout,
@@ -89,8 +89,9 @@ function formatDaysAgo(dateStr) {
 
 /**
  * KPI Card Component - Uses design system
+ * Memoized to prevent unnecessary re-renders
  */
-function KPICard({ title, value, subtitle, tone, icon, onClick }) {
+const KPICard = memo(function KPICard({ title, value, subtitle, tone, icon, onClick }) {
   const toneToClass = {
     success: 'hub-stat-card--success',
     warning: 'hub-stat-card--warning',
@@ -116,12 +117,12 @@ function KPICard({ title, value, subtitle, tone, icon, onClick }) {
       </BlockStack>
     </div>
   );
-}
+});
 
 /**
- * Data Quality Banner Component
+ * Data Quality Banner Component - Memoized
  */
-function DataQualityBanner({ warnings, onDismiss }) {
+const DataQualityBanner = memo(function DataQualityBanner({ warnings, onDismiss }) {
   if (!warnings || warnings.length === 0) return null;
 
   const criticalWarnings = warnings.filter(w => w.severity === 'critical');
@@ -160,12 +161,12 @@ function DataQualityBanner({ warnings, onDismiss }) {
       )}
     </BlockStack>
   );
-}
+});
 
 /**
- * Change Badge with arrow
+ * Change Badge with arrow - Memoized
  */
-function ChangeBadge({ change, suffix = '%' }) {
+const ChangeBadge = memo(function ChangeBadge({ change, suffix = '%' }) {
   if (change === null || change === undefined) return <Badge>-</Badge>;
   const isPositive = change > 0;
   const isNegative = change < 0;
@@ -180,12 +181,12 @@ function ChangeBadge({ change, suffix = '%' }) {
       </InlineStack>
     </Badge>
   );
-}
+});
 
 /**
- * Days of Cover Badge
+ * Days of Cover Badge - Memoized
  */
-function DaysOfCoverBadge({ days }) {
+const DaysOfCoverBadge = memo(function DaysOfCoverBadge({ days }) {
   if (days === null || days === undefined) return <Badge>-</Badge>;
   if (days === Infinity || days > 365) return <Badge tone="success">365+ days</Badge>;
   if (days === 0) return <Badge tone="critical">Out of stock</Badge>;
@@ -193,7 +194,7 @@ function DaysOfCoverBadge({ days }) {
   if (days <= 14) return <Badge tone="warning">{days} days</Badge>;
   if (days <= 30) return <Badge tone="info">{days} days</Badge>;
   return <Badge tone="success">{days} days</Badge>;
-}
+});
 
 /**
  * Analytics Hub Page
