@@ -408,11 +408,11 @@ export default function ProductDetailModal() {
                 </Card>
               )}
 
-              {/* No Recipe Assigned */}
+              {/* No BOM Assigned */}
               {!bom?.bom_components?.length && !loading && (
                 <Banner tone="warning">
                   <p>
-                    No recipe assigned to this product. This listing needs to be assigned a BOM
+                    No BOM assigned to this product. This listing needs to be assigned a BOM
                     (Bill of Materials) that defines what components are included.
                   </p>
                 </Banner>

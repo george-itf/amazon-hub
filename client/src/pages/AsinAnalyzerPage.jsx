@@ -780,7 +780,7 @@ export default function AsinAnalyzerPage() {
                     {!selectedResult.bom_suggestion?.suggested_bom_id && (
                       <Banner>
                         <Text variant="bodySm">
-                          <strong>Assign a Recipe:</strong> COGS cannot be calculated until a BOM recipe is assigned to this listing.
+                          <strong>Assign a BOM:</strong> COGS cannot be calculated until a BOM is assigned to this listing.
                         </Text>
                       </Banner>
                     )}

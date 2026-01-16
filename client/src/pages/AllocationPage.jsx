@@ -103,7 +103,7 @@ function PoolCard({ pool, selected, onSelect }) {
           </Text>
         )}
         <InlineStack gap="200">
-          <Badge tone="info">{pool.bom_count} recipes</Badge>
+          <Badge tone="info">{pool.bom_count} BOMs</Badge>
           <Text variant="bodySm" tone="subdued">
             {pool.boms?.slice(0, 3).map(b => b.bundle_sku).join(', ')}
             {pool.boms?.length > 3 ? ` +${pool.boms.length - 3} more` : ''}

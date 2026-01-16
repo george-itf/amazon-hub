@@ -91,7 +91,7 @@ export default function BomSuggestionPopover({
             )}
           </>
         ) : (
-          <Text variant="bodySm" tone="subdued">No Recipe Assigned</Text>
+          <Text variant="bodySm" tone="subdued">No BOM Assigned</Text>
         )}
       </InlineStack>
     </Button>
@@ -108,7 +108,7 @@ export default function BomSuggestionPopover({
       <Popover.Pane>
         <div style={{ padding: '12px', minWidth: '300px', maxWidth: '400px' }}>
           <BlockStack gap="300">
-            <Text variant="headingSm">Recipe Matches for {asin}</Text>
+            <Text variant="headingSm">BOM Matches for {asin}</Text>
 
             {loading && (
               <InlineStack gap="200" blockAlign="center">
@@ -174,7 +174,7 @@ export default function BomSuggestionPopover({
             )}
 
             {!loading && candidates.length === 0 && !error && (
-              <Text tone="subdued">No matching recipes found. Create a new BOM recipe or assign manually.</Text>
+              <Text tone="subdued">No matching BOMs found. Create a new BOM or assign manually.</Text>
             )}
 
             {/* Clear assignment option */}
@@ -184,7 +184,7 @@ export default function BomSuggestionPopover({
                 destructive
                 onClick={() => handleSelect(null, null)}
               >
-                Remove Recipe Assignment
+                Remove BOM Assignment
               </Button>
             )}
           </BlockStack>

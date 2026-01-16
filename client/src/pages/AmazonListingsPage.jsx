@@ -576,9 +576,9 @@ export default function AmazonListingsPage() {
     });
   }, [filteredListings, listingSettingsMap, selectedListings, boms]);
 
-  // BOM recipe options for assignment dropdown
+  // BOM options for assignment dropdown
   const bomOptions = [
-    { label: '— No Recipe Assigned —', value: '' },
+    { label: '— No BOM Assigned —', value: '' },
     ...boms.map(b => ({ label: `${b.bundle_sku} - ${truncate(b.description || '', 40)}`, value: b.id })),
   ];
 
@@ -625,7 +625,7 @@ export default function AmazonListingsPage() {
           </div>
           <div className="hub-stat-card hub-stat-card--success">
             <BlockStack gap="200">
-              <Text variant="bodySm" tone="subdued">Recipe Assigned</Text>
+              <Text variant="bodySm" tone="subdued">BOM Assigned</Text>
               <Text variant="headingLg" fontWeight="bold" tone="success">{stats.withBom}</Text>
               <ProgressBar progress={stats.total ? (stats.withBom / stats.total) * 100 : 0} tone="success" size="small" />
             </BlockStack>
@@ -715,12 +715,12 @@ export default function AmazonListingsPage() {
               onChange={setStatusFilter}
             />
             <Select
-              label="Recipe"
+              label="BOM"
               labelHidden
               options={[
-                { label: 'All Recipes', value: 'all' },
-                { label: 'Recipe Assigned', value: 'with_bom' },
-                { label: 'No Recipe', value: 'without_bom' },
+                { label: 'All BOMs', value: 'all' },
+                { label: 'BOM Assigned', value: 'with_bom' },
+                { label: 'No BOM', value: 'without_bom' },
               ]}
               value={bomFilter}
               onChange={setBomFilter}
@@ -884,11 +884,11 @@ export default function AmazonListingsPage() {
                 multiline={2}
               />
               <Select
-                label="Product Recipe (BOM)"
+                label="BOM Assignment"
                 options={bomOptions}
                 value={createForm.bom_id}
                 onChange={(v) => setCreateForm(f => ({ ...f, bom_id: v }))}
-                helpText="Assign the recipe that defines what's in this product"
+                helpText="Assign the BOM that defines what components are in this product"
               />
             </FormLayout>
           </BlockStack>
@@ -972,15 +972,15 @@ export default function AmazonListingsPage() {
 
               <Divider />
 
-              {/* Product Recipe (BOM) Assignment */}
+              {/* BOM Assignment */}
               <BlockStack gap="400">
-                <Text variant="headingSm">Product Recipe (BOM)</Text>
+                <Text variant="headingSm">BOM Assignment</Text>
                 <Select
-                  label="Assigned Recipe"
+                  label="Assigned BOM"
                   options={bomOptions}
                   value={detailForm.bom_id}
                   onChange={(v) => setDetailForm(f => ({ ...f, bom_id: v }))}
-                  helpText="Assign the BOM recipe that defines what components are included in this listing"
+                  helpText="Assign the BOM that defines what components are included in this listing"
                 />
                 {selectedBom && (
                   <Card>
