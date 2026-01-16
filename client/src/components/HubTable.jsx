@@ -28,7 +28,6 @@ import {
   SearchIcon,
   FilterIcon,
   ViewIcon,
-  ColumnsIcon,
   ChevronDownIcon,
   XIcon,
   PlusIcon,
@@ -38,6 +37,23 @@ import {
   EditIcon,
   SortIcon,
 } from '@shopify/polaris-icons';
+
+/* Fallback ColumnsIcon — local inline SVG so build doesn't fail when the icon isn't exported
+   Keeps the rest of the file unchanged (uses the same name `ColumnsIcon` elsewhere). */
+const ColumnsIcon = () => (
+  <svg
+    width="16"
+    height="16"
+    viewBox="0 0 16 16"
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <rect x="0" y="0" width="4" height="16" rx="0.5" />
+    <rect x="6" y="0" width="4" height="16" rx="0.5" />
+    <rect x="12" y="0" width="4" height="16" rx="0.5" />
+  </svg>
+);
 
 /**
  * HubTable - Unified table component for Amazon Hub
