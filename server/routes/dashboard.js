@@ -225,20 +225,17 @@ router.get('/stats', async (req, res) => {
  */
 router.get('/pulse', async (req, res) => {
   try {
-    const now = new Date();
-    const todayStart = new Date(now.setHours(0, 0, 0, 0)).toISOString();
-    const weekStart = new Date(now.setDate(now.getDate() - now.getDay())).toISOString();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-    // Reset now for accurate queries
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
+
+    // Last 7 days
     const weekAgo = new Date(today);
     weekAgo.setDate(weekAgo.getDate() - 7);
     const weekStr = weekAgo.toISOString().split('T')[0];
-    const monthAgo = new Date(today);
-    monthAgo.setDate(1);
-    const monthStr = monthAgo.toISOString().split('T')[0];
+
+    // First day of current month
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const monthStr = monthStart.toISOString().split('T')[0];
 
     // Fetch Amazon orders for different time periods in parallel
     const [todayOrders, weekOrders, monthOrders] = await Promise.all([
