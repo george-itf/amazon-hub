@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
   Page,
   Layout,
@@ -50,9 +50,9 @@ function formatPercent(value, decimals = 1) {
 }
 
 /**
- * KPI Card Component
+ * KPI Card Component - Memoized
  */
-function KPICard({ title, value, subtitle, tone, icon }) {
+const KPICard = memo(function KPICard({ title, value, subtitle, tone, icon }) {
   return (
     <Card>
       <BlockStack gap="200">
@@ -69,12 +69,12 @@ function KPICard({ title, value, subtitle, tone, icon }) {
       </BlockStack>
     </Card>
   );
-}
+});
 
 /**
- * Pool Selection Card Component - Uses design system
+ * Pool Selection Card Component - Uses design system - Memoized
  */
-function PoolCard({ pool, selected, onSelect }) {
+const PoolCard = memo(function PoolCard({ pool, selected, onSelect }) {
   const isLowStock = pool.available < 10;
   const isOutOfStock = pool.available === 0;
 
@@ -112,12 +112,12 @@ function PoolCard({ pool, selected, onSelect }) {
       </BlockStack>
     </div>
   );
-}
+});
 
 /**
- * Demand Source Badge
+ * Demand Source Badge - Memoized
  */
-function DemandSourceBadge({ source }) {
+const DemandSourceBadge = memo(function DemandSourceBadge({ source }) {
   const tones = {
     INTERNAL: 'success',
     BLENDED: 'info',
@@ -137,7 +137,7 @@ function DemandSourceBadge({ source }) {
       {labels[source] || source}
     </Badge>
   );
-}
+});
 
 /**
  * AllocationPage - Intelligent stock allocation across Amazon listings
