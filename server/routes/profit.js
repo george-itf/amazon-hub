@@ -8,6 +8,7 @@ import {
   calculateBreakEvenPrice,
   DEFAULT_FEE_CONFIG
 } from '../services/feeCalculator.js';
+import { getKeepaProduct, extractKeepaMetrics } from '../services/keepaService.js';
 
 const router = express.Router();
 
@@ -55,116 +56,53 @@ router.post('/analyze', requireStaff, async (req, res) => {
   }
 
   try {
-    // 1. Fetch Keepa data for the ASIN
+    // 1. Fetch Keepa data for the ASIN using shared service
+    // This ensures budget enforcement, request logging, and metrics extraction
     let keepaData = null;
     let productInfo = null;
 
-    const { data: cached } = await supabase
-      .from('keepa_products_cache')
-      .select('*')
-      .eq('asin', asin.toUpperCase())
-      .maybeSingle();
+    try {
+      const keepaResult = await getKeepaProduct(asin);
+      keepaData = keepaResult.product;
 
-    if (cached?.payload_json) {
-      keepaData = cached.payload_json;
-    } else {
-      // Try to fetch from Keepa API
-      // Check settings first
-      const { data: settings } = await supabase
-        .from('keepa_settings')
-        .select('*')
-        .single();
-
-      if (settings) {
-        // Call Keepa API
-        const apiKey = process.env.KEEPA_API_KEY;
-        if (apiKey) {
-          try {
-            // Use &stats=90 for free price statistics
-            const keepaUrl = `https://api.keepa.com/product?key=${apiKey}&domain=${settings.domain_id || 2}&asin=${asin.toUpperCase()}&stats=90`;
-            const response = await fetch(keepaUrl);
-            const data = await response.json();
-
-            if (data.products && data.products[0]) {
-              keepaData = data.products[0];
-
-              // Cache it
-              await supabase.from('keepa_products_cache').upsert({
-                asin: asin.toUpperCase(),
-                payload_json: keepaData,
-                expires_at: new Date(Date.now() + 720 * 60 * 1000).toISOString(),
-              });
-            }
-          } catch (fetchErr) {
-            console.error('Keepa fetch error:', fetchErr);
-            // Continue without Keepa data
-          }
-        }
-      }
-    }
-
-    // Extract product info from Keepa data
-    if (keepaData) {
-      // Keepa price format: array where each element is [time, price]
-      // Or CSV format where index maps to data type
-      // CSV indices: 0=Amazon, 1=New, 2=Used, 3=Sales Rank, etc.
-      const csv = keepaData.csv || [];
-
-      // Get latest Buy Box price (index 18) or Amazon price (index 0)
-      let currentPricePence = null;
-      const buyBoxPrices = csv[18] || csv[0]; // Buy Box or Amazon
-      if (buyBoxPrices && Array.isArray(buyBoxPrices) && buyBoxPrices.length >= 2) {
-        // Get the last price (most recent)
-        const lastPrice = buyBoxPrices[buyBoxPrices.length - 1];
-        if (lastPrice > 0) {
-          currentPricePence = lastPrice; // Keepa prices are in cents, same as pence for UK
-        }
-      }
-
-      // Get sales rank
-      let salesRank = null;
-      const salesRankData = csv[3];
-      if (salesRankData && Array.isArray(salesRankData) && salesRankData.length >= 2) {
-        salesRank = salesRankData[salesRankData.length - 1];
-      }
-
-      // Get offer count (index 11)
-      let offerCount = null;
-      const offerData = csv[11];
-      if (offerData && Array.isArray(offerData) && offerData.length >= 2) {
-        offerCount = offerData[offerData.length - 1];
-      }
-
-      // Get rating (index 16) - stored as rating * 10
-      let rating = null;
-      const ratingData = csv[16];
-      if (ratingData && Array.isArray(ratingData) && ratingData.length >= 2) {
-        const rawRating = ratingData[ratingData.length - 1];
-        if (rawRating > 0) {
-          rating = rawRating / 10;
-        }
-      }
-
-      // Get review count (index 17)
-      let reviewCount = null;
-      const reviewData = csv[17];
-      if (reviewData && Array.isArray(reviewData) && reviewData.length >= 2) {
-        reviewCount = reviewData[reviewData.length - 1];
-      }
+      // Use extracted metrics from shared service
+      const metrics = keepaResult.metrics;
 
       productInfo = {
-        asin: asin.toUpperCase(),
-        title: keepaData.title || 'Unknown Product',
-        currentPricePence,
-        salesRank,
-        offerCount,
-        rating,
-        reviewCount,
-        category: keepaData.categoryTree?.[0]?.name || 'Unknown',
-        imageUrl: keepaData.imagesCSV ? `https://images-na.ssl-images-amazon.com/images/I/${keepaData.imagesCSV.split(',')[0]}` : null,
-        lastUpdated: cached?.expires_at ? new Date(cached.expires_at).toISOString() : null,
+        asin: keepaResult.asin,
+        title: metrics?.title || keepaData?.title || 'Unknown Product',
+        currentPricePence: metrics?.buybox_price_pence || null,
+        salesRank: metrics?.sales_rank || null,
+        offerCount: metrics?.offer_count || null,
+        rating: metrics?.rating || null,
+        reviewCount: metrics?.review_count || null,
+        category: metrics?.category || 'Unknown',
+        imageUrl: metrics?.image_url || null,
+        lastUpdated: keepaResult.expires_at,
+        fromCache: keepaResult.fromCache,
+        // Additional pricing data from shared service
+        fbaPrice: metrics?.fba_price_pence || null,
+        fbmPrice: metrics?.fbm_price_pence || null,
+        stats90d: {
+          min: metrics?.stats_min_price_90d || null,
+          max: metrics?.stats_max_price_90d || null,
+          avg: metrics?.stats_avg_price_90d || null,
+        },
       };
-    } else {
+    } catch (keepaErr) {
+      // Handle specific Keepa errors
+      if (keepaErr.code === 'NOT_FOUND') {
+        console.log(`Keepa: Product not found for ${asin}`);
+      } else if (keepaErr.code === 'HOURLY_BUDGET_EXCEEDED' || keepaErr.code === 'DAILY_BUDGET_EXCEEDED') {
+        console.warn(`Keepa budget exceeded for ${asin}:`, keepaErr.message);
+      } else {
+        console.error('Keepa fetch error:', keepaErr.message);
+      }
+      // Continue without Keepa data
+    }
+
+    // Default product info if Keepa data unavailable
+    if (!productInfo) {
       productInfo = {
         asin: asin.toUpperCase(),
         title: 'Unknown - Keepa data not available',
@@ -176,6 +114,10 @@ router.post('/analyze', requireStaff, async (req, res) => {
         category: 'Unknown',
         imageUrl: null,
         lastUpdated: null,
+        fromCache: false,
+        fbaPrice: null,
+        fbmPrice: null,
+        stats90d: { min: null, max: null, avg: null },
       };
     }
 

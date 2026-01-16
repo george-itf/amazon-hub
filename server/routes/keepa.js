@@ -1,44 +1,22 @@
 import express from 'express';
-import fetch from 'node-fetch';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
 import { requireAdmin } from '../middleware/auth.js';
 import { recordSystemEvent } from '../services/audit.js';
+import {
+  getKeepaProduct,
+  refreshKeepaProducts,
+  getKeepaSettings,
+  canMakeRequest,
+  getCacheStats,
+  resetCacheStats,
+  KEEPA_TOKENS_PER_PRODUCT,
+} from '../services/keepaService.js';
 
 const router = express.Router();
 
-// Keepa API configuration
-const KEEPA_API_BASE = 'https://api.keepa.com';
-const KEEPA_TOKENS_PER_PRODUCT = 1;
-
 /**
- * Get Keepa settings from database
- */
-async function getKeepaSettings() {
-  const { data, error } = await supabase
-    .from('keepa_settings')
-    .select('setting_key, setting_value');
-
-  if (error) {
-    console.error('Failed to fetch Keepa settings:', error);
-    return {
-      max_tokens_per_hour: 800,
-      max_tokens_per_day: 6000,
-      min_reserve: 200,
-      min_refresh_minutes: 720,
-      domain_id: 2  // UK (amazon.co.uk)
-    };
-  }
-
-  const settings = {};
-  for (const row of data || []) {
-    settings[row.setting_key] = parseInt(row.setting_value) || row.setting_value;
-  }
-  return settings;
-}
-
-/**
- * Get tokens spent in time window
+ * Get tokens spent in time window (kept for status endpoint)
  */
 async function getTokensSpent(minutes) {
   const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
@@ -57,183 +35,45 @@ async function getTokensSpent(minutes) {
 }
 
 /**
- * Check if we can make a request within budget
- */
-async function canMakeRequest(tokensNeeded, settings) {
-  const tokensSpentHour = await getTokensSpent(60);
-  const tokensSpentDay = await getTokensSpent(24 * 60);
-
-  const remainingHour = settings.max_tokens_per_hour - tokensSpentHour;
-  const remainingDay = settings.max_tokens_per_day - tokensSpentDay;
-
-  if (tokensNeeded > remainingHour - settings.min_reserve) {
-    return { allowed: false, reason: 'HOURLY_BUDGET_EXCEEDED', remaining: remainingHour };
-  }
-
-  if (tokensNeeded > remainingDay - settings.min_reserve) {
-    return { allowed: false, reason: 'DAILY_BUDGET_EXCEEDED', remaining: remainingDay };
-  }
-
-  return { allowed: true, remaining_hour: remainingHour, remaining_day: remainingDay };
-}
-
-/**
- * Log a Keepa request
- */
-async function logKeepaRequest(endpoint, asinsCount, tokensEstimated, status, tokensSpent = null, latencyMs = null, errorMessage = null) {
-  await supabase.from('keepa_request_log').insert({
-    endpoint,
-    asins_count: asinsCount,
-    tokens_estimated: tokensEstimated,
-    tokens_spent: tokensSpent,
-    status,
-    latency_ms: latencyMs,
-    error_message: errorMessage
-  });
-}
-
-/**
- * Record Keepa account balance from API response
- * Tracks tokensLeft for monitoring actual Keepa account status
- */
-async function recordAccountBalance(data, endpoint) {
-  try {
-    if (data.tokensLeft !== undefined) {
-      await supabase.from('keepa_account_balance').insert({
-        tokens_left: data.tokensLeft,
-        refill_rate: data.refillRate || null,
-        refill_in_ms: data.refillIn || null,
-        token_flow_reduction: data.tokenFlowReduction || null,
-        request_endpoint: endpoint,
-      });
-    }
-  } catch (err) {
-    // Non-critical, just log
-    console.error('Failed to record Keepa account balance:', err.message);
-  }
-}
-
-/**
- * Fetch product from Keepa API
- * Uses &stats=90 parameter (free) for additional price statistics
- */
-async function fetchFromKeepa(asins, domainId) {
-  const apiKey = process.env.KEEPA_API_KEY;
-  if (!apiKey) {
-    throw new Error('KEEPA_API_KEY not configured');
-  }
-
-  const asinList = Array.isArray(asins) ? asins.join(',') : asins;
-  // Added &stats=90 for free price statistics (min/max/avg over 90 days)
-  const url = `${KEEPA_API_BASE}/product?key=${apiKey}&domain=${domainId}&asin=${asinList}&stats=90`;
-
-  const startTime = Date.now();
-  const response = await fetch(url);
-  const latencyMs = Date.now() - startTime;
-
-  if (!response.ok) {
-    throw new Error(`Keepa API error: ${response.status}`);
-  }
-
-  const data = await response.json();
-
-  // Record account balance for monitoring
-  await recordAccountBalance(data, '/product');
-
-  return {
-    data,
-    latencyMs,
-    tokensSpent: data.tokensConsumed || asins.length,
-    tokensLeft: data.tokensLeft,
-    refillRate: data.refillRate,
-    refillIn: data.refillIn,
-  };
-}
-
-/**
  * GET /keepa/product/:asin
  * Get cached product data, refresh if stale and budget allows
+ * Uses shared Keepa service for budget enforcement, caching, and logging
  */
 router.get('/product/:asin', async (req, res) => {
   const { asin } = req.params;
   const { force_refresh = 'false' } = req.query;
 
   try {
-    const settings = await getKeepaSettings();
+    const result = await getKeepaProduct(asin, {
+      forceRefresh: force_refresh === 'true',
+    });
 
-    // Check cache first
-    if (force_refresh !== 'true') {
-      const { data: cached, error } = await supabase
-        .from('keepa_products_cache')
-        .select('*')
-        .eq('asin', asin.toUpperCase())
-        .single();
+    sendSuccess(res, {
+      asin: result.asin,
+      data: result.product,
+      metrics: result.metrics,
+      fetched_at: result.fetched_at,
+      expires_at: result.expires_at,
+      from_cache: result.fromCache,
+      tokens_spent: result.tokensSpent,
+      tokens_left: result.tokensLeft,
+    });
+  } catch (err) {
+    console.error('Keepa product error:', err);
 
-      if (!error && cached && new Date(cached.expires_at) > new Date()) {
-        return sendSuccess(res, {
-          asin: cached.asin,
-          data: cached.payload_json,
-          fetched_at: cached.fetched_at,
-          expires_at: cached.expires_at,
-          from_cache: true
-        });
-      }
+    if (err.code === 'NOT_FOUND') {
+      return errors.notFound(res, 'Product');
     }
-
-    // Check if API key is configured
-    if (!process.env.KEEPA_API_KEY) {
+    if (err.code === 'HOURLY_BUDGET_EXCEEDED' || err.code === 'DAILY_BUDGET_EXCEEDED') {
+      return errors.badRequest(res, 'Keepa token budget exceeded', {
+        reason: err.code,
+        remaining: err.remaining
+      });
+    }
+    if (err.message === 'KEEPA_API_KEY not configured') {
       return errors.badRequest(res, 'Keepa API not configured');
     }
 
-    // Check budget
-    const budgetCheck = await canMakeRequest(KEEPA_TOKENS_PER_PRODUCT, settings);
-    if (!budgetCheck.allowed) {
-      return errors.badRequest(res, 'Keepa token budget exceeded', {
-        reason: budgetCheck.reason,
-        remaining: budgetCheck.remaining
-      });
-    }
-
-    // Fetch from Keepa
-    try {
-      const { data, latencyMs, tokensSpent, tokensLeft } = await fetchFromKeepa([asin.toUpperCase()], settings.domain_id);
-
-      await logKeepaRequest('/product', 1, KEEPA_TOKENS_PER_PRODUCT, 'SUCCESS', tokensSpent, latencyMs);
-
-      if (!data.products || data.products.length === 0) {
-        return errors.notFound(res, 'Product');
-      }
-
-      const product = data.products[0];
-      const expiresAt = new Date(Date.now() + settings.min_refresh_minutes * 60 * 1000);
-
-      // Cache the result
-      await supabase.from('keepa_products_cache').upsert({
-        asin: asin.toUpperCase(),
-        domain_id: settings.domain_id,
-        payload_json: product,
-        fetched_at: new Date().toISOString(),
-        expires_at: expiresAt.toISOString()
-      });
-
-      // Extract and store daily metrics if available
-      await storeKeepaMetrics(asin.toUpperCase(), product);
-
-      sendSuccess(res, {
-        asin: asin.toUpperCase(),
-        data: product,
-        fetched_at: new Date().toISOString(),
-        expires_at: expiresAt.toISOString(),
-        from_cache: false,
-        tokens_spent: tokensSpent,
-        tokens_left: tokensLeft,  // Actual Keepa account balance
-      });
-    } catch (fetchError) {
-      await logKeepaRequest('/product', 1, KEEPA_TOKENS_PER_PRODUCT, 'FAILED', null, null, fetchError.message);
-      throw fetchError;
-    }
-  } catch (err) {
-    console.error('Keepa product error:', err);
     errors.internal(res, 'Failed to fetch Keepa data');
   }
 });
@@ -242,6 +82,7 @@ router.get('/product/:asin', async (req, res) => {
  * POST /keepa/refresh
  * Refresh data for multiple ASINs
  * ADMIN only, budgeted
+ * Uses shared Keepa service for budget enforcement, caching, and logging
  */
 router.post('/refresh', requireAdmin, async (req, res) => {
   const { asins } = req.body;
@@ -250,86 +91,42 @@ router.post('/refresh', requireAdmin, async (req, res) => {
     return errors.badRequest(res, 'asins array is required');
   }
 
-  if (asins.length > 100) {
-    return errors.badRequest(res, 'Maximum 100 ASINs per request');
-  }
-
   try {
-    if (!process.env.KEEPA_API_KEY) {
-      return errors.badRequest(res, 'Keepa API not configured');
-    }
-
-    const settings = await getKeepaSettings();
-    const tokensNeeded = asins.length * KEEPA_TOKENS_PER_PRODUCT;
-
-    // Check budget
-    const budgetCheck = await canMakeRequest(tokensNeeded, settings);
-    if (!budgetCheck.allowed) {
-      await logKeepaRequest('/refresh', asins.length, tokensNeeded, 'BUDGET_EXCEEDED');
-      return errors.badRequest(res, 'Keepa token budget exceeded', {
-        reason: budgetCheck.reason,
-        remaining: budgetCheck.remaining,
-        tokens_needed: tokensNeeded
-      });
-    }
-
-    // Fetch from Keepa
-    const normalizedAsins = asins.map(a => a.toUpperCase());
-    const { data, latencyMs, tokensSpent, tokensLeft } = await fetchFromKeepa(normalizedAsins, settings.domain_id);
-
-    await logKeepaRequest('/refresh', asins.length, tokensNeeded, 'SUCCESS', tokensSpent, latencyMs);
-
-    const expiresAt = new Date(Date.now() + settings.min_refresh_minutes * 60 * 1000);
-    const results = [];
-    const cacheUpserts = [];
-    const validProducts = [];
-
-    // Prepare batch data
-    for (const product of (data.products || [])) {
-      if (!product || !product.asin) continue;
-
-      cacheUpserts.push({
-        asin: product.asin,
-        domain_id: settings.domain_id,
-        payload_json: product,
-        fetched_at: new Date().toISOString(),
-        expires_at: expiresAt.toISOString()
-      });
-
-      validProducts.push(product);
-
-      results.push({
-        asin: product.asin,
-        title: product.title,
-        success: true
-      });
-    }
-
-    // Batch upsert all cache entries at once
-    if (cacheUpserts.length > 0) {
-      const { error: cacheError } = await supabase.from('keepa_products_cache').upsert(cacheUpserts);
-      if (cacheError) {
-        console.error('Batch cache upsert error:', cacheError);
-      }
-    }
-
-    // Store metrics in parallel for all valid products
-    await Promise.all(validProducts.map(product => storeKeepaMetrics(product.asin, product)));
+    const result = await refreshKeepaProducts(asins);
 
     await recordSystemEvent({
       eventType: 'KEEPA_REFRESH',
-      description: `Refreshed ${results.length} products`,
-      metadata: { asins_requested: asins.length, asins_refreshed: results.length, tokens_spent: tokensSpent }
+      description: `Refreshed ${result.refreshed} products`,
+      metadata: {
+        asins_requested: asins.length,
+        asins_refreshed: result.refreshed,
+        tokens_spent: result.tokensSpent
+      }
     });
 
     sendSuccess(res, {
-      refreshed: results.length,
-      tokens_spent: tokensSpent,
-      tokens_left: tokensLeft,  // Actual Keepa account balance
-      results
+      refreshed: result.refreshed,
+      tokens_spent: result.tokensSpent,
+      tokens_left: result.tokensLeft,
+      results: result.results
     });
   } catch (err) {
     console.error('Keepa refresh error:', err);
+
+    if (err.message === 'Maximum 100 ASINs per request') {
+      return errors.badRequest(res, err.message);
+    }
+    if (err.code === 'HOURLY_BUDGET_EXCEEDED' || err.code === 'DAILY_BUDGET_EXCEEDED') {
+      return errors.badRequest(res, 'Keepa token budget exceeded', {
+        reason: err.code,
+        remaining: err.remaining,
+        tokens_needed: err.tokens_needed
+      });
+    }
+    if (err.message === 'KEEPA_API_KEY not configured') {
+      return errors.badRequest(res, 'Keepa API not configured');
+    }
+
     errors.internal(res, 'Failed to refresh Keepa data');
   }
 });
@@ -372,6 +169,7 @@ router.get('/metrics/:asin', async (req, res) => {
  * GET /keepa/status
  * Get Keepa integration status (no secrets)
  * Includes actual Keepa account balance from API responses
+ * Includes cache hit/miss tracking metrics
  */
 router.get('/status', async (req, res) => {
   try {
@@ -380,7 +178,7 @@ router.get('/status', async (req, res) => {
     const tokensSpentHour = await getTokensSpent(60);
     const tokensSpentDay = await getTokensSpent(24 * 60);
 
-    // Get cache stats
+    // Get cache stats from database
     const { count: cacheCount } = await supabase
       .from('keepa_products_cache')
       .select('*', { count: 'exact', head: true });
@@ -407,6 +205,9 @@ router.get('/status', async (req, res) => {
 
     const accountBalance = latestBalance?.[0] || null;
 
+    // Get in-memory cache hit/miss stats
+    const cacheHitStats = getCacheStats();
+
     sendSuccess(res, {
       configured: !!process.env.KEEPA_API_KEY,
       domain_id: settings.domain_id,
@@ -430,7 +231,12 @@ router.get('/status', async (req, res) => {
       cache: {
         total_products: cacheCount || 0,
         stale_products: staleCount || 0,
-        min_refresh_minutes: settings.min_refresh_minutes
+        min_refresh_minutes: settings.min_refresh_minutes,
+        // In-memory cache hit/miss tracking
+        session_hits: cacheHitStats.hits,
+        session_misses: cacheHitStats.misses,
+        session_hit_rate: cacheHitStats.hitRate,
+        session_hours: parseFloat(cacheHitStats.hoursSinceReset),
       },
       last_request: lastRequest?.[0] || null
     });
@@ -484,147 +290,91 @@ router.put('/settings', requireAdmin, async (req, res) => {
   }
 });
 
-// ============================================================================
-// KEEPA CSV INDEX MAPPING (aligned with Keepa API documentation)
-// ============================================================================
-// Keepa CSV array indices (price types):
-//   csv[0]  = AMAZON: Amazon price
-//   csv[1]  = NEW: Marketplace New price (combined FBA+FBM)
-//   csv[2]  = USED: Marketplace Used price
-//   csv[3]  = SALES: Sales Rank
-//   csv[7]  = NEW_FBM_SHIPPING: FBM price with shipping
-//   csv[10] = NEW_FBA: FBA-specific price (for margin analysis)
-//   csv[11] = COUNT_NEW: New offer count
-//   csv[16] = RATING: Rating (multiply by 10 in Keepa format, e.g., 45 = 4.5 stars)
-//   csv[17] = COUNT_REVIEWS: Review count
-//   csv[18] = BUY_BOX_SHIPPING: Buy Box price with shipping
-//
-// Stats object (from &stats=90 parameter - FREE):
-//   stats.current[18] = Current Buy Box price
-//   stats.min[18]     = Minimum Buy Box price over period
-//   stats.max[18]     = Maximum Buy Box price over period
-//   stats.avg[18]     = Average Buy Box price over period
-// ============================================================================
-
 /**
- * Extract latest non-null price value from a Keepa CSV array
- * Searches backwards from the end to find the most recent valid price.
- *
- * @param {Array<number>} csvArray - Keepa CSV array (timestamp, value, timestamp, value, ...)
- * @returns {number|null} - Latest valid price in pence, or null if none found
+ * POST /keepa/cache/reset-stats
+ * Reset cache hit/miss statistics (ADMIN only)
  */
-function latestPriceFromCsv(csvArray) {
-  if (!csvArray || !Array.isArray(csvArray) || csvArray.length < 2) {
-    return null;
-  }
-
-  // Keepa CSV format: [timestamp, value, timestamp, value, ...]
-  // Values are at odd indices (1, 3, 5, ...) but we typically just get the last value
-  // Search backwards for the first valid value
-  for (let i = csvArray.length - 1; i >= 0; i--) {
-    const value = csvArray[i];
-    // Keepa uses -1 for "no data" and -2 for "out of stock"
-    if (typeof value === 'number' && value > 0) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-/**
- * Extract latest non-null integer value from a Keepa CSV array
- * Used for sales rank, offer count, review count, etc.
- *
- * @param {Array<number>} csvArray - Keepa CSV array
- * @returns {number|null} - Latest valid integer, or null if none found
- */
-function latestIntFromCsv(csvArray) {
-  if (!csvArray || !Array.isArray(csvArray) || csvArray.length < 2) {
-    return null;
-  }
-
-  // Search backwards for the first valid value
-  for (let i = csvArray.length - 1; i >= 0; i--) {
-    const value = csvArray[i];
-    // Keepa uses -1 for "no data"
-    if (typeof value === 'number' && value >= 0) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-/**
- * Extract latest rating from Keepa CSV array
- * Keepa stores ratings multiplied by 10 (e.g., 45 = 4.5 stars)
- *
- * @param {Array<number>} csvArray - Keepa CSV array for rating
- * @returns {number|null} - Latest rating as decimal (e.g., 4.5), or null
- */
-function latestRatingFromCsv(csvArray) {
-  const rawValue = latestIntFromCsv(csvArray);
-  if (rawValue === null) return null;
-  // Convert from Keepa format (45 = 4.5 stars)
-  return Math.round((rawValue / 10) * 100) / 100;
-}
-
-/**
- * Store Keepa metrics from product data to keepa_metrics_daily
- *
- * Uses correct CSV index mapping:
- * - buybox: csv[18] with fallback to csv[0] (Amazon price)
- * - amazon price: csv[0]
- * - new 3P price: csv[1]
- * - used price: csv[2]
- * - sales rank: csv[3]
- * - fba price: csv[10] (NEW_FBA - for margin analysis)
- * - fbm price: csv[7] (NEW_FBM_SHIPPING)
- * - offer count: csv[11]
- * - rating: csv[16]
- * - review count: csv[17]
- *
- * Also extracts stats from &stats=90 parameter (free):
- * - stats.min[18], stats.max[18], stats.avg[18] for Buy Box price statistics
- */
-async function storeKeepaMetrics(asin, product) {
+router.post('/cache/reset-stats', requireAdmin, async (req, res) => {
   try {
-    if (!product.csv) return;
-
-    const today = new Date().toISOString().split('T')[0];
-    const csv = product.csv;
-    const stats = product.stats || {};
-
-    // Extract buybox price with fallback to Amazon price (matching profit.js behavior)
-    const buyboxPrice = latestPriceFromCsv(csv[18]) || latestPriceFromCsv(csv[0]);
-
-    const metrics = {
-      asin,
-      date: today,
-      buybox_price_pence: buyboxPrice,
-      amazon_price_pence: latestPriceFromCsv(csv[0]),
-      new_price_pence: latestPriceFromCsv(csv[1]),
-      used_price_pence: latestPriceFromCsv(csv[2]),
-      sales_rank: latestIntFromCsv(csv[3]),
-      offer_count: latestIntFromCsv(csv[11]),
-      rating: latestRatingFromCsv(csv[16]),
-      review_count: latestIntFromCsv(csv[17]),
-      // FBA-specific pricing for margin analysis (csv[10] = NEW_FBA)
-      fba_price_pence: latestPriceFromCsv(csv[10]),
-      // FBM pricing with shipping (csv[7] = NEW_FBM_SHIPPING)
-      fbm_price_pence: latestPriceFromCsv(csv[7]),
-      // Stats from &stats=90 parameter (free) - Buy Box price statistics
-      // Index 18 = BUY_BOX_SHIPPING price type
-      stats_min_price_90d: stats.min?.[18] > 0 ? stats.min[18] : null,
-      stats_max_price_90d: stats.max?.[18] > 0 ? stats.max[18] : null,
-      stats_avg_price_90d: stats.avg?.[18] > 0 ? Math.round(stats.avg[18]) : null,
-    };
-
-    await supabase.from('keepa_metrics_daily').upsert(metrics);
+    resetCacheStats();
+    sendSuccess(res, { message: 'Cache statistics reset successfully' });
   } catch (err) {
-    console.error('Failed to store Keepa metrics:', err);
+    console.error('Cache stats reset error:', err);
+    errors.internal(res, 'Failed to reset cache statistics');
   }
-}
+});
+
+/**
+ * POST /keepa/cleanup
+ * Run data cleanup for Keepa tables (ADMIN only)
+ * Removes old request_log (30 days), account_balance (7 days), and stale cache
+ */
+router.post('/cleanup', requireAdmin, async (req, res) => {
+  try {
+    const results = {};
+
+    // Get cleanup retention settings
+    const settings = await getKeepaSettings();
+    const requestLogDays = parseInt(settings.cleanup_request_log_days) || 30;
+    const accountBalanceDays = parseInt(settings.cleanup_account_balance_days) || 7;
+    const staleCacheDays = parseInt(settings.cleanup_stale_cache_days) || 7;
+
+    // Clean request logs
+    const requestLogCutoff = new Date(Date.now() - requestLogDays * 24 * 60 * 60 * 1000).toISOString();
+    const { error: requestLogError, count: requestLogCount } = await supabase
+      .from('keepa_request_log')
+      .delete({ count: 'exact' })
+      .lt('requested_at', requestLogCutoff);
+
+    if (requestLogError) {
+      console.error('Request log cleanup error:', requestLogError);
+      results.request_log = { error: requestLogError.message };
+    } else {
+      results.request_log = { deleted: requestLogCount || 0, retention_days: requestLogDays };
+    }
+
+    // Clean account balance
+    const accountBalanceCutoff = new Date(Date.now() - accountBalanceDays * 24 * 60 * 60 * 1000).toISOString();
+    const { error: accountBalanceError, count: accountBalanceCount } = await supabase
+      .from('keepa_account_balance')
+      .delete({ count: 'exact' })
+      .lt('recorded_at', accountBalanceCutoff);
+
+    if (accountBalanceError) {
+      console.error('Account balance cleanup error:', accountBalanceError);
+      results.account_balance = { error: accountBalanceError.message };
+    } else {
+      results.account_balance = { deleted: accountBalanceCount || 0, retention_days: accountBalanceDays };
+    }
+
+    // Clean stale cache entries
+    const staleCacheCutoff = new Date(Date.now() - staleCacheDays * 24 * 60 * 60 * 1000).toISOString();
+    const { error: staleCacheError, count: staleCacheCount } = await supabase
+      .from('keepa_products_cache')
+      .delete({ count: 'exact' })
+      .lt('expires_at', staleCacheCutoff);
+
+    if (staleCacheError) {
+      console.error('Stale cache cleanup error:', staleCacheError);
+      results.stale_cache = { error: staleCacheError.message };
+    } else {
+      results.stale_cache = { deleted: staleCacheCount || 0, retention_days: staleCacheDays };
+    }
+
+    await recordSystemEvent({
+      eventType: 'KEEPA_CLEANUP',
+      description: 'Data cleanup completed',
+      metadata: results
+    });
+
+    sendSuccess(res, {
+      message: 'Cleanup completed',
+      results
+    });
+  } catch (err) {
+    console.error('Keepa cleanup error:', err);
+    errors.internal(res, 'Failed to run cleanup');
+  }
+});
 
 export default router;
