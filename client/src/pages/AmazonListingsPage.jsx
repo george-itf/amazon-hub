@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, memo } from 'react';
+import { useDebounce } from '../hooks/useDebounce.js';
 import {
   Page,
   Layout,
@@ -90,8 +91,9 @@ export default function AmazonListingsPage() {
   const [shippingOptions, setShippingOptions] = useState([]);
   const [successMessage, setSuccessMessage] = useState(null);
 
-  // Search and filter state
+  // Search and filter state - debounce search for smoother client-side filtering
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebounce(searchQuery, 200); // Fast debounce for client-side
   const [statusFilter, setStatusFilter] = useState('all');
   const [bomFilter, setBomFilter] = useState('all');
   const [sortBy, setSortBy] = useState('title');
@@ -279,9 +281,9 @@ export default function AmazonListingsPage() {
       result = result.filter(l => !l.bom_id);
     }
 
-    // Apply search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
+    // Apply search filter - use debounced query for smoother filtering
+    if (debouncedSearchQuery) {
+      const query = debouncedSearchQuery.toLowerCase();
       result = result.filter(l => {
         const bom = boms.find(b => b.id === l.bom_id);
         return (
@@ -303,7 +305,7 @@ export default function AmazonListingsPage() {
     });
 
     return result;
-  }, [listings, boms, listingSettingsMap, tabs, selectedTabIndex, customTabs, searchQuery, statusFilter, bomFilter, sortBy]);
+  }, [listings, boms, listingSettingsMap, tabs, selectedTabIndex, customTabs, debouncedSearchQuery, statusFilter, bomFilter, sortBy]);
 
   // Stats
   const stats = useMemo(() => {

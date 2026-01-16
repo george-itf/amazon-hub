@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, memo } from 'react';
+import { useDebounce } from '../hooks/useDebounce.js';
 import {
   Page,
   Layout,
@@ -51,6 +52,7 @@ export default function InventoryPage() {
 
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebounce(searchQuery, 300); // Debounce API calls
   const [stockFilter, setStockFilter] = useState('all');
   const [sortBy, setSortBy] = useState('sku');
   const [usageFilter, setUsageFilter] = useState('all'); // 'all', 'active', 'unassigned'
@@ -130,9 +132,10 @@ export default function InventoryPage() {
     try {
       // Use sensible pagination - load first 500 items
       // Client-side filtering works on paginated results
+      // Use debounced query for API to prevent excessive calls while typing
       const data = await getComponents({
         limit: 500,
-        search: searchQuery || undefined,
+        search: debouncedSearchQuery || undefined,
         signal: abortControllerRef.current.signal
       });
       if (mountedRef.current) {
@@ -152,7 +155,7 @@ export default function InventoryPage() {
         setLoading(false);
       }
     }
-  }, [searchQuery]);
+  }, [debouncedSearchQuery]);
 
   useEffect(() => {
     load();
