@@ -73,15 +73,19 @@ export default function InventoryPage() {
   });
   const [selectedTabIndex, setSelectedTabIndex] = useState(0);
 
-  // Sync custom tabs from user preferences when loaded
+  // Track if we've completed initial load from preferences
+  const initialLoadCompleteRef = React.useRef(false);
+
+  // Sync custom tabs from user preferences when loaded (ONE TIME)
   useEffect(() => {
-    if (!prefsLoading) {
+    if (!prefsLoading && !initialLoadCompleteRef.current) {
       const savedTabs = getPreference('inventory_custom_tabs', []);
-      if (Array.isArray(savedTabs)) {
+      if (Array.isArray(savedTabs) && savedTabs.length >= 0) {
         setCustomTabs(savedTabs);
       }
+      initialLoadCompleteRef.current = true;
     }
-  }, [prefsLoading, getPreference]);
+  }, [prefsLoading]); // Only depend on loading state, not getPreference
 
   // Tab management modal
   const [tabModalOpen, setTabModalOpen] = useState(false);
@@ -117,11 +121,11 @@ export default function InventoryPage() {
 
   // Save custom tabs to user preferences (syncs to server if logged in)
   useEffect(() => {
-    // Skip initial render to avoid overwriting server data before it loads
-    if (!prefsLoading) {
+    // Only save after initial load is complete (to avoid overwriting server data)
+    if (initialLoadCompleteRef.current) {
       setPreference('inventory_custom_tabs', customTabs);
     }
-  }, [customTabs, setPreference, prefsLoading]);
+  }, [customTabs, setPreference]);
 
   // Create a ref to track mount state for cleanup
   const mountedRef = React.useRef(true);
