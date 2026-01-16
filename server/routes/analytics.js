@@ -1159,6 +1159,7 @@ async function computeMovers(limitNum) {
 /**
  * GET /analytics/hub/profitability
  * Listing-level profitability analysis
+ * CACHED: Results cached for 1 minute
  */
 router.get('/hub/profitability', requireStaff, async (req, res) => {
   const { days = 30, min_units = 1 } = req.query;
@@ -1166,12 +1167,30 @@ router.get('/hub/profitability', requireStaff, async (req, res) => {
   const minUnits = parseInt(min_units) || 1;
 
   try {
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - daysNum);
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const cacheKey = `profitability:${daysNum}:${minUnits}`;
+    const result = await getOrCompute(
+      cacheKey,
+      async () => computeProfitability(daysNum, minUnits),
+      { ttlMs: TTL.MEDIUM, namespace: NAMESPACES.ANALYTICS }
+    );
 
-    // Fetch order lines with BOM data
-    const { data: orderLines, error } = await supabase
+    sendSuccess(res, result);
+  } catch (err) {
+    console.error('Profitability query error:', err);
+    return errors.internal(res, 'Failed to fetch profitability data');
+  }
+});
+
+/**
+ * Compute profitability (extracted for caching)
+ */
+async function computeProfitability(daysNum, minUnits) {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - daysNum);
+  const startDateStr = startDate.toISOString().split('T')[0];
+
+  // Fetch order lines with BOM data
+  const { data: orderLines, error } = await supabase
       .from('order_lines')
       .select(`
         id,
@@ -1317,39 +1336,63 @@ router.get('/hub/profitability', requireStaff, async (req, res) => {
       ? ((totalProfit / totalRevenue) * 100).toFixed(1)
       : 0;
 
-    sendSuccess(res, {
-      summary: {
-        total_listings: profitList.length,
-        total_revenue_pence: totalRevenue,
-        total_profit_pence: totalProfit,
-        avg_margin_percent: parseFloat(avgMargin),
-        listings_with_issues: marginLeaks.length,
-      },
-      best_profit_total: bestProfitTotal,
-      best_profit_per_unit: bestProfitPerUnit,
-      worst_margin: worstMargin,
-      margin_leaks: marginLeaks,
-      period_days: daysNum,
-    });
-  } catch (err) {
-    console.error('Profitability query error:', err);
-    return errors.internal(res, 'Failed to fetch profitability data');
-  }
-});
+  return {
+    summary: {
+      total_listings: profitList.length,
+      total_revenue_pence: totalRevenue,
+      total_profit_pence: totalProfit,
+      avg_margin_percent: parseFloat(avgMargin),
+      listings_with_issues: marginLeaks.length,
+    },
+    best_profit_total: bestProfitTotal,
+    best_profit_per_unit: bestProfitPerUnit,
+    worst_margin: worstMargin,
+    margin_leaks: marginLeaks,
+    period_days: daysNum,
+  };
+}
 
 /**
  * GET /analytics/hub/stock-risk
  * Listing-level stock risk (days of cover, stockout prediction)
+ * CACHED: Results cached for 1 minute
+ * OPTIMIZED: Parallel queries
  */
 router.get('/hub/stock-risk', requireStaff, async (req, res) => {
   const { location = 'Warehouse' } = req.query;
 
   try {
-    // Get active demand model
-    const demandModel = await getActiveDemandModel();
+    const cacheKey = `stock-risk:${location}`;
+    const result = await getOrCompute(
+      cacheKey,
+      async () => computeStockRisk(location),
+      { ttlMs: TTL.MEDIUM, namespace: NAMESPACES.ANALYTICS }
+    );
 
-    // Get listings with BOMs
-    const { data: listings, error: listingsError } = await supabase
+    sendSuccess(res, result);
+  } catch (err) {
+    console.error('Stock risk query error:', err);
+    return errors.internal(res, 'Failed to fetch stock risk data');
+  }
+});
+
+/**
+ * Compute stock risk (extracted for caching)
+ */
+async function computeStockRisk(location) {
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
+
+  // OPTIMIZED: Run all initial queries in parallel
+  const [
+    demandModel,
+    listingsResult,
+    stockResult,
+    salesResult
+  ] = await Promise.all([
+    getActiveDemandModel(),
+    supabase
       .from('listing_memory')
       .select(`
         id,
@@ -1373,31 +1416,12 @@ router.get('/hub/stock-risk', requireStaff, async (req, res) => {
         )
       `)
       .eq('is_active', true)
-      .not('bom_id', 'is', null);
-
-    if (listingsError) throw listingsError;
-
-    // Get all component stock
-    const { data: allStock } = await supabase
+      .not('bom_id', 'is', null),
+    supabase
       .from('component_stock')
       .select('component_id, on_hand, reserved')
-      .eq('location', location);
-
-    const stockMap = new Map();
-    for (const s of allStock || []) {
-      stockMap.set(s.component_id, {
-        on_hand: s.on_hand,
-        reserved: s.reserved,
-        available: s.on_hand - s.reserved,
-      });
-    }
-
-    // Get 30-day sales data per ASIN
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const thirtyDaysAgoStr = thirtyDaysAgo.toISOString().split('T')[0];
-
-    const { data: salesData } = await supabase
+      .eq('location', location),
+    supabase
       .from('order_lines')
       .select(`
         asin,
@@ -1410,7 +1434,23 @@ router.get('/hub/stock-risk', requireStaff, async (req, res) => {
         )
       `)
       .neq('orders.status', 'CANCELLED')
-      .gte('orders.order_date', thirtyDaysAgoStr);
+      .gte('orders.order_date', thirtyDaysAgoStr)
+  ]);
+
+  if (listingsResult.error) throw listingsResult.error;
+
+  const listings = listingsResult.data;
+  const allStock = stockResult.data;
+  const salesData = salesResult.data;
+
+  const stockMap = new Map();
+  for (const s of allStock || []) {
+    stockMap.set(s.component_id, {
+      on_hand: s.on_hand,
+      reserved: s.reserved,
+      available: s.on_hand - s.reserved,
+    });
+  }
 
     const salesByAsin = new Map();
     for (const line of salesData || []) {
@@ -1535,86 +1575,110 @@ router.get('/hub/stock-risk', requireStaff, async (req, res) => {
     const lowStockCount = riskData.filter(r => r.risk === 'LOW').length;
     const okCount = riskData.filter(r => r.risk === 'OK').length;
 
-    sendSuccess(res, {
-      stock_risk: riskData,
-      summary: {
-        total_listings: riskData.length,
-        stockout_soon_count: stockoutSoonCount,
-        low_stock_count: lowStockCount,
-        ok_count: okCount,
-      },
-      has_demand_model: !!demandModel,
-    });
-  } catch (err) {
-    console.error('Stock risk query error:', err);
-    return errors.internal(res, 'Failed to fetch stock risk data');
-  }
-});
+  return {
+    stock_risk: riskData,
+    summary: {
+      total_listings: riskData.length,
+      stockout_soon_count: stockoutSoonCount,
+      low_stock_count: lowStockCount,
+      ok_count: okCount,
+    },
+    has_demand_model: !!demandModel,
+  };
+}
 
 /**
  * GET /analytics/hub/data-quality
  * Data quality warnings for analytics accuracy
+ * CACHED: Results cached for 5 minutes (stable data)
+ * OPTIMIZED: Parallel queries
  */
 router.get('/hub/data-quality', requireStaff, async (req, res) => {
   const { days = 30 } = req.query;
   const daysNum = parseInt(days) || 30;
 
   try {
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - daysNum);
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const cacheKey = `data-quality:${daysNum}`;
+    const result = await getOrCompute(
+      cacheKey,
+      async () => computeDataQuality(daysNum),
+      { ttlMs: TTL.LONG, namespace: NAMESPACES.ANALYTICS }
+    );
 
-    // Count unresolved order lines
-    const { count: unresolvedCount } = await supabase
+    sendSuccess(res, result);
+  } catch (err) {
+    console.error('Data quality check error:', err);
+    return errors.internal(res, 'Failed to check data quality');
+  }
+});
+
+/**
+ * Compute data quality (extracted for caching)
+ */
+async function computeDataQuality(daysNum) {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - daysNum);
+  const startDateStr = startDate.toISOString().split('T')[0];
+
+  // OPTIMIZED: Run independent queries in parallel
+  const [
+    unresolvedResult,
+    totalLinesResult,
+    activeListingsResult,
+    noFeeResult,
+    noCostResult
+  ] = await Promise.all([
+    supabase
       .from('order_lines')
       .select('id', { count: 'exact', head: true })
       .is('bom_id', null)
-      .gte('created_at', startDateStr);
-
-    const { count: totalLinesCount } = await supabase
+      .gte('created_at', startDateStr),
+    supabase
       .from('order_lines')
       .select('id', { count: 'exact', head: true })
-      .gte('created_at', startDateStr);
-
-    const unresolvedPercent = totalLinesCount > 0
-      ? ((unresolvedCount / totalLinesCount) * 100).toFixed(1)
-      : 0;
-
-    // Count listings missing Keepa metrics
-    const { data: activeListings } = await supabase
+      .gte('created_at', startDateStr),
+    supabase
       .from('listing_memory')
       .select('asin')
       .eq('is_active', true)
-      .not('asin', 'is', null);
-
-    const asins = activeListings?.map(l => l.asin) || [];
-    let missingKeepaCount = 0;
-
-    if (asins.length > 0) {
-      const { data: keepaAsins } = await supabase
-        .from('keepa_metrics_daily')
-        .select('asin')
-        .in('asin', asins);
-
-      const keepaAsinSet = new Set(keepaAsins?.map(k => k.asin) || []);
-      missingKeepaCount = asins.filter(a => !keepaAsinSet.has(a)).length;
-    }
-
-    // Count listings with no fee data
-    const { count: noFeeCount } = await supabase
+      .not('asin', 'is', null),
+    supabase
       .from('listing_memory')
       .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
-      .is('amazon_fee_percent', null);
-
-    // Components missing cost
-    const { count: noCostCount } = await supabase
+      .is('amazon_fee_percent', null),
+    supabase
       .from('components')
       .select('id', { count: 'exact', head: true })
       .eq('is_active', true)
-      .or('cost_ex_vat_pence.is.null,cost_ex_vat_pence.eq.0');
+      .or('cost_ex_vat_pence.is.null,cost_ex_vat_pence.eq.0')
+  ]);
 
-    const warnings = [];
+  const unresolvedCount = unresolvedResult.count || 0;
+  const totalLinesCount = totalLinesResult.count || 0;
+  const noFeeCount = noFeeResult.count || 0;
+  const noCostCount = noCostResult.count || 0;
+
+  const unresolvedPercent = totalLinesCount > 0
+    ? ((unresolvedCount / totalLinesCount) * 100).toFixed(1)
+    : 0;
+
+  // Count listings missing Keepa metrics
+  const activeListings = activeListingsResult.data;
+  const asins = activeListings?.map(l => l.asin) || [];
+  let missingKeepaCount = 0;
+
+  if (asins.length > 0) {
+    const { data: keepaAsins } = await supabase
+      .from('keepa_metrics_daily')
+      .select('asin')
+      .in('asin', asins);
+
+    const keepaAsinSet = new Set(keepaAsins?.map(k => k.asin) || []);
+    missingKeepaCount = asins.filter(a => !keepaAsinSet.has(a)).length;
+  }
+
+  const warnings = [];
 
     if (parseFloat(unresolvedPercent) > 5) {
       warnings.push({
@@ -1656,22 +1720,18 @@ router.get('/hub/data-quality', requireStaff, async (req, res) => {
       });
     }
 
-    sendSuccess(res, {
-      warnings,
-      metrics: {
-        unresolved_line_count: unresolvedCount || 0,
-        unresolved_percent: parseFloat(unresolvedPercent),
-        total_lines: totalLinesCount || 0,
-        missing_keepa_count: missingKeepaCount,
-        no_fee_count: noFeeCount || 0,
-        no_cost_count: noCostCount || 0,
-      },
-      period_days: daysNum,
-    });
-  } catch (err) {
-    console.error('Data quality check error:', err);
-    return errors.internal(res, 'Failed to check data quality');
-  }
-});
+  return {
+    warnings,
+    metrics: {
+      unresolved_line_count: unresolvedCount || 0,
+      unresolved_percent: parseFloat(unresolvedPercent),
+      total_lines: totalLinesCount || 0,
+      missing_keepa_count: missingKeepaCount,
+      no_fee_count: noFeeCount || 0,
+      no_cost_count: noCostCount || 0,
+    },
+    period_days: daysNum,
+  };
+}
 
 export default router;
