@@ -151,6 +151,7 @@ export default function InventoryPage() {
       // Use debounced query for API to prevent excessive calls while typing
       const data = await getComponents({
         limit: 500,
+        active_only: 'false', // Load ALL components, not just active ones
         search: debouncedSearchQuery || undefined,
         signal: abortControllerRef.current.signal
       });

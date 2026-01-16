@@ -377,6 +377,9 @@ export default function AmazonListingsPage() {
   // Sync pricing state
   const [syncingPricing, setSyncingPricing] = useState(false);
 
+  // Component search state for BOM editor
+  const [componentSearchQuery, setComponentSearchQuery] = useState('');
+
   // Load data
   async function load() {
     setLoading(true);
@@ -386,7 +389,7 @@ export default function AmazonListingsPage() {
         getListings(),
         getBoms(),
         getShippingOptions().catch(() => ({ options: [] })),
-        getComponents({ active_only: 'true' }).catch(() => ({ components: [] })),
+        getComponents({ active_only: 'false', limit: 5000 }).catch(() => ({ components: [] })),
       ]);
       setListings(listingData.listings || []);
       setBoms(bomData.boms || []);
@@ -784,6 +787,7 @@ export default function AmazonListingsPage() {
       shipping_rule: settings.shipping_rule || '',
       tags: settings.tags || [],
     });
+    setComponentSearchQuery(''); // Clear component search when opening modal
     setDetailModal({ open: true, listing });
   }
 
@@ -1320,29 +1324,111 @@ export default function AmazonListingsPage() {
                   </Card>
                 )}
 
-                {/* Add Component Selector */}
-                <Select
-                  label="Add Component"
-                  options={[
-                    { label: '-- Select a component to add --', value: '' },
-                    ...components
-                      .filter(c => !detailForm.bom_components.some(bc => bc.component_id === c.id))
-                      .map(c => ({
-                        label: `${c.internal_sku} - ${truncate(c.description || '', 40)}`,
-                        value: c.id
-                      }))
-                  ]}
-                  value=""
-                  onChange={(v) => {
-                    if (v) handleAddComponent(v);
-                  }}
-                  helpText="Select a component to add to this listing's BOM"
-                />
+                {/* Add Component Search */}
+                <BlockStack gap="200">
+                  <TextField
+                    label="Search & Add Components"
+                    value={componentSearchQuery}
+                    onChange={setComponentSearchQuery}
+                    placeholder="Search by SKU or description..."
+                    autoComplete="off"
+                    clearButton
+                    onClearButtonClick={() => setComponentSearchQuery('')}
+                  />
+
+                  {componentSearchQuery && (
+                    <Card>
+                      <BlockStack gap="200">
+                        {components
+                          .filter(c => {
+                            // Filter out already added components
+                            if (detailForm.bom_components.some(bc => bc.component_id === c.id)) return false;
+                            // Search filter
+                            const query = componentSearchQuery.toLowerCase();
+                            return (
+                              c.internal_sku?.toLowerCase().includes(query) ||
+                              c.description?.toLowerCase().includes(query) ||
+                              c.brand?.toLowerCase().includes(query)
+                            );
+                          })
+                          .slice(0, 20)
+                          .map((c, index) => (
+                            <div key={c.id}>
+                              {index > 0 && <Divider />}
+                              <div
+                                style={{
+                                  padding: '12px',
+                                  cursor: 'pointer',
+                                  borderRadius: '4px',
+                                  transition: 'background-color 0.2s',
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f6f6f7'; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                                onClick={() => {
+                                  handleAddComponent(c.id);
+                                  setComponentSearchQuery('');
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    handleAddComponent(c.id);
+                                    setComponentSearchQuery('');
+                                  }
+                                }}
+                              >
+                                <BlockStack gap="100">
+                                  <InlineStack align="space-between">
+                                    <Text variant="bodyMd" fontWeight="semibold">{c.internal_sku}</Text>
+                                    {c.brand && <Badge>{c.brand}</Badge>}
+                                  </InlineStack>
+                                  <Text variant="bodySm" tone="subdued">{c.description}</Text>
+                                  {c.total_on_hand !== undefined && (
+                                    <Text variant="bodySm" tone="subdued">
+                                      Stock: {c.total_on_hand || 0} units • Cost: {formatPrice(c.cost_ex_vat_pence)}
+                                    </Text>
+                                  )}
+                                </BlockStack>
+                              </div>
+                            </div>
+                          ))}
+                        {components.filter(c => {
+                          if (detailForm.bom_components.some(bc => bc.component_id === c.id)) return false;
+                          const query = componentSearchQuery.toLowerCase();
+                          return (
+                            c.internal_sku?.toLowerCase().includes(query) ||
+                            c.description?.toLowerCase().includes(query) ||
+                            c.brand?.toLowerCase().includes(query)
+                          );
+                        }).length === 0 && (
+                          <div style={{ padding: '12px', textAlign: 'center' }}>
+                            <Text variant="bodySm" tone="subdued">No components found</Text>
+                          </div>
+                        )}
+                        {components.filter(c => {
+                          if (detailForm.bom_components.some(bc => bc.component_id === c.id)) return false;
+                          const query = componentSearchQuery.toLowerCase();
+                          return (
+                            c.internal_sku?.toLowerCase().includes(query) ||
+                            c.description?.toLowerCase().includes(query) ||
+                            c.brand?.toLowerCase().includes(query)
+                          );
+                        }).length > 20 && (
+                          <div style={{ padding: '12px', textAlign: 'center' }}>
+                            <Text variant="bodySm" tone="subdued">
+                              Showing first 20 results. Keep typing to narrow down...
+                            </Text>
+                          </div>
+                        )}
+                      </BlockStack>
+                    </Card>
+                  )}
+                </BlockStack>
 
                 {detailForm.bom_components.length === 0 && (
                   <Banner tone="info">
                     <Text variant="bodyMd">
-                      No components added yet. Use the dropdown above to add components to create a Bill of Materials for this listing.
+                      No components added yet. Use the search box above to find and add components to create a Bill of Materials for this listing.
                     </Text>
                   </Banner>
                 )}
