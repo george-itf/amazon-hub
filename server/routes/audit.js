@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireStaff } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -21,7 +20,7 @@ const router = express.Router();
  * - actor_display: Filter by actor display name (partial match)
  * - correlation_id: Filter by correlation ID for related events
  */
-router.get('/timeline', requireStaff, async (req, res) => {
+router.get('/timeline', async (req, res) => {
   const {
     limit = 100,
     offset = 0,
@@ -212,7 +211,7 @@ router.get('/timeline', requireStaff, async (req, res) => {
  * GET /audit/timeline/market-context
  * Get Keepa price change events for timeline overlay
  */
-router.get('/timeline/market-context', requireStaff, async (req, res) => {
+router.get('/timeline/market-context', async (req, res) => {
   const { asin, since, until } = req.query;
 
   try {
@@ -304,7 +303,7 @@ router.get('/timeline/market-context', requireStaff, async (req, res) => {
  * GET /audit/entity/:type/:id
  * Get audit history for a specific entity
  */
-router.get('/entity/:type/:id', requireStaff, async (req, res) => {
+router.get('/entity/:type/:id', async (req, res) => {
   const { type, id } = req.params;
   const { limit = 50 } = req.query;
 
@@ -337,7 +336,7 @@ router.get('/entity/:type/:id', requireStaff, async (req, res) => {
  * GET /audit/activity
  * Get recent activity by user
  */
-router.get('/activity', requireStaff, async (req, res) => {
+router.get('/activity', async (req, res) => {
   const { user_id, limit = 50 } = req.query;
 
   try {
@@ -369,7 +368,7 @@ router.get('/activity', requireStaff, async (req, res) => {
  * GET /audit/actors
  * Get unique actors from audit log for filter dropdown
  */
-router.get('/actors', requireStaff, async (req, res) => {
+router.get('/actors', async (req, res) => {
   try {
     // Get distinct actors from audit_log
     const { data, error } = await supabase
@@ -410,7 +409,7 @@ router.get('/actors', requireStaff, async (req, res) => {
  * GET /audit/correlation/:id
  * Get all events with a specific correlation ID
  */
-router.get('/correlation/:id', requireStaff, async (req, res) => {
+router.get('/correlation/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -440,7 +439,7 @@ router.get('/correlation/:id', requireStaff, async (req, res) => {
  * GET /audit/export
  * Export audit log as CSV
  */
-router.get('/export', requireStaff, async (req, res) => {
+router.get('/export', async (req, res) => {
   const {
     entity_type,
     entity_id,

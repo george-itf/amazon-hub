@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireStaff } from '../middleware/auth.js';
 import {
   getActiveDemandModel,
   predictUnitsPerDayFromMetrics,
@@ -17,7 +16,7 @@ const DEFAULT_AMAZON_FEE_RATE = 0.15;
  * GET /analytics/summary
  * Get comprehensive analytics summary for a date range
  */
-router.get('/summary', requireStaff, async (req, res) => {
+router.get('/summary', async (req, res) => {
   const { start_date, end_date } = req.query;
 
   try {
@@ -98,7 +97,7 @@ router.get('/summary', requireStaff, async (req, res) => {
  * GET /analytics/products
  * Get product-level profitability analysis
  */
-router.get('/products', requireStaff, async (req, res) => {
+router.get('/products', async (req, res) => {
   const { start_date, end_date, sort_by = 'revenue', limit = 50 } = req.query;
 
   try {
@@ -236,7 +235,7 @@ router.get('/products', requireStaff, async (req, res) => {
  * GET /analytics/trends
  * Get daily/weekly/monthly trend data
  */
-router.get('/trends', requireStaff, async (req, res) => {
+router.get('/trends', async (req, res) => {
   const { start_date, end_date, granularity = 'daily' } = req.query;
 
   try {
@@ -355,7 +354,7 @@ router.get('/trends', requireStaff, async (req, res) => {
  * GET /analytics/customers
  * Get customer analytics
  */
-router.get('/customers', requireStaff, async (req, res) => {
+router.get('/customers', async (req, res) => {
   const { start_date, end_date, limit = 20 } = req.query;
 
   try {
@@ -446,7 +445,7 @@ router.get('/customers', requireStaff, async (req, res) => {
  * GET /analytics/export
  * Export analytics data as CSV
  */
-router.get('/export', requireStaff, async (req, res) => {
+router.get('/export', async (req, res) => {
   const { start_date, end_date, type = 'orders' } = req.query;
 
   try {
@@ -725,7 +724,7 @@ function escapeCSV(value) {
  * High-level KPIs for the Analytics Hub dashboard
  * CACHED: Results are cached for 1 minute to reduce database load
  */
-router.get('/hub/summary', requireStaff, async (req, res) => {
+router.get('/hub/summary', async (req, res) => {
   const { location = 'Warehouse', days = 30 } = req.query;
   const daysNum = parseInt(days) || 30;
 
@@ -893,7 +892,7 @@ async function computeHubSummary(location, daysNum) {
  * Components with stock but no recent sales
  * CACHED: Results cached for 5 minutes (stable data)
  */
-router.get('/hub/dead-stock', requireStaff, async (req, res) => {
+router.get('/hub/dead-stock', async (req, res) => {
   const { location = 'Warehouse', days = 90, min_value = 0 } = req.query;
   const daysNum = parseInt(days) || 90;
   const minValue = parseInt(min_value) || 0;
@@ -990,7 +989,7 @@ async function computeDeadStock(location, daysNum, minValue) {
  * Top gainers and losers (30d vs prior 30d)
  * OPTIMIZED: Parallel queries + caching
  */
-router.get('/hub/movers', requireStaff, async (req, res) => {
+router.get('/hub/movers', async (req, res) => {
   const { limit = 10 } = req.query;
   const limitNum = Math.min(parseInt(limit) || 10, 50);
 
@@ -1161,7 +1160,7 @@ async function computeMovers(limitNum) {
  * Listing-level profitability analysis
  * CACHED: Results cached for 1 minute
  */
-router.get('/hub/profitability', requireStaff, async (req, res) => {
+router.get('/hub/profitability', async (req, res) => {
   const { days = 30, min_units = 1 } = req.query;
   const daysNum = parseInt(days) || 30;
   const minUnits = parseInt(min_units) || 1;
@@ -1358,7 +1357,7 @@ async function computeProfitability(daysNum, minUnits) {
  * CACHED: Results cached for 1 minute
  * OPTIMIZED: Parallel queries
  */
-router.get('/hub/stock-risk', requireStaff, async (req, res) => {
+router.get('/hub/stock-risk', async (req, res) => {
   const { location = 'Warehouse' } = req.query;
 
   try {
@@ -1593,7 +1592,7 @@ async function computeStockRisk(location) {
  * CACHED: Results cached for 5 minutes (stable data)
  * OPTIMIZED: Parallel queries
  */
-router.get('/hub/data-quality', requireStaff, async (req, res) => {
+router.get('/hub/data-quality', async (req, res) => {
   const { days = 30 } = req.query;
   const daysNum = parseInt(days) || 30;
 

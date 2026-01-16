@@ -2,7 +2,6 @@ import express from 'express';
 import supabase from '../services/supabase.js';
 import { fetchOpenOrders, fetchHistoricalOrders } from '../services/shopify.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import { requireIdempotencyKey } from '../middleware/idempotency.js';
 import { recordSystemEvent } from '../services/audit.js';
 import { resolveListing } from '../utils/memoryResolution.js';
@@ -69,7 +68,7 @@ function extractAmazonOrderId(shopifyOrder) {
  * Requires idempotency key to prevent duplicate processing
  * Uses distributed lock to prevent race conditions
  */
-router.post('/import', requireStaff, requireIdempotencyKey, async (req, res) => {
+router.post('/import', requireIdempotencyKey, async (req, res) => {
   const lockName = 'shopify_order_import';
   let lockAcquired = false;
 
@@ -289,7 +288,7 @@ router.post('/import', requireStaff, requireIdempotencyKey, async (req, res) => 
  * - fulfillment_status: 'any', 'fulfilled', 'unfulfilled', 'partial' (default: 'any')
  * - maxTotal: max orders to import (default: 500)
  */
-router.post('/import-historical', requireAdmin, async (req, res) => {
+router.post('/import-historical', async (req, res) => {
   try {
     const {
       created_at_min,
@@ -490,7 +489,7 @@ router.post('/import-historical', requireAdmin, async (req, res) => {
  * POST /orders/re-evaluate
  * Re-evaluate order readiness for non-picked orders
  */
-router.post('/re-evaluate', requireStaff, async (req, res) => {
+router.post('/re-evaluate', async (req, res) => {
   const { order_ids } = req.body;
 
   try {
@@ -686,7 +685,7 @@ router.get('/status/ready-to-pick', async (req, res) => {
  * Cancel an order (local status only, does not affect Shopify)
  * ADMIN only
  */
-router.post('/:id/cancel', requireAdmin, async (req, res) => {
+router.post('/:id/cancel', async (req, res) => {
   const { id } = req.params;
   const { note } = req.body;
 

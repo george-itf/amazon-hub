@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import { requireIdempotencyKey } from '../middleware/idempotency.js';
 import { auditLog, getAuditContext, recordSystemEvent } from '../services/audit.js';
 
@@ -138,7 +137,7 @@ router.get('/:id', async (req, res) => {
  * Create a new pick batch from READY_TO_PICK orders
  * Creates the batch with aggregated component requirements
  */
-router.post('/', requireStaff, async (req, res) => {
+router.post('/', async (req, res) => {
   const { order_ids, note } = req.body;
 
   if (!order_ids || !Array.isArray(order_ids) || order_ids.length === 0) {
@@ -356,7 +355,7 @@ router.post('/', requireStaff, async (req, res) => {
  * Reserve stock for a pick batch
  * ADMIN only, requires idempotency key
  */
-router.post('/:id/reserve', requireAdmin, requireIdempotencyKey, async (req, res) => {
+router.post('/:id/reserve', requireIdempotencyKey, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -402,7 +401,7 @@ router.post('/:id/reserve', requireAdmin, requireIdempotencyKey, async (req, res
  * Confirm a reserved pick batch (dispatches stock)
  * ADMIN only, requires idempotency key
  */
-router.post('/:id/confirm', requireAdmin, requireIdempotencyKey, async (req, res) => {
+router.post('/:id/confirm', requireIdempotencyKey, async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -446,7 +445,7 @@ router.post('/:id/confirm', requireAdmin, requireIdempotencyKey, async (req, res
  * Cancel a pick batch (releases reserved stock if applicable)
  * ADMIN only, requires idempotency key
  */
-router.post('/:id/cancel', requireAdmin, requireIdempotencyKey, async (req, res) => {
+router.post('/:id/cancel', requireIdempotencyKey, async (req, res) => {
   const { id } = req.params;
   const { note } = req.body;
 

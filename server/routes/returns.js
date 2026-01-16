@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import { requireIdempotencyKey } from '../middleware/idempotency.js';
 import { auditLog, getAuditContext, recordSystemEvent } from '../services/audit.js';
 
@@ -128,7 +127,7 @@ router.get('/:id', async (req, res) => {
  * Create a new return
  * ADMIN only
  */
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', async (req, res) => {
   const { order_id, order_line_id, channel = 'amazon', reason_code, customer_note, lines } = req.body;
 
   if (!lines || !Array.isArray(lines) || lines.length === 0) {
@@ -230,7 +229,7 @@ router.post('/', requireAdmin, async (req, res) => {
  * Mark a return as inspected and set dispositions
  * ADMIN only
  */
-router.post('/:id/inspect', requireAdmin, async (req, res) => {
+router.post('/:id/inspect', async (req, res) => {
   const { id } = req.params;
   const { line_dispositions, note } = req.body;
 
@@ -342,7 +341,7 @@ router.post('/:id/inspect', requireAdmin, async (req, res) => {
  * Process an inspected return (update stock based on dispositions)
  * ADMIN only, requires idempotency key
  */
-router.post('/:id/process', requireAdmin, requireIdempotencyKey, async (req, res) => {
+router.post('/:id/process', requireIdempotencyKey, async (req, res) => {
   const { id } = req.params;
 
   try {

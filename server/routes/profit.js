@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireStaff } from '../middleware/auth.js';
 import {
   calculateProfit,
   calculateTargetPrice,
@@ -29,7 +28,7 @@ const router = express.Router();
  * - Price needed for target margin
  * - Sales velocity indicators
  */
-router.post('/analyze', requireStaff, async (req, res) => {
+router.post('/analyze', async (req, res) => {
   const {
     asin,
     components = [],
@@ -293,7 +292,7 @@ router.post('/analyze', requireStaff, async (req, res) => {
  * GET /profit/quick/:asin
  * Quick profit check for an ASIN using existing BOM if linked
  */
-router.get('/quick/:asin', requireStaff, async (req, res) => {
+router.get('/quick/:asin', async (req, res) => {
   const { asin } = req.params;
 
   try {

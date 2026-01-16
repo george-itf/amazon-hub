@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import { auditLog, getAuditContext } from '../services/audit.js';
 
 const router = express.Router();
@@ -95,7 +94,7 @@ router.get('/review', async (req, res) => {
  * Reset all APPROVED BOMs back to PENDING_REVIEW
  * ADMIN only
  */
-router.post('/review/reset-all', requireAdmin, async (req, res) => {
+router.post('/review/reset-all', async (req, res) => {
   try {
     const { data: updated, error } = await supabase
       .from('boms')
@@ -392,7 +391,7 @@ router.get('/:id', async (req, res) => {
  * Create a new BOM with components
  * ADMIN only
  */
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', async (req, res) => {
   const { bundle_sku, description, components } = req.body;
 
   if (!bundle_sku) {
@@ -516,7 +515,7 @@ router.post('/', requireAdmin, async (req, res) => {
  * Update a BOM
  * ADMIN only
  */
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', async (req, res) => {
   const { id } = req.params;
   const { description, components, is_active } = req.body;
 
@@ -637,7 +636,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
  * Approve a BOM from the review queue
  * ADMIN only
  */
-router.post('/:id/approve', requireAdmin, async (req, res) => {
+router.post('/:id/approve', async (req, res) => {
   const { id } = req.params;
   const { components, description } = req.body;
 
@@ -783,7 +782,7 @@ router.post('/:id/approve', requireAdmin, async (req, res) => {
  * Reject a BOM from the review queue
  * ADMIN only
  */
-router.post('/:id/reject', requireAdmin, async (req, res) => {
+router.post('/:id/reject', async (req, res) => {
   const { id } = req.params;
   const { reason } = req.body;
 

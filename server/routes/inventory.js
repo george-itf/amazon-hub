@@ -5,7 +5,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin, requireStaff } from '../middleware/auth.js';
 import { auditLog, getAuditContext } from '../services/audit.js';
 import { allocatePool, computeRecommendations, validateAllocation } from '../utils/poolAllocation.js';
 
@@ -19,7 +18,7 @@ const router = express.Router();
  * GET /inventory/recommendations
  * Get per-BOM quantity recommendations based on pool allocations
  */
-router.get('/recommendations', requireStaff, async (req, res) => {
+router.get('/recommendations', async (req, res) => {
   const { location = 'Warehouse' } = req.query;
 
   try {
@@ -102,7 +101,7 @@ router.get('/recommendations', requireStaff, async (req, res) => {
  * GET /inventory/pools
  * List all inventory pools
  */
-router.get('/pools', requireStaff, async (req, res) => {
+router.get('/pools', async (req, res) => {
   const { location, include_inactive = 'false' } = req.query;
 
   try {
@@ -200,7 +199,7 @@ router.get('/pools', requireStaff, async (req, res) => {
  * GET /inventory/pools/:id
  * Get a specific pool with full details
  */
-router.get('/pools/:id', requireStaff, async (req, res) => {
+router.get('/pools/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -321,7 +320,7 @@ router.get('/pools/:id', requireStaff, async (req, res) => {
  * POST /inventory/pools
  * Create a new inventory pool
  */
-router.post('/pools', requireAdmin, async (req, res) => {
+router.post('/pools', async (req, res) => {
   const { name, description, pool_component_id, location = 'Warehouse' } = req.body;
 
   if (!name || !pool_component_id) {
@@ -384,7 +383,7 @@ router.post('/pools', requireAdmin, async (req, res) => {
  * PUT /inventory/pools/:id
  * Update a pool
  */
-router.put('/pools/:id', requireAdmin, async (req, res) => {
+router.put('/pools/:id', async (req, res) => {
   const { id } = req.params;
   const { name, description, is_active } = req.body;
 
@@ -439,7 +438,7 @@ router.put('/pools/:id', requireAdmin, async (req, res) => {
  * DELETE /inventory/pools/:id
  * Delete a pool (soft delete - sets is_active=false)
  */
-router.delete('/pools/:id', requireAdmin, async (req, res) => {
+router.delete('/pools/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -485,7 +484,7 @@ router.delete('/pools/:id', requireAdmin, async (req, res) => {
  * POST /inventory/pools/:poolId/members
  * Add a BOM to a pool
  */
-router.post('/pools/:poolId/members', requireAdmin, async (req, res) => {
+router.post('/pools/:poolId/members', async (req, res) => {
   const { poolId } = req.params;
   const { bom_id, weight = 1.0, min_qty = 0, max_qty = null, priority = 0 } = req.body;
 
@@ -561,7 +560,7 @@ router.post('/pools/:poolId/members', requireAdmin, async (req, res) => {
  * PUT /inventory/pools/:poolId/members/:memberId
  * Update a pool member
  */
-router.put('/pools/:poolId/members/:memberId', requireAdmin, async (req, res) => {
+router.put('/pools/:poolId/members/:memberId', async (req, res) => {
   const { poolId, memberId } = req.params;
   const { weight, min_qty, max_qty, priority, is_active } = req.body;
 
@@ -622,7 +621,7 @@ router.put('/pools/:poolId/members/:memberId', requireAdmin, async (req, res) =>
  * DELETE /inventory/pools/:poolId/members/:memberId
  * Remove a BOM from a pool
  */
-router.delete('/pools/:poolId/members/:memberId', requireAdmin, async (req, res) => {
+router.delete('/pools/:poolId/members/:memberId', async (req, res) => {
   const { poolId, memberId } = req.params;
 
   try {

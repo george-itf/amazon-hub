@@ -1,7 +1,6 @@
 import express from 'express';
 import supabase from '../services/supabase.js';
 import { sendSuccess, errors } from '../middleware/correlationId.js';
-import { requireAdmin } from '../middleware/auth.js';
 import { recordSystemEvent } from '../services/audit.js';
 import {
   getKeepaProduct,
@@ -84,7 +83,7 @@ router.get('/product/:asin', async (req, res) => {
  * ADMIN only, budgeted
  * Uses shared Keepa service for budget enforcement, caching, and logging
  */
-router.post('/refresh', requireAdmin, async (req, res) => {
+router.post('/refresh', async (req, res) => {
   const { asins } = req.body;
 
   if (!asins || !Array.isArray(asins) || asins.length === 0) {
@@ -251,7 +250,7 @@ router.get('/status', async (req, res) => {
  * Update Keepa settings
  * ADMIN only
  */
-router.put('/settings', requireAdmin, async (req, res) => {
+router.put('/settings', async (req, res) => {
   const { max_tokens_per_hour, max_tokens_per_day, min_reserve, min_refresh_minutes, domain_id } = req.body;
 
   try {
@@ -294,7 +293,7 @@ router.put('/settings', requireAdmin, async (req, res) => {
  * POST /keepa/cache/reset-stats
  * Reset cache hit/miss statistics (ADMIN only)
  */
-router.post('/cache/reset-stats', requireAdmin, async (req, res) => {
+router.post('/cache/reset-stats', async (req, res) => {
   try {
     resetCacheStats();
     sendSuccess(res, { message: 'Cache statistics reset successfully' });
@@ -309,7 +308,7 @@ router.post('/cache/reset-stats', requireAdmin, async (req, res) => {
  * Run data cleanup for Keepa tables (ADMIN only)
  * Removes old request_log (30 days), account_balance (7 days), and stale cache
  */
-router.post('/cleanup', requireAdmin, async (req, res) => {
+router.post('/cleanup', async (req, res) => {
   try {
     const results = {};
 
