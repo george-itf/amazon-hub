@@ -934,6 +934,167 @@ router.get('/order/:orderId/details', async (req, res) => {
 });
 
 /**
+ * GET /amazon/listing/:sku/details
+ * Get listing details from SP-API (price, stock, etc.)
+ */
+router.get('/listing/:sku/details', async (req, res) => {
+  const { sku } = req.params;
+
+  if (!spApiClient.isConfigured()) {
+    return errors.badRequest(res, 'SP-API credentials not configured');
+  }
+
+  try {
+    // Fetch listing details from SP-API
+    const listingData = await spApiClient.getListingsItem(sku);
+
+    // Extract price and quantity from the response
+    const summaries = listingData.summaries || [];
+    const offers = listingData.offers || [];
+    const fulfillmentAvailability = listingData.fulfillmentAvailability || [];
+
+    // Get price from offers
+    let price = null;
+    if (offers.length > 0 && offers[0].price) {
+      const priceData = offers[0].price;
+      if (priceData.listingPrice) {
+        price = {
+          amount: parseFloat(priceData.listingPrice.amount || 0),
+          currencyCode: priceData.listingPrice.currencyCode || 'GBP',
+          amount_pence: Math.round(parseFloat(priceData.listingPrice.amount || 0) * 100),
+        };
+      }
+    }
+
+    // Get quantity from fulfillment availability
+    let quantity = null;
+    if (fulfillmentAvailability.length > 0) {
+      const availability = fulfillmentAvailability[0];
+      if (availability.quantity !== undefined) {
+        quantity = parseInt(availability.quantity) || 0;
+      }
+    }
+
+    // Get ASIN
+    let asin = null;
+    if (summaries.length > 0 && summaries[0].asin) {
+      asin = summaries[0].asin;
+    }
+
+    sendSuccess(res, {
+      sku,
+      asin,
+      price,
+      quantity,
+      last_synced: new Date().toISOString(),
+      raw_data: listingData,
+    });
+  } catch (err) {
+    console.error(`Failed to fetch listing details for ${sku}:`, err);
+    return errors.internal(res, `Failed to fetch listing: ${err.message}`);
+  }
+});
+
+/**
+ * POST /amazon/listings/sync-pricing
+ * Bulk sync price and stock from SP-API for multiple listings
+ */
+router.post('/listings/sync-pricing', async (req, res) => {
+  const { listing_ids, limit = 50 } = req.body;
+
+  if (!spApiClient.isConfigured()) {
+    return errors.badRequest(res, 'SP-API credentials not configured');
+  }
+
+  try {
+    // Get listings with SKUs
+    let query = supabase
+      .from('listing_memory')
+      .select('id, asin, sku')
+      .eq('is_active', true)
+      .not('sku', 'is', null);
+
+    if (listing_ids && listing_ids.length > 0) {
+      query = query.in('id', listing_ids);
+    }
+
+    query = query.limit(Math.min(limit, 100));
+
+    const { data: listings, error: listingError } = await query;
+
+    if (listingError) throw listingError;
+
+    const results = {
+      total: listings?.length || 0,
+      synced: 0,
+      failed: 0,
+      errors: [],
+    };
+
+    // Sync each listing
+    for (const listing of listings || []) {
+      try {
+        // Fetch from SP-API
+        const listingData = await spApiClient.getListingsItem(listing.sku);
+
+        const offers = listingData.offers || [];
+        const fulfillmentAvailability = listingData.fulfillmentAvailability || [];
+
+        // Extract price
+        let pricePence = null;
+        if (offers.length > 0 && offers[0].price?.listingPrice) {
+          pricePence = Math.round(parseFloat(offers[0].price.listingPrice.amount || 0) * 100);
+        }
+
+        // Extract quantity
+        let quantity = null;
+        if (fulfillmentAvailability.length > 0) {
+          quantity = parseInt(fulfillmentAvailability[0].quantity) || 0;
+        }
+
+        // Update listing_settings with SP-API data (don't override manual overrides)
+        await supabase
+          .from('listing_settings')
+          .upsert({
+            listing_memory_id: listing.id,
+            sp_api_price_pence: pricePence,
+            sp_api_quantity: quantity,
+            sp_api_synced_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          }, {
+            onConflict: 'listing_memory_id',
+            ignoreDuplicates: false,
+          });
+
+        results.synced++;
+
+        // Small delay to respect rate limits
+        await new Promise(r => setTimeout(r, 200));
+      } catch (err) {
+        console.error(`Failed to sync ${listing.sku}:`, err.message);
+        results.failed++;
+        results.errors.push({
+          sku: listing.sku,
+          error: err.message,
+        });
+      }
+    }
+
+    await recordSystemEvent({
+      eventType: 'AMAZON_PRICING_SYNC',
+      description: `Synced pricing for ${results.synced} listings`,
+      metadata: results,
+      severity: results.failed > 0 ? 'WARN' : 'INFO',
+    });
+
+    sendSuccess(res, results);
+  } catch (err) {
+    console.error('Pricing sync failed:', err);
+    return errors.internal(res, `Sync failed: ${err.message}`);
+  }
+});
+
+/**
  * GET /amazon/scheduler/status
  * Get auto-sync scheduler status
  */

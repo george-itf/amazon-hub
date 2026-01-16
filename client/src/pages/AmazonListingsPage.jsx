@@ -44,6 +44,7 @@ import {
   getComponents,
   createBom,
   updateBom,
+  syncAmazonPricing,
 } from '../utils/api.jsx';
 import { useUserPreferences } from '../hooks/useUserPreferences.jsx';
 import HubTable, { useHubTableState, useColumnManagement } from '../components/HubTable.jsx';
@@ -234,12 +235,24 @@ export default function AmazonListingsPage() {
       sortable: true,
       render: (_, row) => {
         const settings = listingSettingsMap[row.id] || {};
+        const hasOverride = settings.price_override_pence != null;
+        const hasSPAPI = settings.sp_api_price_pence != null;
+        const displayPrice = hasOverride
+          ? settings.price_override_pence
+          : settings.sp_api_price_pence;
+
+        if (!displayPrice && displayPrice !== 0) {
+          return <span style={{ color: '#9CA3AF' }}>—</span>;
+        }
+
         return (
-          <Text variant="bodyMd">
-            {settings.price_override_pence
-              ? formatPrice(settings.price_override_pence)
-              : <span style={{ color: '#9CA3AF' }}>Auto</span>}
-          </Text>
+          <InlineStack gap="100" blockAlign="center">
+            <Text variant="bodyMd" fontWeight={hasOverride ? 'semibold' : 'regular'}>
+              {formatPrice(displayPrice)}
+            </Text>
+            {hasOverride && <Badge size="small" tone="info">Override</Badge>}
+            {!hasOverride && hasSPAPI && <Badge size="small" tone="default">SP-API</Badge>}
+          </InlineStack>
         );
       },
     },
@@ -250,22 +263,41 @@ export default function AmazonListingsPage() {
       sortable: false,
       render: (_, row) => {
         const settings = listingSettingsMap[row.id] || {};
-        if (settings.quantity_override != null) {
-          return (
-            <InlineStack gap="100">
-              <Text variant="bodyMd">{settings.quantity_override}</Text>
-              <Badge size="small" tone="info">Override</Badge>
-            </InlineStack>
-          );
+        const hasOverride = settings.quantity_override != null;
+        const hasSPAPI = settings.sp_api_quantity != null;
+        const hasCap = settings.quantity_cap != null;
+
+        // Priority: Override > SP-API > Cap > None
+        let displayQty = null;
+        let label = '';
+        let tone = 'default';
+
+        if (hasOverride) {
+          displayQty = settings.quantity_override;
+          label = 'Override';
+          tone = 'info';
+        } else if (hasSPAPI) {
+          displayQty = settings.sp_api_quantity;
+          label = 'SP-API';
+          tone = 'default';
+        } else if (hasCap) {
+          displayQty = settings.quantity_cap;
+          label = 'Cap';
+          tone = 'default';
         }
-        if (settings.quantity_cap != null) {
-          return (
-            <InlineStack gap="100">
-              <Text variant="bodyMd">Cap: {settings.quantity_cap}</Text>
-            </InlineStack>
-          );
+
+        if (displayQty == null) {
+          return <span style={{ color: '#9CA3AF' }}>—</span>;
         }
-        return <span style={{ color: '#9CA3AF' }}>Auto</span>;
+
+        return (
+          <InlineStack gap="100" blockAlign="center">
+            <Text variant="bodyMd" fontWeight={hasOverride ? 'semibold' : 'regular'}>
+              {displayQty}
+            </Text>
+            <Badge size="small" tone={tone}>{label}</Badge>
+          </InlineStack>
+        );
       },
     },
     {
@@ -341,6 +373,9 @@ export default function AmazonListingsPage() {
   // Remove BOM confirmation modal
   const [removeBomModal, setRemoveBomModal] = useState({ open: false });
   const [removingBom, setRemovingBom] = useState(false);
+
+  // Sync pricing state
+  const [syncingPricing, setSyncingPricing] = useState(false);
 
   // Load data
   async function load() {
@@ -505,13 +540,10 @@ export default function AmazonListingsPage() {
   // Stats
   const stats = useMemo(() => {
     const total = listings.length;
-    const withBom = listings.filter(l => l.bom_id).length;
-    const active = listings.filter(l => l.is_active).length;
-    const withOverrides = Object.values(listingSettingsMap).filter(s =>
-      s.price_override_pence || s.quantity_override || s.quantity_cap
-    ).length;
-    return { total, withBom, active, withOverrides };
-  }, [listings, listingSettingsMap]);
+    const bomComplete = listings.filter(l => l.bom_id).length;
+    const bomToReview = listings.filter(l => !l.bom_id).length;
+    return { total, bomComplete, bomToReview };
+  }, [listings]);
 
   // Selection scope summary for bulk actions bar
   const selectionSummary = useMemo(() => {
@@ -865,13 +897,43 @@ export default function AmazonListingsPage() {
     }
   }, [savedViewsHook, tableState.activeFilters, tableState.sortColumn, tableState.sortDirection, columns]);
 
+  // Sync pricing from Amazon SP-API
+  async function handleSyncPricing() {
+    setSyncingPricing(true);
+    try {
+      const listingIds = tableState.selectedIds.length > 0
+        ? tableState.selectedIds
+        : listings.filter(l => l.sku).map(l => l.id).slice(0, 50);
+
+      const result = await syncAmazonPricing(listingIds, 50);
+
+      setSuccessMessage(`Synced pricing for ${result.synced} of ${result.total} listing(s)`);
+      if (result.failed > 0) {
+        setError(`Failed to sync ${result.failed} listing(s)`);
+      }
+
+      // Reload data to show updated pricing
+      await load();
+    } catch (err) {
+      setError(err?.message || 'Failed to sync pricing from Amazon');
+    } finally {
+      setSyncingPricing(false);
+    }
+  }
+
   // Get BOM details for modal
 
   return (
     <Page
       title="Amazon Listings"
-      subtitle={`${stats.total} listings - ${stats.withBom} with BOM - ${stats.withOverrides} with overrides`}
+      subtitle={`${stats.total} total • ${stats.bomComplete} with BOM • ${stats.bomToReview} need review`}
       secondaryActions={[
+        {
+          content: syncingPricing ? 'Syncing...' : 'Sync from Amazon',
+          onAction: handleSyncPricing,
+          loading: syncingPricing,
+          disabled: syncingPricing,
+        },
         { content: 'Refresh', onAction: load, icon: RefreshIcon },
       ]}
     >
@@ -889,30 +951,44 @@ export default function AmazonListingsPage() {
         )}
 
         {/* Stats Cards */}
-        <div className="hub-grid hub-grid--4">
+        <div className="hub-grid hub-grid--3">
           <div className="hub-stat-card">
             <BlockStack gap="200">
-              <Text variant="bodySm" tone="subdued">Total Listings</Text>
+              <Text variant="bodySm" tone="subdued">Total</Text>
               <Text variant="headingLg" fontWeight="bold">{stats.total}</Text>
+              <Text variant="bodySm" tone="subdued">All listings</Text>
             </BlockStack>
           </div>
           <div className="hub-stat-card hub-stat-card--success">
             <BlockStack gap="200">
-              <Text variant="bodySm" tone="subdued">BOM Assigned</Text>
-              <Text variant="headingLg" fontWeight="bold" tone="success">{stats.withBom}</Text>
-              <ProgressBar progress={stats.total ? (stats.withBom / stats.total) * 100 : 0} tone="success" size="small" />
+              <Text variant="bodySm" tone="subdued">BOM Complete</Text>
+              <Text variant="headingLg" fontWeight="bold" tone="success">{stats.bomComplete}</Text>
+              <ProgressBar progress={stats.total ? (stats.bomComplete / stats.total) * 100 : 0} tone="success" size="small" />
             </BlockStack>
           </div>
-          <div className="hub-stat-card">
+          <div
+            className="hub-stat-card hub-stat-card--warning"
+            style={{ cursor: 'pointer' }}
+            onClick={() => {
+              // Filter to show only listings without BOM (review queue)
+              tableState.setFilters({ ...tableState.activeFilters, bomStatus: 'unassigned' });
+              window.scrollTo({ top: 400, behavior: 'smooth' });
+            }}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                tableState.setFilters({ ...tableState.activeFilters, bomStatus: 'unassigned' });
+                window.scrollTo({ top: 400, behavior: 'smooth' });
+              }
+            }}
+          >
             <BlockStack gap="200">
-              <Text variant="bodySm" tone="subdued">Active</Text>
-              <Text variant="headingLg" fontWeight="bold">{stats.active}</Text>
-            </BlockStack>
-          </div>
-          <div className="hub-stat-card">
-            <BlockStack gap="200">
-              <Text variant="bodySm" tone="subdued">With Overrides</Text>
-              <Text variant="headingLg" fontWeight="bold">{stats.withOverrides}</Text>
+              <Text variant="bodySm" tone="subdued">BOM To Review</Text>
+              <Text variant="headingLg" fontWeight="bold" tone={stats.bomToReview > 0 ? 'caution' : undefined}>
+                {stats.bomToReview}
+              </Text>
+              <Text variant="bodySm" tone="subdued">Click to review →</Text>
             </BlockStack>
           </div>
         </div>
