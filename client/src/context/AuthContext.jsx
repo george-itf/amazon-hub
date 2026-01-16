@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { useNavigate } from 'react-router-dom';
 import * as api from '../utils/api.jsx';
 import { setStoredToken, clearStoredToken, getStoredToken } from '../utils/api.jsx';
+import { logError, getErrorMessage } from '../utils/errorLogger.js';
 
 // Create a React context for authentication
 const AuthContext = createContext(null);
@@ -42,7 +43,7 @@ export function AuthProvider({ children }) {
       clearStoredToken();
       setUser(null);
       if (err.status !== 401) {
-        console.error('Session check error:', err);
+        logError('Session check error', err);
       }
     } finally {
       setLoading(false);
@@ -64,7 +65,7 @@ export function AuthProvider({ children }) {
       navigate('/');
       return result;
     } catch (err) {
-      setError(err.message);
+      setError(getErrorMessage(err));
       throw err;
     }
   }
@@ -85,7 +86,7 @@ export function AuthProvider({ children }) {
       navigate('/');
       return result;
     } catch (err) {
-      setError(err.message);
+      setError(getErrorMessage(err));
       throw err;
     }
   }
@@ -97,7 +98,7 @@ export function AuthProvider({ children }) {
     try {
       await api.logout();
     } catch (err) {
-      console.error('Logout error:', err);
+      logError('Logout error', err);
     } finally {
       // Clear stored token
       clearStoredToken();
@@ -116,7 +117,7 @@ export function AuthProvider({ children }) {
       setError(null);
       await api.changePassword(currentPassword, newPassword);
     } catch (err) {
-      setError(err.message);
+      setError(getErrorMessage(err));
       throw err;
     }
   }

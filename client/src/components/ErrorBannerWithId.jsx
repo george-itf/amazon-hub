@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { Banner, Button, Text, InlineStack, Box } from '@shopify/polaris';
+import { logError } from '../utils/errorLogger.js';
 
 /**
  * ErrorBannerWithId - Displays API errors with correlation ID for support
@@ -28,7 +29,7 @@ function ErrorBannerWithId({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
-      console.error('Failed to copy correlation ID:', err);
+      logError('Failed to copy correlation ID', err);
     }
   }, [correlationId]);
 
