@@ -152,30 +152,39 @@ router.get('/pools', requireStaff, async (req, res) => {
       throw error;
     }
 
-    // Enrich with member count and stock info
-    const enrichedPools = await Promise.all(
-      (data || []).map(async (pool) => {
-        // Get stock for pool component
-        const { data: stock } = await supabase
-          .from('component_stock')
-          .select('on_hand, reserved')
-          .eq('component_id', pool.pool_component_id)
-          .eq('location', pool.location)
-          .maybeSingle();
+    // OPTIMIZED: Batch fetch all stock data in a single query instead of N+1 queries
+    const poolComponentIds = [...new Set((data || []).map(p => p.pool_component_id).filter(Boolean))];
+    const poolLocations = [...new Set((data || []).map(p => p.location).filter(Boolean))];
 
-        const activeMembers = (pool.inventory_pool_members || [])
-          .filter(m => m.is_active && m.boms?.is_active);
+    // Single query to get all relevant stock
+    let stockMap = new Map();
+    if (poolComponentIds.length > 0) {
+      const { data: allStock } = await supabase
+        .from('component_stock')
+        .select('component_id, location, on_hand, reserved')
+        .in('component_id', poolComponentIds);
 
-        return {
-          ...pool,
-          pool_on_hand: stock?.on_hand || 0,
-          pool_reserved: stock?.reserved || 0,
-          pool_available: Math.max(0, (stock?.on_hand || 0) - (stock?.reserved || 0)),
-          active_member_count: activeMembers.length,
-          total_weight: activeMembers.reduce((sum, m) => sum + (m.weight || 1), 0),
-        };
-      })
-    );
+      // Build lookup map keyed by "component_id:location"
+      for (const s of allStock || []) {
+        stockMap.set(`${s.component_id}:${s.location}`, s);
+      }
+    }
+
+    // Enrich pools with stock data from the map (no additional queries)
+    const enrichedPools = (data || []).map((pool) => {
+      const stock = stockMap.get(`${pool.pool_component_id}:${pool.location}`);
+      const activeMembers = (pool.inventory_pool_members || [])
+        .filter(m => m.is_active && m.boms?.is_active);
+
+      return {
+        ...pool,
+        pool_on_hand: stock?.on_hand || 0,
+        pool_reserved: stock?.reserved || 0,
+        pool_available: Math.max(0, (stock?.on_hand || 0) - (stock?.reserved || 0)),
+        active_member_count: activeMembers.length,
+        total_weight: activeMembers.reduce((sum, m) => sum + (m.weight || 1), 0),
+      };
+    });
 
     sendSuccess(res, {
       pools: enrichedPools,
@@ -247,30 +256,43 @@ router.get('/pools/:id', requireStaff, async (req, res) => {
     };
 
     // Calculate allocations
+    const activeMembers = (pool.inventory_pool_members || [])
+      .filter(m => m.is_active && m.boms?.is_active);
+
+    // OPTIMIZED: Batch fetch buildable for all members at once
+    const memberBomIds = activeMembers.map(m => m.bom_id);
+    const buildableMap = new Map();
+
+    if (memberBomIds.length > 0) {
+      // Use Promise.all to fetch all buildable values in parallel instead of sequential
+      const buildableResults = await Promise.all(
+        memberBomIds.map(bomId =>
+          supabase.rpc('rpc_get_bom_availability', {
+            p_bom_id: bomId,
+            p_location: pool.location,
+          }).catch(() => ({ data: null }))
+        )
+      );
+
+      // Map results to BOM IDs
+      memberBomIds.forEach((bomId, i) => {
+        const result = buildableResults[i];
+        buildableMap.set(bomId, result?.data?.data?.buildable || result?.data?.buildable || 0);
+      });
+    }
+
     const poolData = {
       pool_available: enrichedPool.pool_available,
-      members: (pool.inventory_pool_members || [])
-        .filter(m => m.is_active && m.boms?.is_active)
-        .map(m => ({
-          bom_id: m.bom_id,
-          bundle_sku: m.boms?.bundle_sku,
-          weight: m.weight,
-          min_qty: m.min_qty,
-          max_qty: m.max_qty,
-          priority: m.priority,
-          buildable: 0, // Will be calculated
-        })),
+      members: activeMembers.map(m => ({
+        bom_id: m.bom_id,
+        bundle_sku: m.boms?.bundle_sku,
+        weight: m.weight,
+        min_qty: m.min_qty,
+        max_qty: m.max_qty,
+        priority: m.priority,
+        buildable: buildableMap.get(m.bom_id) || 0,
+      })),
     };
-
-    // Get buildable for each member
-    for (const member of poolData.members) {
-      const { data: buildableData } = await supabase.rpc('rpc_get_bom_availability', {
-        p_bom_id: member.bom_id,
-        p_location: pool.location,
-      }).catch(() => ({ data: null }));
-
-      member.buildable = buildableData?.data?.buildable || 0;
-    }
 
     const allocation = allocatePool(poolData);
     const validation = validateAllocation(poolData, allocation);

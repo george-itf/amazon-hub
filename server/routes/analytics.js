@@ -6,6 +6,7 @@ import {
   getActiveDemandModel,
   predictUnitsPerDayFromMetrics,
 } from '../services/keepaDemandModel.js';
+import { getOrCompute, NAMESPACES, TTL } from '../utils/queryCache.js';
 
 const router = express.Router();
 
@@ -722,19 +723,39 @@ function escapeCSV(value) {
 /**
  * GET /analytics/hub/summary
  * High-level KPIs for the Analytics Hub dashboard
+ * CACHED: Results are cached for 1 minute to reduce database load
  */
 router.get('/hub/summary', requireStaff, async (req, res) => {
   const { location = 'Warehouse', days = 30 } = req.query;
   const daysNum = parseInt(days) || 30;
 
   try {
-    const now = new Date();
-    const startDate = new Date(now);
-    startDate.setDate(startDate.getDate() - daysNum);
-    const startDateStr = startDate.toISOString().split('T')[0];
+    // Use cache for expensive analytics queries
+    const cacheKey = `hub-summary:${location}:${daysNum}`;
+    const result = await getOrCompute(
+      cacheKey,
+      async () => computeHubSummary(location, daysNum),
+      { ttlMs: TTL.MEDIUM, namespace: NAMESPACES.ANALYTICS }
+    );
 
-    // Fetch orders for the period
-    const { data: orders, error: ordersError } = await supabase
+    sendSuccess(res, result);
+  } catch (err) {
+    console.error('Analytics hub summary error:', err);
+    return errors.internal(res, 'Failed to generate analytics summary');
+  }
+});
+
+/**
+ * Compute hub summary (extracted for caching)
+ */
+async function computeHubSummary(location, daysNum) {
+  const now = new Date();
+  const startDate = new Date(now);
+  startDate.setDate(startDate.getDate() - daysNum);
+  const startDateStr = startDate.toISOString().split('T')[0];
+
+  // Fetch orders for the period
+  const { data: orders, error: ordersError } = await supabase
       .from('orders')
       .select(`
         id,
@@ -853,27 +874,24 @@ router.get('/hub/summary', requireStaff, async (req, res) => {
       }
     }
 
-    sendSuccess(res, {
-      revenue_pence: revenuePence,
-      estimated_profit_pence: estimatedProfitPence,
-      avg_margin_percent: parseFloat(avgMarginPercent),
-      orders_count: orders?.length || 0,
-      units_sold: unitsSold,
-      dead_stock_value_pence: deadStockValuePence,
-      low_stock_count: lowStockCount,
-      stockout_soon_count: stockoutSoonCount,
-      skipped_unresolved_line_count: unresolvedLineCount,
-      period_days: daysNum,
-    });
-  } catch (err) {
-    console.error('Analytics hub summary error:', err);
-    return errors.internal(res, 'Failed to generate analytics summary');
-  }
-});
+  return {
+    revenue_pence: revenuePence,
+    estimated_profit_pence: estimatedProfitPence,
+    avg_margin_percent: parseFloat(avgMarginPercent),
+    orders_count: orders?.length || 0,
+    units_sold: unitsSold,
+    dead_stock_value_pence: deadStockValuePence,
+    low_stock_count: lowStockCount,
+    stockout_soon_count: stockoutSoonCount,
+    skipped_unresolved_line_count: unresolvedLineCount,
+    period_days: daysNum,
+  };
+}
 
 /**
  * GET /analytics/hub/dead-stock
  * Components with stock but no recent sales
+ * CACHED: Results cached for 5 minutes (stable data)
  */
 router.get('/hub/dead-stock', requireStaff, async (req, res) => {
   const { location = 'Warehouse', days = 90, min_value = 0 } = req.query;
@@ -881,12 +899,30 @@ router.get('/hub/dead-stock', requireStaff, async (req, res) => {
   const minValue = parseInt(min_value) || 0;
 
   try {
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - daysNum);
-    const cutoffDateStr = cutoffDate.toISOString();
+    const cacheKey = `dead-stock:${location}:${daysNum}:${minValue}`;
+    const result = await getOrCompute(
+      cacheKey,
+      async () => computeDeadStock(location, daysNum, minValue),
+      { ttlMs: TTL.LONG, namespace: NAMESPACES.ANALYTICS }
+    );
 
-    // Query components with stock at the location
-    const { data: stockData, error } = await supabase
+    sendSuccess(res, result);
+  } catch (err) {
+    console.error('Dead stock query error:', err);
+    return errors.internal(res, 'Failed to fetch dead stock data');
+  }
+});
+
+/**
+ * Compute dead stock (extracted for caching)
+ */
+async function computeDeadStock(location, daysNum, minValue) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - daysNum);
+  const cutoffDateStr = cutoffDate.toISOString();
+
+  // Query components with stock at the location
+  const { data: stockData, error } = await supabase
       .from('component_stock')
       .select(`
         id,
@@ -936,52 +972,68 @@ router.get('/hub/dead-stock', requireStaff, async (req, res) => {
       });
     }
 
-    // Sort by dead stock value descending
-    deadStock.sort((a, b) => b.dead_stock_value_pence - a.dead_stock_value_pence);
+  // Sort by dead stock value descending
+  deadStock.sort((a, b) => b.dead_stock_value_pence - a.dead_stock_value_pence);
 
-    const totalDeadStockValue = deadStock.reduce((sum, d) => sum + d.dead_stock_value_pence, 0);
+  const totalDeadStockValue = deadStock.reduce((sum, d) => sum + d.dead_stock_value_pence, 0);
 
-    sendSuccess(res, {
-      dead_stock: deadStock,
-      total_count: deadStock.length,
-      total_value_pence: totalDeadStockValue,
-      threshold_days: daysNum,
-    });
-  } catch (err) {
-    console.error('Dead stock query error:', err);
-    return errors.internal(res, 'Failed to fetch dead stock data');
-  }
-});
+  return {
+    dead_stock: deadStock,
+    total_count: deadStock.length,
+    total_value_pence: totalDeadStockValue,
+    threshold_days: daysNum,
+  };
+}
 
 /**
  * GET /analytics/hub/movers
  * Top gainers and losers (30d vs prior 30d)
+ * OPTIMIZED: Parallel queries + caching
  */
 router.get('/hub/movers', requireStaff, async (req, res) => {
   const { limit = 10 } = req.query;
   const limitNum = Math.min(parseInt(limit) || 10, 50);
 
   try {
-    const now = new Date();
+    const cacheKey = `movers:${limitNum}`;
+    const result = await getOrCompute(
+      cacheKey,
+      async () => computeMovers(limitNum),
+      { ttlMs: TTL.MEDIUM, namespace: NAMESPACES.ANALYTICS }
+    );
 
-    // Current period: 0-30 days ago
-    const period1End = new Date(now);
-    const period1Start = new Date(now);
-    period1Start.setDate(period1Start.getDate() - 30);
+    sendSuccess(res, result);
+  } catch (err) {
+    console.error('Movers query error:', err);
+    return errors.internal(res, 'Failed to fetch movers data');
+  }
+});
 
-    // Prior period: 31-60 days ago
-    const period2End = new Date(period1Start);
-    period2End.setDate(period2End.getDate() - 1);
-    const period2Start = new Date(period2End);
-    period2Start.setDate(period2Start.getDate() - 29);
+/**
+ * Compute movers data (extracted for caching)
+ */
+async function computeMovers(limitNum) {
+  const now = new Date();
 
-    const period1StartStr = period1Start.toISOString().split('T')[0];
-    const period1EndStr = period1End.toISOString().split('T')[0];
-    const period2StartStr = period2Start.toISOString().split('T')[0];
-    const period2EndStr = period2End.toISOString().split('T')[0];
+  // Current period: 0-30 days ago
+  const period1End = new Date(now);
+  const period1Start = new Date(now);
+  period1Start.setDate(period1Start.getDate() - 30);
 
-    // Fetch order lines for both periods
-    const { data: recentLines, error: recentError } = await supabase
+  // Prior period: 31-60 days ago
+  const period2End = new Date(period1Start);
+  period2End.setDate(period2End.getDate() - 1);
+  const period2Start = new Date(period2End);
+  period2Start.setDate(period2Start.getDate() - 29);
+
+  const period1StartStr = period1Start.toISOString().split('T')[0];
+  const period1EndStr = period1End.toISOString().split('T')[0];
+  const period2StartStr = period2Start.toISOString().split('T')[0];
+  const period2EndStr = period2End.toISOString().split('T')[0];
+
+  // OPTIMIZED: Fetch both periods in parallel
+  const [recentResult, priorResult] = await Promise.all([
+    supabase
       .from('order_lines')
       .select(`
         asin,
@@ -998,11 +1050,8 @@ router.get('/hub/movers', requireStaff, async (req, res) => {
       .eq('orders.channel', 'AMAZON')
       .neq('orders.status', 'CANCELLED')
       .gte('orders.order_date', period1StartStr)
-      .lte('orders.order_date', period1EndStr);
-
-    if (recentError) throw recentError;
-
-    const { data: priorLines, error: priorError } = await supabase
+      .lte('orders.order_date', period1EndStr),
+    supabase
       .from('order_lines')
       .select(`
         asin,
@@ -1019,9 +1068,14 @@ router.get('/hub/movers', requireStaff, async (req, res) => {
       .eq('orders.channel', 'AMAZON')
       .neq('orders.status', 'CANCELLED')
       .gte('orders.order_date', period2StartStr)
-      .lte('orders.order_date', period2EndStr);
+      .lte('orders.order_date', period2EndStr)
+  ]);
 
-    if (priorError) throw priorError;
+  if (recentResult.error) throw recentResult.error;
+  if (priorResult.error) throw priorResult.error;
+
+  const recentLines = recentResult.data;
+  const priorLines = priorResult.data;
 
     // Aggregate by ASIN/SKU
     const aggregateLines = (lines) => {
@@ -1087,24 +1141,20 @@ router.get('/hub/movers', requireStaff, async (req, res) => {
       .sort((a, b) => a.delta_units - b.delta_units)
       .slice(0, limitNum);
 
-    // New winners (sold in period 1 but not period 2)
-    const newWinners = movers
-      .filter(m => m.units_0_30 > 0 && m.units_31_60 === 0)
-      .sort((a, b) => b.units_0_30 - a.units_0_30)
-      .slice(0, limitNum);
+  // New winners (sold in period 1 but not period 2)
+  const newWinners = movers
+    .filter(m => m.units_0_30 > 0 && m.units_31_60 === 0)
+    .sort((a, b) => b.units_0_30 - a.units_0_30)
+    .slice(0, limitNum);
 
-    sendSuccess(res, {
-      top_gainers: topGainers,
-      top_losers: topLosers,
-      new_winners: newWinners,
-      period_1: { start: period1StartStr, end: period1EndStr },
-      period_2: { start: period2StartStr, end: period2EndStr },
-    });
-  } catch (err) {
-    console.error('Movers query error:', err);
-    return errors.internal(res, 'Failed to fetch movers data');
-  }
-});
+  return {
+    top_gainers: topGainers,
+    top_losers: topLosers,
+    new_winners: newWinners,
+    period_1: { start: period1StartStr, end: period1EndStr },
+    period_2: { start: period2StartStr, end: period2EndStr },
+  };
+}
 
 /**
  * GET /analytics/hub/profitability

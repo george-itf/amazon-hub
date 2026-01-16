@@ -375,55 +375,63 @@ router.get('/pulse', async (req, res) => {
  * - Convert to component demand (sum across listings × qty_required)
  * - Days of cover = on_hand / daily_demand
  * - Bucket: 0-7 (critical) / 7-14 (low) / 14-30 (medium) / 30+ (healthy)
+ *
+ * OPTIMIZED: All queries run in parallel using Promise.all
  */
 router.get('/stock-heatmap', async (req, res) => {
   try {
-    // Get active demand model
-    const model = await getActiveDemandModel();
+    // Run all independent queries in parallel for performance
+    const [
+      model,
+      componentsResult,
+      bomComponentsResult,
+      bomsResult,
+      listingsResult
+    ] = await Promise.all([
+      getActiveDemandModel(),
+      supabase
+        .from('components')
+        .select(`
+          id,
+          internal_sku,
+          description,
+          cost_price_pence,
+          component_stock (
+            on_hand,
+            reserved,
+            location
+          )
+        `)
+        .eq('is_active', true)
+        .order('internal_sku'),
+      supabase
+        .from('bom_components')
+        .select('component_id, bom_id, qty_required'),
+      supabase
+        .from('boms')
+        .select('id, bundle_sku')
+        .eq('is_active', true),
+      supabase
+        .from('listing_memory')
+        .select('id, asin, bom_id')
+        .eq('is_active', true)
+        .not('bom_id', 'is', null)
+    ]);
 
-    // Fetch all active components with stock
-    const { data: components, error: compError } = await supabase
-      .from('components')
-      .select(`
-        id,
-        internal_sku,
-        description,
-        cost_price_pence,
-        component_stock (
-          on_hand,
-          reserved,
-          location
-        )
-      `)
-      .eq('is_active', true)
-      .order('internal_sku');
-
+    const components = componentsResult.data;
+    const compError = componentsResult.error;
     if (compError) throw compError;
 
-    // Fetch all bom_components to map component → BOMs
-    const { data: bomComponents } = await supabase
-      .from('bom_components')
-      .select('component_id, bom_id, qty_required');
-
-    // Fetch all active BOMs
-    const { data: boms } = await supabase
-      .from('boms')
-      .select('id, bundle_sku')
-      .eq('is_active', true);
-
-    // Fetch listing_memory → BOM mappings
-    const { data: listings } = await supabase
-      .from('listing_memory')
-      .select('id, asin, bom_id')
-      .eq('is_active', true)
-      .not('bom_id', 'is', null);
+    const bomComponents = bomComponentsResult.data;
+    const boms = bomsResult.data;
+    const listings = listingsResult.data;
 
     // Fetch latest Keepa metrics for all relevant ASINs
     const relevantAsins = [...new Set((listings || []).map(l => l.asin).filter(Boolean))];
     let keepaMetrics = new Map();
 
     if (relevantAsins.length > 0) {
-      // Get the latest metric per ASIN
+      // Get the latest metric per ASIN - use distinct on for efficiency
       const { data: keepaData } = await supabase
         .from('keepa_metrics_daily')
         .select('asin, sales_rank, offer_count, buybox_price_pence')
