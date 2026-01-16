@@ -1,0 +1,14 @@
+{
+  "name": "amazon-hub",
+  "version": "1.0.0",
+  "description": "Amazon Hub Brain - Operations Console for Invicta Tools",
+  "private": true,
+  "scripts": {
+    "shopify": "shopify",
+    "dev": "shopify app dev"
+  },
+  "devDependencies": {
+    "@shopify/cli": "^3.0.0",
+    "@shopify/app": "^3.0.0"
+  }
+}

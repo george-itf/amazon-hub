@@ -1,0 +1,1618 @@
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3001';
+
+// Validate environment variables in production
+if (import.meta.env.PROD && !import.meta.env.VITE_API_BASE) {
+  console.warn(
+    '[API] Warning: VITE_API_BASE environment variable is not set in production. ' +
+    'API requests will default to http://localhost:3001 which may not work correctly.'
+  );
+}
+
+// Token storage helpers
+const TOKEN_KEY = 'amazon_hub_token';
+
+export function getStoredToken() {
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+export function setStoredToken(token) {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+}
+
+export function clearStoredToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+// Default request timeout (30 seconds)
+const DEFAULT_TIMEOUT = 30000;
+
+// Retry configuration
+const DEFAULT_MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
+const RETRYABLE_STATUS_CODES = [408, 429, 500, 502, 503, 504];
+
+// Request deduplication cache
+const pendingRequests = new Map();
+
+/**
+ * Sleep helper for retry delays with exponential backoff
+ */
+function sleep(ms, attempt = 0) {
+  const backoff = Math.min(ms * Math.pow(2, attempt), 10000); // Cap at 10s
+  return new Promise(resolve => setTimeout(resolve, backoff));
+}
+
+/**
+ * Check if an error is retryable
+ */
+function isRetryable(error, status) {
+  // Network errors are retryable
+  if (error.name === 'TypeError' && error.message.includes('fetch')) {
+    return true;
+  }
+  // Timeout errors are retryable
+  if (error.code === 'TIMEOUT') {
+    return true;
+  }
+  // Certain HTTP status codes are retryable
+  if (status && RETRYABLE_STATUS_CODES.includes(status)) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Generate a cache key for request deduplication
+ */
+function getRequestKey(url, options) {
+  // Only dedupe GET requests
+  if (options.method && options.method !== 'GET') {
+    return null;
+  }
+  return `GET:${url}`;
+}
+
+/**
+ * Helper to make an authenticated HTTP request.
+ * Sends the stored token via Authorization header.
+ * Parses JSON responses and throws on non-2xx statuses with structured error info.
+ * Supports retry logic, request cancellation, and deduplication.
+ *
+ * @param {string} url
+ * @param {Object} options
+ * @param {AbortSignal} options.signal - External abort signal for cancellation
+ * @param {number} options.maxRetries - Max retry attempts (default: 3)
+ * @param {boolean} options.dedupe - Enable request deduplication for GET (default: true)
+ */
+async function request(url, options = {}) {
+  const {
+    signal: externalSignal,
+    maxRetries = DEFAULT_MAX_RETRIES,
+    dedupe = true,
+    ...restOptions
+  } = options;
+
+  // Check for request deduplication
+  const cacheKey = dedupe ? getRequestKey(url, options) : null;
+  if (cacheKey && pendingRequests.has(cacheKey)) {
+    // Return the pending promise for this identical request
+    return pendingRequests.get(cacheKey);
+  }
+
+  const requestPromise = executeRequest(url, restOptions, externalSignal, maxRetries);
+
+  // Cache the promise for deduplication
+  if (cacheKey) {
+    pendingRequests.set(cacheKey, requestPromise);
+    requestPromise.finally(() => {
+      pendingRequests.delete(cacheKey);
+    });
+  }
+
+  return requestPromise;
+}
+
+/**
+ * Internal request executor with retry logic
+ */
+async function executeRequest(url, options, externalSignal, maxRetries) {
+  const token = getStoredToken();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(options.headers || {})
+  };
+
+  // Add auth token if available
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  // Add idempotency key if provided
+  if (options.idempotencyKey) {
+    headers['Idempotency-Key'] = options.idempotencyKey;
+  }
+
+  const timeout = options.timeout || DEFAULT_TIMEOUT;
+  let lastError;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // Check if externally cancelled before each attempt
+    if (externalSignal?.aborted) {
+      const error = new Error('Request cancelled');
+      error.code = 'CANCELLED';
+      throw error;
+    }
+
+    // Create internal abort controller for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+    // Link external signal to internal controller
+    const abortHandler = () => controller.abort();
+    if (externalSignal) {
+      externalSignal.addEventListener('abort', abortHandler);
+    }
+
+    let resp;
+    try {
+      resp = await fetch(`${API_BASE}${url}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+
+      clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', abortHandler);
+      }
+
+      // Handle non-JSON responses
+      const contentType = resp.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        if (!resp.ok) {
+          const error = new Error(`Request failed: ${resp.status}`);
+          error.status = resp.status;
+          if (isRetryable(error, resp.status) && attempt < maxRetries) {
+            lastError = error;
+            await sleep(RETRY_DELAY_MS, attempt);
+            continue;
+          }
+          throw error;
+        }
+        return resp.status === 204 ? null : await resp.text();
+      }
+
+      const json = await resp.json();
+
+      if (!resp.ok) {
+        // Handle server error envelope: { ok: false, error: { code, message, category, details? }, correlation_id }
+        const errorMessage = json.message
+          || json.error?.message
+          || (typeof json.error === 'string' ? json.error : null)
+          || `Request failed: ${resp.status}`;
+        const error = new Error(errorMessage);
+        error.status = resp.status;
+        error.code = json.code || json.error?.code;
+        error.correlationId = json.correlationId || json.correlation_id;
+        error.category = json.category || json.error?.category;
+        error.details = json.details || json.error?.details;
+
+        // Retry on retryable errors
+        if (isRetryable(error, resp.status) && attempt < maxRetries) {
+          lastError = error;
+          await sleep(RETRY_DELAY_MS, attempt);
+          continue;
+        }
+        throw error;
+      }
+
+      // Return data from success envelope
+      return json.data !== undefined ? json.data : json;
+
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener('abort', abortHandler);
+      }
+
+      // Handle abort errors
+      if (err.name === 'AbortError') {
+        // Check if it was external cancellation
+        if (externalSignal?.aborted) {
+          const error = new Error('Request cancelled');
+          error.code = 'CANCELLED';
+          throw error;
+        }
+        // It was a timeout
+        const error = new Error(`Request timeout after ${timeout}ms`);
+        error.code = 'TIMEOUT';
+
+        // Retry on timeout
+        if (attempt < maxRetries) {
+          lastError = error;
+          await sleep(RETRY_DELAY_MS, attempt);
+          continue;
+        }
+        throw error;
+      }
+
+      // Network errors - retry
+      if (isRetryable(err) && attempt < maxRetries) {
+        lastError = err;
+        await sleep(RETRY_DELAY_MS, attempt);
+        continue;
+      }
+
+      throw err;
+    }
+  }
+
+  // Should not reach here, but throw last error if we do
+  throw lastError || new Error('Request failed after retries');
+}
+
+/**
+ * Generate a unique idempotency key
+ */
+export function generateIdempotencyKey() {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+}
+
+// ============ Auth API ============
+
+export async function login(email, password) {
+  return request('/auth/login', {
+    method: 'POST',
+    body: { email, password }
+  });
+}
+
+export async function logout() {
+  return request('/auth/logout', { method: 'POST' });
+}
+
+export async function register(email, password, name) {
+  return request('/auth/register', {
+    method: 'POST',
+    body: { email, password, name }
+  });
+}
+
+export async function getCurrentUser() {
+  return request('/auth/me');
+}
+
+export async function changePassword(currentPassword, newPassword) {
+  return request('/auth/change-password', {
+    method: 'POST',
+    body: { current_password: currentPassword, new_password: newPassword }
+  });
+}
+
+// ============ Dashboard API ============
+
+export async function getDashboard() {
+  return request('/dashboard');
+}
+
+export async function getDashboardStats() {
+  return request('/dashboard/stats');
+}
+
+export async function getDashboardPulse() {
+  return request('/dashboard/pulse');
+}
+
+export async function getStockHeatmap() {
+  return request('/dashboard/stock-heatmap');
+}
+
+// ============ Components API ============
+
+export async function getComponents(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/components${query ? `?${query}` : ''}`);
+}
+
+export async function getComponent(id) {
+  return request(`/components/${id}`);
+}
+
+export async function createComponent(component) {
+  return request('/components', { method: 'POST', body: component });
+}
+
+export async function updateComponent(id, updates) {
+  return request(`/components/${id}`, { method: 'PUT', body: updates });
+}
+
+export async function getComponentMovements(id, params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/components/${id}/movements${query ? `?${query}` : ''}`);
+}
+
+// ============ BOMs API ============
+
+export async function getBoms(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/boms${query ? `?${query}` : ''}`);
+}
+
+export async function getBom(id) {
+  return request(`/boms/${id}`);
+}
+
+export async function createBom(bom) {
+  return request('/boms', { method: 'POST', body: bom });
+}
+
+export async function updateBom(id, updates) {
+  return request(`/boms/${id}`, { method: 'PUT', body: updates });
+}
+
+export async function getBomAvailability(id, location) {
+  const query = location ? `?location=${encodeURIComponent(location)}` : '';
+  return request(`/boms/${id}/availability${query}`);
+}
+
+// ============ BOM Review API ============
+
+export async function getBomReviewQueue(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/boms/review${query ? `?${query}` : ''}`);
+}
+
+export async function getBomReviewStats() {
+  return request('/boms/review/stats');
+}
+
+export async function approveBom(id, updates = {}) {
+  return request(`/boms/${id}/approve`, {
+    method: 'POST',
+    body: updates
+  });
+}
+
+export async function rejectBom(id, reason) {
+  return request(`/boms/${id}/reject`, {
+    method: 'POST',
+    body: { reason }
+  });
+}
+
+export async function resetAllBomReviews() {
+  return request('/boms/review/reset-all', { method: 'POST' });
+}
+
+export async function suggestBomComponents(data) {
+  return request('/boms/review/suggest-components', {
+    method: 'POST',
+    body: data
+  });
+}
+
+// ============ Listings API ============
+
+export async function getListings(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/listings${query ? `?${query}` : ''}`);
+}
+
+export async function getListing(id) {
+  return request(`/listings/${id}`);
+}
+
+export async function createListing(listing) {
+  return request('/listings', { method: 'POST', body: listing });
+}
+
+export async function updateListing(id, updates) {
+  return request(`/listings/${id}`, { method: 'PUT', body: updates });
+}
+
+export async function supersedeListing(id, data) {
+  return request(`/listings/${id}/supersede`, { method: 'POST', body: data });
+}
+
+export async function searchListings(query, activeOnly = true) {
+  return request(`/listings/search/query?q=${encodeURIComponent(query)}&active_only=${activeOnly}`);
+}
+
+export async function getListingInventory(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/listings/inventory${query ? `?${query}` : ''}`);
+}
+
+export async function getSharedComponents(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/listings/shared-components${query ? `?${query}` : ''}`);
+}
+
+export async function getComponentDependentListings(componentId, params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/components/${componentId}/dependent-listings${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Reset all BOM assignments - clears bom_id from all listing_memory records
+ * Requires admin role and confirmation string
+ */
+export async function resetAllBomAssignments() {
+  return request('/listings/admin/reset-all-boms', {
+    method: 'POST',
+    body: { confirm: 'RESET_ALL_BOMS' },
+  });
+}
+
+// ============ Orders API ============
+
+export async function getOrders(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/orders${query ? `?${query}` : ''}`);
+}
+
+export async function getOrder(id) {
+  return request(`/orders/${id}`);
+}
+
+export async function importOrders() {
+  return request('/orders/import', { method: 'POST' });
+}
+
+export async function importHistoricalOrders(options) {
+  return request('/orders/import-historical', {
+    method: 'POST',
+    body: options
+  });
+}
+
+export async function reEvaluateOrders(orderIds) {
+  return request('/orders/re-evaluate', {
+    method: 'POST',
+    body: { order_ids: orderIds }
+  });
+}
+
+export async function getReadyToPickOrders() {
+  return request('/orders/status/ready-to-pick');
+}
+
+export async function cancelOrder(id, note) {
+  return request(`/orders/${id}/cancel`, {
+    method: 'POST',
+    body: { note }
+  });
+}
+
+// ============ Pick Batches API ============
+
+export async function getPickBatches(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/pick-batches${query ? `?${query}` : ''}`);
+}
+
+export async function getPickBatch(id) {
+  return request(`/pick-batches/${id}`);
+}
+
+export async function createPickBatch(orderIds) {
+  return request('/pick-batches', {
+    method: 'POST',
+    body: { order_ids: orderIds }
+  });
+}
+
+export async function reservePickBatch(id, idempotencyKey) {
+  return request(`/pick-batches/${id}/reserve`, {
+    method: 'POST',
+    idempotencyKey
+  });
+}
+
+export async function confirmPickBatch(id, idempotencyKey) {
+  return request(`/pick-batches/${id}/confirm`, {
+    method: 'POST',
+    idempotencyKey
+  });
+}
+
+export async function cancelPickBatch(id, reason, idempotencyKey) {
+  return request(`/pick-batches/${id}/cancel`, {
+    method: 'POST',
+    body: { reason },
+    idempotencyKey
+  });
+}
+
+export async function getPickBatchPrint(id) {
+  return request(`/pick-batches/${id}/print`);
+}
+
+// ============ Stock API ============
+
+export async function getStock(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/stock${query ? `?${query}` : ''}`);
+}
+
+export async function getComponentStock(componentId) {
+  return request(`/stock/${componentId}`);
+}
+
+export async function receiveStock(componentId, location, quantity, note, idempotencyKey) {
+  return request('/stock/receive', {
+    method: 'POST',
+    body: { component_id: componentId, location, quantity, note },
+    idempotencyKey
+  });
+}
+
+export async function adjustStock(componentId, location, delta, reason, note, idempotencyKey) {
+  return request('/stock/adjust', {
+    method: 'POST',
+    body: { component_id: componentId, location, delta, reason, note },
+    idempotencyKey
+  });
+}
+
+export async function getStockMovements(componentId, params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/stock/${componentId}/movements${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Undo a stock adjustment within 2-minute window
+ * @param {string} movementId - The movement ID to undo
+ * @returns {Promise<{undone: boolean, original_movement_id: string, undo_movement_id: string, reverse_delta: number, new_on_hand: number}>}
+ */
+export async function undoStockAdjustment(movementId) {
+  return request(`/stock/undo/${movementId}`, {
+    method: 'POST',
+  });
+}
+
+// ============ Returns API ============
+
+export async function getReturns(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/returns${query ? `?${query}` : ''}`);
+}
+
+export async function getReturn(id) {
+  return request(`/returns/${id}`);
+}
+
+export async function createReturn(returnData) {
+  return request('/returns', { method: 'POST', body: returnData });
+}
+
+export async function inspectReturn(id, lineDispositions) {
+  return request(`/returns/${id}/inspect`, {
+    method: 'POST',
+    body: { line_dispositions: lineDispositions }
+  });
+}
+
+export async function processReturn(id, idempotencyKey) {
+  return request(`/returns/${id}/process`, {
+    method: 'POST',
+    idempotencyKey
+  });
+}
+
+export async function getQuarantineSummary() {
+  return request('/returns/quarantine/summary');
+}
+
+// ============ Review Queue API ============
+
+export async function getReviewQueue(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/review${query ? `?${query}` : ''}`);
+}
+
+export async function getReviewItem(id) {
+  return request(`/review/${id}`);
+}
+
+export async function getReviewStats() {
+  return request('/review/stats/summary');
+}
+
+export async function resolveReview(id, body) {
+  return request(`/review/${id}/resolve`, {
+    method: 'POST',
+    body: body
+  });
+}
+
+export async function skipReview(id, reason) {
+  return request(`/review/${id}/skip`, {
+    method: 'POST',
+    body: { reason }
+  });
+}
+
+export async function requeueReview(id) {
+  return request(`/review/${id}/requeue`, { method: 'POST' });
+}
+
+// ============ Keepa API ============
+
+export async function getKeepaProduct(asin, forceRefresh = false) {
+  return request(`/keepa/product/${asin}?force_refresh=${forceRefresh}`);
+}
+
+export async function refreshKeepaProducts(asins) {
+  return request('/keepa/refresh', {
+    method: 'POST',
+    body: { asins }
+  });
+}
+
+export async function getKeepaMetrics(asin, rangeDays = 90) {
+  return request(`/keepa/metrics/${asin}?range=${rangeDays}`);
+}
+
+export async function getKeepaStatus() {
+  return request('/keepa/status');
+}
+
+export async function updateKeepaSettings(settings) {
+  return request('/keepa/settings', {
+    method: 'PUT',
+    body: settings
+  });
+}
+
+// ============ Intelligence API ============
+
+export async function getConstraints(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/intelligence/constraints${query ? `?${query}` : ''}`);
+}
+
+export async function getConstraintDetails(componentId) {
+  return request(`/intelligence/constraints/${componentId}`);
+}
+
+export async function getBottlenecks() {
+  return request('/intelligence/bottlenecks');
+}
+
+export async function getFulfillmentReadiness() {
+  return request('/intelligence/fulfillment-readiness');
+}
+
+// ============ Audit API ============
+
+/**
+ * Get unified audit timeline with filtering
+ * @param {Object} params - Query params
+ * @param {number} params.limit - Max records (default: 100)
+ * @param {number} params.offset - Pagination offset
+ * @param {string} params.entity_type - Filter by entity type
+ * @param {string} params.entity_id - Filter by entity ID
+ * @param {string} params.since - Start date (ISO string)
+ * @param {string} params.until - End date (ISO string)
+ * @param {string} params.action - Filter by action type
+ * @param {string} params.actor_id - Filter by actor ID
+ * @param {string} params.actor_display - Filter by actor name (partial match)
+ * @param {string} params.correlation_id - Filter by correlation ID
+ */
+export async function getAuditTimeline(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/audit/timeline${query ? `?${query}` : ''}`);
+}
+
+export async function getMarketContext(asin, params = {}) {
+  const query = new URLSearchParams({ asin, ...params }).toString();
+  return request(`/audit/timeline/market-context?${query}`);
+}
+
+export async function getEntityHistory(entityType, entityId) {
+  return request(`/audit/entity/${entityType}/${entityId}`);
+}
+
+export async function getRecentActivity() {
+  return request('/audit/activity');
+}
+
+/**
+ * Get unique actors from audit log for filter dropdown
+ */
+export async function getAuditActors() {
+  return request('/audit/actors');
+}
+
+/**
+ * Get all events with a specific correlation ID
+ * @param {string} correlationId - The correlation ID
+ */
+export async function getCorrelatedEvents(correlationId) {
+  return request(`/audit/correlation/${encodeURIComponent(correlationId)}`);
+}
+
+/**
+ * Export audit log as CSV
+ * @param {Object} params - Same filters as getAuditTimeline
+ */
+export async function exportAuditLog(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const token = getStoredToken();
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    const response = await fetch(`${API_BASE}/audit/export${query ? `?${query}` : ''}`, {
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error('Export failed');
+    }
+    return response.blob();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Export request timeout');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// ============ Brain API ============
+
+export async function resolveListing(asin, sku, title) {
+  return request('/brain/resolve', {
+    method: 'POST',
+    body: { asin, sku, title }
+  });
+}
+
+export async function parseTitle(title) {
+  return request('/brain/parse', {
+    method: 'POST',
+    body: { title }
+  });
+}
+
+export async function compareTitles(title1, title2) {
+  return request('/brain/compare', {
+    method: 'POST',
+    body: { title1, title2 }
+  });
+}
+
+export async function batchResolveListing(items) {
+  return request('/brain/batch-resolve', {
+    method: 'POST',
+    body: { items }
+  });
+}
+
+export async function suggestBom(title) {
+  return request(`/brain/suggest-bom?title=${encodeURIComponent(title)}`);
+}
+
+export async function getBrainHealth() {
+  return request('/brain/health');
+}
+
+// ============ Analytics API ============
+
+export async function getAnalyticsSummary(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/summary${query ? `?${query}` : ''}`);
+}
+
+export async function getAnalyticsProducts(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/products${query ? `?${query}` : ''}`);
+}
+
+export async function getAnalyticsTrends(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/trends${query ? `?${query}` : ''}`);
+}
+
+export async function getAnalyticsCustomers(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/customers${query ? `?${query}` : ''}`);
+}
+
+export async function exportAnalytics(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  const token = getStoredToken();
+
+  // Set up request timeout
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s for exports
+
+  try {
+    const response = await fetch(`${API_BASE}/analytics/export${query ? `?${query}` : ''}`, {
+      headers: {
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      throw new Error('Export failed');
+    }
+    return response.blob();
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Export request timeout');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+// ============ Profit Analyzer API ============
+
+export async function analyzeProfitability({ asin, components, sizeTier = 'standard', targetMarginPercent = 10 }) {
+  return request('/profit/analyze', {
+    method: 'POST',
+    body: { asin, components, sizeTier, targetMarginPercent }
+  });
+}
+
+export async function quickProfitCheck(asin) {
+  return request(`/profit/quick/${asin}`);
+}
+
+// ============ Amazon SP-API ============
+
+export async function getAmazonStatus() {
+  return request('/amazon/status');
+}
+
+export async function syncAmazonOrders(daysBack = 7, statuses) {
+  return request('/amazon/sync/orders', {
+    method: 'POST',
+    body: { daysBack, statuses },
+    timeout: 120000, // 2 minute timeout for sync
+  });
+}
+
+export async function getRecentAmazonOrders(daysBack = 3) {
+  return request(`/amazon/orders/recent?daysBack=${daysBack}`);
+}
+
+export async function getAmazonOrderDetails(orderId) {
+  return request(`/amazon/order/${orderId}`);
+}
+
+export async function getAmazonOrderEnhancedDetails(orderId) {
+  return request(`/amazon/order/${orderId}/details`);
+}
+
+export async function getAmazonStats() {
+  return request('/amazon/stats');
+}
+
+export async function getAmazonSettings() {
+  return request('/amazon/settings');
+}
+
+export async function updateAmazonSettings(settings) {
+  return request('/amazon/settings', {
+    method: 'PUT',
+    body: settings,
+  });
+}
+
+export async function syncAmazonFees(daysBack = 30) {
+  return request('/amazon/sync/fees', {
+    method: 'POST',
+    body: { daysBack },
+    timeout: 120000,
+  });
+}
+
+export async function getAmazonCatalog(asin, refresh = false) {
+  return request(`/amazon/catalog/${asin}?refresh=${refresh}`);
+}
+
+export async function getAmazonSyncHistory(limit = 20) {
+  return request(`/amazon/sync/history?limit=${limit}`);
+}
+
+export async function getAmazonPendingShipments() {
+  return request('/amazon/orders/pending-shipment');
+}
+
+export async function confirmAmazonShipment(orderId, carrierCode, trackingNumber) {
+  return request('/amazon/shipment/confirm', {
+    method: 'POST',
+    body: { orderId, carrierCode, trackingNumber },
+  });
+}
+
+// ============ Amazon Catalog & Listings ============
+
+export async function syncAmazonCatalog(asins, daysBack = 30) {
+  return request('/amazon/sync/catalog', {
+    method: 'POST',
+    body: { asins, daysBack },
+    timeout: 300000, // 5 minute timeout for catalog sync
+  });
+}
+
+export async function getAmazonCatalogItems(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/amazon/catalog${query ? `?${query}` : ''}`);
+}
+
+export async function getAmazonListings(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/amazon/listings${query ? `?${query}` : ''}`);
+}
+
+export async function mapAmazonListing(asin, bomId) {
+  return request(`/amazon/listings/${asin}/map`, {
+    method: 'POST',
+    body: { bomId },
+  });
+}
+
+export async function getSchedulerStatus() {
+  return request('/amazon/scheduler/status');
+}
+
+export async function updateSchedulerSettings(settings) {
+  return request('/amazon/scheduler/settings', {
+    method: 'POST',
+    body: settings,
+  });
+}
+
+// ============ Inventory Pools API ============
+
+export async function getInventoryRecommendations(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/inventory/recommendations${query ? `?${query}` : ''}`);
+}
+
+export async function getInventoryPools(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/inventory/pools${query ? `?${query}` : ''}`);
+}
+
+export async function getInventoryPool(id) {
+  return request(`/inventory/pools/${id}`);
+}
+
+export async function createInventoryPool(pool) {
+  return request('/inventory/pools', { method: 'POST', body: pool });
+}
+
+export async function updateInventoryPool(id, updates) {
+  return request(`/inventory/pools/${id}`, { method: 'PUT', body: updates });
+}
+
+export async function deleteInventoryPool(id) {
+  return request(`/inventory/pools/${id}`, { method: 'DELETE' });
+}
+
+export async function addPoolMember(poolId, member) {
+  return request(`/inventory/pools/${poolId}/members`, {
+    method: 'POST',
+    body: member,
+  });
+}
+
+export async function updatePoolMember(poolId, memberId, updates) {
+  return request(`/inventory/pools/${poolId}/members/${memberId}`, {
+    method: 'PUT',
+    body: updates,
+  });
+}
+
+export async function removePoolMember(poolId, memberId) {
+  return request(`/inventory/pools/${poolId}/members/${memberId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function pushAmazonInventory(options = {}) {
+  const { location = 'Warehouse', dry_run = true, only_mapped = true, limit = 50 } = options;
+  return request('/amazon/inventory/push', {
+    method: 'POST',
+    body: { location, dry_run, only_mapped, limit },
+    idempotencyKey: generateIdempotencyKey(),
+    timeout: 180000, // 3 minutes for live push
+  });
+}
+
+// ============ Allocation Engine API ============
+
+export async function getAllocationPools(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/intelligence/allocation/pools${query ? `?${query}` : ''}`);
+}
+
+export async function getAllocationPreview(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/intelligence/allocation/preview${query ? `?${query}` : ''}`);
+}
+
+export async function applyAllocation(params, idempotencyKey) {
+  return request('/intelligence/allocation/apply', {
+    method: 'POST',
+    body: params,
+    idempotencyKey,
+    timeout: 180000, // 3 minutes for live push
+  });
+}
+
+/**
+ * Check if allocation preview is stale (older than threshold)
+ * @param {string} generatedAt - ISO timestamp when preview was generated
+ * @param {number} thresholdMinutes - Staleness threshold in minutes (default: 5)
+ * @returns {{isStale: boolean, ageMinutes: number}}
+ */
+export function checkPreviewStaleness(generatedAt, thresholdMinutes = 5) {
+  if (!generatedAt) {
+    return { isStale: false, ageMinutes: 0 };
+  }
+
+  const previewTime = new Date(generatedAt).getTime();
+  const now = Date.now();
+  const ageMs = now - previewTime;
+  const ageMinutes = Math.round(ageMs / 60000);
+
+  return {
+    isStale: ageMinutes >= thresholdMinutes,
+    ageMinutes,
+  };
+}
+
+// ============ UI Views API ============
+
+/**
+ * Get saved views for a page (personal + shared views)
+ * @param {string} page - Page name: 'shipping', 'listings', 'inventory', 'components', 'orders', 'boms', 'returns', 'analytics', 'review'
+ * @returns {Promise<{views: Array, personal_views: Array, shared_views: Array, page: string}>}
+ */
+export async function getSavedViews(page) {
+  return request(`/views?page=${encodeURIComponent(page)}`);
+}
+
+/**
+ * Create a new saved view
+ * @param {string} page - Page name
+ * @param {string} name - View name
+ * @param {Object} config - View configuration { filters, columns, sort, is_default }
+ * @returns {Promise<Object>} Created view
+ */
+export async function createSavedView(page, name, config = {}) {
+  const { filters = {}, columns = [], sort = {}, is_default = false } = config;
+  return request('/views', {
+    method: 'POST',
+    body: { page, name, filters, columns, sort, is_default },
+  });
+}
+
+/**
+ * Update a saved view
+ * @param {string|number} id - View ID
+ * @param {Object} config - Updated configuration { name?, filters?, columns?, sort?, is_default? }
+ * @returns {Promise<Object>} Updated view
+ */
+export async function updateSavedView(id, config) {
+  return request(`/views/${id}`, { method: 'PUT', body: config });
+}
+
+/**
+ * Delete a saved view (only own views)
+ * @param {string|number} id - View ID
+ * @returns {Promise<{deleted: boolean, id: string}>}
+ */
+export async function deleteSavedView(id) {
+  return request(`/views/${id}`, { method: 'DELETE' });
+}
+
+/**
+ * Share a personal view with all users
+ * @param {string|number} id - View ID
+ * @returns {Promise<Object>} Updated view with is_shared: true
+ */
+export async function shareSavedView(id) {
+  return request(`/views/${id}/share`, { method: 'POST' });
+}
+
+/**
+ * Unshare a shared view (make it personal again)
+ * @param {string|number} id - View ID
+ * @returns {Promise<Object>} Updated view with is_shared: false
+ */
+export async function unshareSavedView(id) {
+  return request(`/views/${id}/unshare`, { method: 'POST' });
+}
+
+/**
+ * Set a view as the default for the current page
+ * @param {string|number} id - View ID
+ * @returns {Promise<Object>} Updated view with is_default: true
+ */
+export async function setDefaultSavedView(id) {
+  return request(`/views/${id}/set-default`, { method: 'POST' });
+}
+
+/**
+ * Reorder saved views for a page
+ * @param {string} page - Page name
+ * @param {Array<string|number>} viewIds - Array of view IDs in desired order
+ * @returns {Promise<{views: Array, page: string}>}
+ */
+export async function reorderSavedViews(page, viewIds) {
+  return request('/views/reorder', {
+    method: 'POST',
+    body: { page, view_ids: viewIds },
+  });
+}
+
+// Legacy API functions for backwards compatibility
+// @deprecated Use getSavedViews(page) instead
+export async function getViews(context) {
+  return request(`/views?context=${encodeURIComponent(context)}`);
+}
+
+// @deprecated Use createSavedView(page, name, config) instead
+export async function createView(context, name, config) {
+  return request('/views', {
+    method: 'POST',
+    body: { context, name, config },
+  });
+}
+
+// @deprecated Use updateSavedView(id, config) instead
+export async function updateView(id, payload) {
+  return request(`/views/${id}`, { method: 'PUT', body: payload });
+}
+
+// @deprecated Use deleteSavedView(id) instead
+export async function deleteView(id) {
+  return request(`/views/${id}`, { method: 'DELETE' });
+}
+
+// @deprecated Use reorderSavedViews(page, viewIds) instead
+export async function reorderViews(context, viewIds) {
+  return request('/views/reorder', {
+    method: 'POST',
+    body: { context, view_ids: viewIds },
+  });
+}
+
+// ============ Listing Settings API ============
+
+export async function getListingSettings(listingMemoryIds) {
+  const params = listingMemoryIds && listingMemoryIds.length > 0
+    ? `?listing_memory_ids=${listingMemoryIds.join(',')}`
+    : '';
+  return request(`/listing-settings${params}`);
+}
+
+export async function getListingSetting(listingMemoryId) {
+  return request(`/listing-settings/${listingMemoryId}`);
+}
+
+export async function updateListingSettings(listingMemoryId, payload) {
+  return request(`/listing-settings/${listingMemoryId}`, {
+    method: 'PUT',
+    body: payload,
+  });
+}
+
+export async function deleteListingSettings(listingMemoryId) {
+  return request(`/listing-settings/${listingMemoryId}`, { method: 'DELETE' });
+}
+
+export async function getListingSettingsByGroup(groupKey) {
+  return request(`/listing-settings/by-group/${encodeURIComponent(groupKey)}`);
+}
+
+// ============ Shipping API ============
+
+/**
+ * Get Royal Mail API connection status
+ */
+export async function getShippingStatus() {
+  return request('/shipping/status');
+}
+
+/**
+ * Get available Royal Mail service codes
+ */
+export async function getShippingServices() {
+  return request('/shipping/services');
+}
+
+/**
+ * Get orders ready to ship
+ */
+export async function getReadyToShipOrders() {
+  return request('/shipping/orders/ready');
+}
+
+/**
+ * Validate orders before batch label creation (preflight check)
+ * @param {string[]} orderIds - Array of order UUIDs
+ * @param {string} serviceCode - Service code to use for cost estimation
+ * @returns {Promise<{eligible_count, ineligible_orders, estimated_cost_pence, warnings}>}
+ */
+export async function validateShippingBatch(orderIds, serviceCode) {
+  return request('/shipping/batch-validate', {
+    method: 'POST',
+    body: {
+      order_ids: orderIds,
+      service_code: serviceCode,
+    },
+  });
+}
+
+/**
+ * Create shipping labels in batch
+ * @param {string[]} orderIds - Array of order UUIDs
+ * @param {Object} options - Options
+ * @param {boolean} options.dryRun - If true, simulate without creating labels
+ * @param {string} options.serviceCode - Override service code for all labels
+ */
+export async function createShippingBatch(orderIds, options = {}) {
+  return request('/shipping/batch-create', {
+    method: 'POST',
+    body: {
+      order_ids: orderIds,
+      dry_run: options.dryRun || false,
+      service_code: options.serviceCode,
+    },
+    timeout: 120000, // 2 minute timeout for batch operations
+  });
+}
+
+/**
+ * Get recent batch operations history
+ */
+export async function getShippingBatches(limit = 20) {
+  return request(`/shipping/batches?limit=${limit}`);
+}
+
+/**
+ * Get shipping labels with optional filters
+ */
+export async function getShippingLabels(options = {}) {
+  const params = new URLSearchParams();
+  if (options.orderId) params.append('order_id', options.orderId);
+  if (options.status) params.append('status', options.status);
+  if (options.limit) params.append('limit', options.limit);
+  const query = params.toString();
+  return request(`/shipping/labels${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get today's total shipping cost
+ */
+export async function getShippingTodayCost() {
+  return request('/shipping/today-cost');
+}
+
+/**
+ * Create a single shipping label
+ */
+export async function createShippingLabel(orderId, serviceCode = 'TPN') {
+  return request('/shipping/label/create', {
+    method: 'POST',
+    body: { orderId, serviceCode },
+  });
+}
+
+/**
+ * Sync tracking numbers from Royal Mail
+ */
+export async function syncShippingTracking(options = {}) {
+  return request('/shipping/sync-tracking', {
+    method: 'POST',
+    body: {
+      daysBack: options.daysBack || 7,
+      autoConfirmAmazon: options.autoConfirmAmazon !== false,
+    },
+  });
+}
+
+/**
+ * Get tracking info for an order
+ */
+export async function getShippingTracking(orderId) {
+  return request(`/shipping/tracking/${orderId}`);
+}
+
+/**
+ * Manually confirm shipment with tracking
+ */
+export async function confirmShipment(orderId, trackingNumber, options = {}) {
+  return request(`/shipping/confirm/${orderId}`, {
+    method: 'POST',
+    body: {
+      trackingNumber,
+      carrierCode: options.carrierCode || 'Royal Mail',
+      confirmOnAmazon: options.confirmOnAmazon !== false,
+    },
+  });
+}
+
+/**
+ * Confirm multiple shipments in bulk
+ * @param {Array} shipments - Array of { orderId, trackingNumber, carrierCode }
+ * @param {boolean} confirmOnAmazon - Whether to confirm on Amazon
+ */
+export async function confirmBulkShipments(shipments, confirmOnAmazon = true) {
+  return request('/shipping/confirm-bulk', {
+    method: 'POST',
+    body: { shipments, confirmOnAmazon },
+    timeout: 180000, // 3 minute timeout for bulk
+  });
+}
+
+// ============ Shipping Rules API ============
+
+/**
+ * Get shipping options/rules for dropdown selections
+ */
+export async function getShippingOptions() {
+  return request('/shipping/rules').catch(() => ({ options: [], rules: [] }));
+}
+
+/**
+ * Get all shipping rules
+ */
+export async function getShippingRules() {
+  return request('/shipping/rules');
+}
+
+/**
+ * Create a new shipping rule
+ */
+export async function createShippingRule(data) {
+  return request('/shipping/rules', {
+    method: 'POST',
+    body: data,
+  });
+}
+
+/**
+ * Update an existing shipping rule
+ */
+export async function updateShippingRule(ruleId, data) {
+  return request(`/shipping/rules/${ruleId}`, {
+    method: 'PUT',
+    body: data,
+  });
+}
+
+/**
+ * Delete a shipping rule
+ */
+export async function deleteShippingRule(ruleId) {
+  return request(`/shipping/rules/${ruleId}`, {
+    method: 'DELETE',
+  });
+}
+
+// ============ Analytics Hub API ============
+
+/**
+ * Get analytics hub KPI summary
+ * @param {Object} params - Query params (days_back, location)
+ */
+export async function getAnalyticsHubSummary(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/hub/summary${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get dead stock analysis
+ * @param {Object} params - Query params (days_threshold, min_value_pence, location, limit)
+ */
+export async function getAnalyticsHubDeadStock(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/hub/dead-stock${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get movers analysis (gainers, losers, new winners)
+ * @param {Object} params - Query params (min_change_percent, min_units, limit)
+ */
+export async function getAnalyticsHubMovers(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/hub/movers${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get profitability analysis by listing
+ * @param {Object} params - Query params (days_back, min_orders, sort_by, limit)
+ */
+export async function getAnalyticsHubProfitability(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/hub/profitability${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get stock risk analysis (days of cover, stockout risks)
+ * @param {Object} params - Query params (days_threshold, location, limit)
+ */
+export async function getAnalyticsHubStockRisk(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/analytics/hub/stock-risk${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get data quality warnings for analytics accuracy
+ */
+export async function getAnalyticsHubDataQuality() {
+  return request('/analytics/hub/data-quality');
+}
+
+// ============ ASIN Analyzer API ============
+
+/**
+ * Analyze multiple ASINs with scoring and BOM suggestions
+ * @param {Object} params - Analysis params
+ * @param {string[]} params.asins - Array of ASINs to analyze
+ * @param {string} params.location - Warehouse location (optional)
+ * @param {number} params.bom_id - Force specific BOM for all ASINs (optional)
+ * @param {Object} params.scoring - Scoring config { min_margin, target_margin, horizon_days }
+ */
+export async function analyzeAsins(params) {
+  return request('/asin/analyze', {
+    method: 'POST',
+    body: params,
+  });
+}
+
+/**
+ * Get BOM candidates/suggestions for an ASIN
+ * @param {string} asin - ASIN to get suggestions for
+ * @param {string} title - Optional product title (improves matching when cache unavailable)
+ */
+export async function getBomCandidates(asin, title = null) {
+  let url = `/asin/bom-candidates?asin=${encodeURIComponent(asin)}`;
+  if (title) {
+    url += `&title=${encodeURIComponent(title)}`;
+  }
+  return request(url);
+}
+
+/**
+ * Reverse search: Find opportunities from a component
+ * @param {Object} params - Search params
+ * @param {string} params.component_id - Component ID to search from
+ * @param {string} params.location - Warehouse location (optional)
+ * @param {number} params.horizon_days - Forecast horizon (optional)
+ */
+export async function reverseSearchComponent(params) {
+  return request('/asin/reverse-search', {
+    method: 'POST',
+    body: params,
+  });
+}
+
+// ============ Demand Model API ============
+
+/**
+ * Get demand model status and metrics
+ */
+export async function getDemandModelStatus() {
+  return request('/intelligence/demand-model/status');
+}
+
+/**
+ * Train a new demand model (admin only)
+ * @param {Object} params - Training params
+ * @param {number} params.lookback_days - Days of data to use (optional)
+ * @param {number} params.ridge_lambda - Regularization parameter (optional)
+ */
+export async function trainDemandModel(params = {}) {
+  return request('/intelligence/demand-model/train', {
+    method: 'POST',
+    body: params,
+    timeout: 120000, // 2 minute timeout for training
+  });
+}
+
+/**
+ * Get demand prediction for an ASIN
+ * @param {string} asin - ASIN to predict
+ * @param {string} date - Optional date for historical lookup
+ */
+export async function getDemandPrediction(asin, date = null) {
+  const params = new URLSearchParams({ asin });
+  if (date) params.append('date', date);
+  return request(`/intelligence/demand-model/predict?${params.toString()}`);
+}
+
+/**
+ * Get demand model training history
+ * @param {number} limit - Max runs to return (default: 10)
+ */
+export async function getDemandModelHistory(limit = 10) {
+  return request(`/intelligence/demand-model/history?limit=${limit}`);
+}
+
+// ============ System Health API ============
+
+/**
+ * Get system health data (integrations status, sync history)
+ * @param {Object} params - Query params
+ * @param {number} params.days_back - Lookback period in days (default: 30)
+ */
+export async function getSystemHealth(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/health/system${query ? `?${query}` : ''}`);
+}
+
+/**
+ * Get recent system events
+ * @param {Object} params - Query params
+ * @param {number} params.limit - Max events to return
+ * @param {string} params.event_type - Filter by event type
+ * @param {string} params.severity - Filter by severity
+ */
+export async function getSystemEvents(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/health/events${query ? `?${query}` : ''}`);
+}
+
+// ============ User Preferences API ============
+
+/**
+ * Get all preferences for the current user
+ * @returns {Promise<{preferences: Object}>} Object with all preferences keyed by preference_key
+ */
+export async function getUserPreferences() {
+  return request('/preferences');
+}
+
+/**
+ * Get a specific preference by key
+ * @param {string} key - The preference key
+ * @returns {Promise<{value: any, exists: boolean, updated_at?: string}>}
+ */
+export async function getUserPreference(key) {
+  return request(`/preferences/${encodeURIComponent(key)}`);
+}
+
+/**
+ * Set (create or update) a preference
+ * @param {string} key - The preference key
+ * @param {any} value - The preference value (will be stored as JSON)
+ * @returns {Promise<{key: string, value: any, updated_at: string}>}
+ */
+export async function setUserPreference(key, value) {
+  return request(`/preferences/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: { value },
+  });
+}
+
+/**
+ * Delete a preference
+ * @param {string} key - The preference key to delete
+ * @returns {Promise<{deleted: boolean, key: string}>}
+ */
+export async function deleteUserPreference(key) {
+  return request(`/preferences/${encodeURIComponent(key)}`, {
+    method: 'DELETE',
+  });
+}

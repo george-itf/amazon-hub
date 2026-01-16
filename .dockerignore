@@ -1,0 +1,16 @@
+.git
+.gitignore
+client
+**/node_modules
+**/dist
+**/build
+**/.env
+**/.env.*
+.DS_Store
+*.log
+npm-debug.log
+README.md
+DEPLOYMENT.md
+**/__tests__
+**/*.test.js
+**/*.spec.js

@@ -1,0 +1,895 @@
+@import '@shopify/polaris/build/esm/styles.css';
+
+/*
+ * Amazon Hub Design System
+ * Clean, minimal design with consistent visual language
+ *
+ * Color Palette:
+ * - Primary: Amazon Orange (#FF9900)
+ * - Success: Green (#059669)
+ * - Warning: Amber (#D97706)
+ * - Critical: Red (#DC2626)
+ * - Info: Blue (#3B82F6)
+ * - Neutral: Gray scale
+ */
+
+/* ============================================
+   CSS VARIABLES - Design Tokens
+   ============================================ */
+:root {
+  /* Brand Colors */
+  --hub-primary: #FF9900;
+  --hub-primary-hover: #E68A00;
+  --hub-primary-light: #FFF3E0;
+
+  /* Semantic Colors */
+  --hub-success: #059669;
+  --hub-success-light: #D1FAE5;
+  --hub-warning: #D97706;
+  --hub-warning-light: #FEF3C7;
+  --hub-critical: #DC2626;
+  --hub-critical-light: #FEE2E2;
+  --hub-info: #3B82F6;
+  --hub-info-light: #DBEAFE;
+
+  /* Neutral Colors */
+  --hub-bg: #F8FAFC;
+  --hub-surface: #FFFFFF;
+  --hub-surface-hover: #F1F5F9;
+  --hub-border: #E2E8F0;
+  --hub-border-strong: #CBD5E1;
+  --hub-text: #1E293B;
+  --hub-text-secondary: #64748B;
+  --hub-text-muted: #94A3B8;
+
+  /* Navigation */
+  --hub-nav-bg: #1E293B;
+  --hub-nav-hover: #334155;
+  --hub-nav-active: #FF9900;
+
+  /* Spacing Scale */
+  --hub-space-xs: 4px;
+  --hub-space-sm: 8px;
+  --hub-space-md: 16px;
+  --hub-space-lg: 24px;
+  --hub-space-xl: 32px;
+  --hub-space-2xl: 48px;
+
+  /* Border Radius */
+  --hub-radius-sm: 4px;
+  --hub-radius-md: 8px;
+  --hub-radius-lg: 12px;
+  --hub-radius-xl: 16px;
+
+  /* Shadows */
+  --hub-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --hub-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --hub-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+
+  /* Transitions */
+  --hub-transition-fast: 0.15s ease;
+  --hub-transition-normal: 0.2s ease;
+
+  /* Polaris Overrides */
+  --p-background: var(--hub-bg);
+  --p-surface: var(--hub-surface);
+  --p-text: var(--hub-text);
+  --p-interactive-critical: var(--hub-primary);
+  --p-interactive-critical-hovered: var(--hub-primary-hover);
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+body {
+  background-color: var(--hub-bg);
+  color: var(--hub-text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ============================================
+   NAVIGATION - WCAG 2.1 AA Accessible
+   ============================================ */
+.Polaris-Navigation {
+  background-color: var(--hub-nav-bg) !important;
+}
+
+.Polaris-Navigation__PrimaryNavigation {
+  background-color: var(--hub-nav-bg) !important;
+}
+
+.Polaris-Frame__Navigation {
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: var(--hub-nav-bg) !important;
+}
+
+.Polaris-Navigation__Item {
+  color: #ffffff !important;
+  background-color: transparent !important;
+  border-radius: var(--hub-radius-md);
+  margin: 2px 8px;
+  transition: background-color var(--hub-transition-fast), box-shadow var(--hub-transition-fast);
+}
+
+.Polaris-Navigation__Item:hover {
+  background-color: var(--hub-nav-hover) !important;
+  color: #ffffff !important;
+}
+
+/* Keyboard focus - visible focus ring for accessibility */
+.Polaris-Navigation__Item:focus,
+.Polaris-Navigation__Item:focus-visible {
+  background-color: var(--hub-nav-hover) !important;
+  color: #ffffff !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px var(--hub-primary), 0 0 0 5px rgba(255, 153, 0, 0.3) !important;
+}
+
+.Polaris-Navigation__Item:hover *,
+.Polaris-Navigation__Item:focus * {
+  color: #ffffff !important;
+  background-color: transparent !important;
+}
+
+.Polaris-Navigation__ItemWrapper,
+.Polaris-Navigation__ItemInnerWrapper {
+  background-color: transparent !important;
+}
+
+/* Selected/active state - high contrast for visibility */
+.Polaris-Navigation__Item--selected,
+.Polaris-Navigation__Item--selected:hover {
+  background-color: var(--hub-nav-active) !important;
+  color: #000000 !important;
+}
+
+/* Selected + focused state - white focus ring for contrast */
+.Polaris-Navigation__Item--selected:focus,
+.Polaris-Navigation__Item--selected:focus-visible {
+  background-color: var(--hub-nav-active) !important;
+  color: #000000 !important;
+  box-shadow: 0 0 0 3px #ffffff, 0 0 0 5px rgba(255, 255, 255, 0.3) !important;
+}
+
+/* Text colors - WCAG AA contrast ratios */
+/* #FFFFFF on #1E293B = 13.5:1 contrast (exceeds 4.5:1 requirement) */
+.Polaris-Navigation__Text {
+  color: #ffffff !important;
+}
+
+/* Selected item text - black on orange for high contrast */
+.Polaris-Navigation__Item--selected .Polaris-Navigation__Text {
+  color: #000000 !important;
+}
+
+/* Icons - high contrast */
+.Polaris-Navigation__Icon,
+.Polaris-Navigation__Item svg {
+  fill: #F8FAFC !important;
+}
+
+.Polaris-Navigation__Item--selected .Polaris-Navigation__Icon svg,
+.Polaris-Navigation__Item--selected svg {
+  fill: #000000 !important;
+}
+
+/* Section headings - #E2E8F0 on #1E293B = 10.2:1 contrast */
+.Polaris-Navigation__SectionHeading {
+  color: #E2E8F0 !important;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Skip link for keyboard navigation */
+.hub-skip-to-content {
+  position: absolute;
+  top: -100px;
+  left: 16px;
+  background: var(--hub-primary);
+  color: #000000;
+  padding: 12px 24px;
+  font-weight: 600;
+  border-radius: 0 0 var(--hub-radius-md) var(--hub-radius-md);
+  z-index: 9999;
+  transition: top 0.2s ease;
+  text-decoration: none;
+}
+
+.hub-skip-to-content:focus {
+  top: 0;
+  outline: 3px solid #000000;
+  outline-offset: 2px;
+}
+
+/* ============================================
+   FRAME & LAYOUT
+   ============================================ */
+.Polaris-Frame__Main {
+  background-color: var(--hub-bg);
+  min-height: 100vh;
+}
+
+.Polaris-Frame__Content {
+  background-color: var(--hub-bg);
+}
+
+.Polaris-Page {
+  background-color: var(--hub-bg);
+  max-width: 1400px;
+}
+
+/* ============================================
+   CARDS - Clean minimal style
+   ============================================ */
+.Polaris-Card {
+  background-color: var(--hub-surface);
+  border-radius: var(--hub-radius-lg);
+  box-shadow: var(--hub-shadow-sm);
+  border: 1px solid var(--hub-border);
+  transition: box-shadow var(--hub-transition-fast);
+}
+
+.Polaris-Card:hover {
+  box-shadow: var(--hub-shadow-md);
+}
+
+/* Remove default Polaris card padding for custom layouts */
+.Polaris-LegacyCard__Section {
+  padding: var(--hub-space-md);
+}
+
+/* ============================================
+   BADGES - Consistent color coding
+   ============================================ */
+.Polaris-Badge--toneSuccess {
+  background-color: var(--hub-success-light) !important;
+  color: var(--hub-success) !important;
+}
+
+.Polaris-Badge--toneWarning {
+  background-color: var(--hub-warning-light) !important;
+  color: var(--hub-warning) !important;
+}
+
+.Polaris-Badge--toneCritical {
+  background-color: var(--hub-critical-light) !important;
+  color: var(--hub-critical) !important;
+}
+
+.Polaris-Badge--toneInfo {
+  background-color: var(--hub-info-light) !important;
+  color: var(--hub-info) !important;
+}
+
+/* ============================================
+   DATA TABLES - Clean styling
+   ============================================ */
+.Polaris-DataTable {
+  border-radius: var(--hub-radius-md);
+  overflow: hidden;
+}
+
+.Polaris-DataTable__Table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.Polaris-DataTable__Cell {
+  border-bottom: 1px solid var(--hub-border);
+  padding: var(--hub-space-sm) var(--hub-space-md);
+}
+
+.Polaris-DataTable__Cell--header {
+  background-color: var(--hub-bg);
+  font-weight: 600;
+  color: var(--hub-text-secondary);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.Polaris-DataTable__TableRow:hover .Polaris-DataTable__Cell {
+  background-color: var(--hub-surface-hover);
+}
+
+/* ============================================
+   BUTTONS - Primary orange accent
+   ============================================ */
+.Polaris-Button--variantPrimary {
+  background-color: var(--hub-primary) !important;
+  border-color: var(--hub-primary) !important;
+}
+
+.Polaris-Button--variantPrimary:hover {
+  background-color: var(--hub-primary-hover) !important;
+  border-color: var(--hub-primary-hover) !important;
+}
+
+/* ============================================
+   FORMS
+   ============================================ */
+.Polaris-TextField__Input {
+  border-radius: var(--hub-radius-md);
+}
+
+.Polaris-TextField__Backdrop {
+  border-radius: var(--hub-radius-md);
+}
+
+.Polaris-Select__Backdrop {
+  border-radius: var(--hub-radius-md);
+}
+
+/* ============================================
+   MODALS - Clean look
+   ============================================ */
+.Polaris-Modal-Dialog__Modal {
+  border-radius: var(--hub-radius-xl);
+  box-shadow: var(--hub-shadow-lg);
+}
+
+.Polaris-Modal-Header {
+  border-bottom: 1px solid var(--hub-border);
+}
+
+.Polaris-Modal-Footer {
+  border-top: 1px solid var(--hub-border);
+}
+
+/* ============================================
+   TABS - Clean underline style
+   ============================================ */
+.Polaris-Tabs__Tab--selected {
+  border-bottom-color: var(--hub-primary) !important;
+}
+
+.Polaris-Tabs__Tab--selected .Polaris-Tabs__Title {
+  color: var(--hub-primary) !important;
+}
+
+/* ============================================
+   BANNERS - Softer colors
+   ============================================ */
+.Polaris-Banner--toneSuccess {
+  background-color: var(--hub-success-light);
+  border-left: 4px solid var(--hub-success);
+}
+
+.Polaris-Banner--toneWarning {
+  background-color: var(--hub-warning-light);
+  border-left: 4px solid var(--hub-warning);
+}
+
+.Polaris-Banner--toneCritical {
+  background-color: var(--hub-critical-light);
+  border-left: 4px solid var(--hub-critical);
+}
+
+.Polaris-Banner--toneInfo {
+  background-color: var(--hub-info-light);
+  border-left: 4px solid var(--hub-info);
+}
+
+/* ============================================
+   SPINNERS & LOADING
+   ============================================ */
+.Polaris-Spinner {
+  margin: var(--hub-space-lg) auto;
+}
+
+/* ============================================
+   UTILITY CLASSES
+   ============================================ */
+
+/* Stat Cards */
+.hub-stat-card {
+  padding: var(--hub-space-md);
+  background: var(--hub-surface);
+  border-radius: var(--hub-radius-lg);
+  border: 1px solid var(--hub-border);
+  transition: all var(--hub-transition-fast);
+}
+
+.hub-stat-card:hover {
+  box-shadow: var(--hub-shadow-md);
+  border-color: var(--hub-border-strong);
+}
+
+.hub-stat-card--clickable {
+  cursor: pointer;
+}
+
+.hub-stat-card--highlighted {
+  background: var(--hub-primary-light);
+  border-color: var(--hub-primary);
+}
+
+.hub-stat-card--success {
+  border-left: 4px solid var(--hub-success);
+}
+
+.hub-stat-card--warning {
+  border-left: 4px solid var(--hub-warning);
+}
+
+.hub-stat-card--critical {
+  border-left: 4px solid var(--hub-critical);
+}
+
+/* Grid Layouts */
+.hub-grid {
+  display: grid;
+  gap: var(--hub-space-md);
+}
+
+.hub-grid--2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.hub-grid--3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.hub-grid--4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* Quick Action Buttons */
+.hub-quick-action {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hub-space-xs);
+  padding: var(--hub-space-xs) var(--hub-space-sm);
+  border-radius: var(--hub-radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--hub-transition-fast);
+  border: none;
+  background: transparent;
+  color: var(--hub-text-secondary);
+}
+
+.hub-quick-action:hover {
+  background: var(--hub-surface-hover);
+  color: var(--hub-text);
+}
+
+.hub-quick-action--primary {
+  color: var(--hub-primary);
+}
+
+.hub-quick-action--primary:hover {
+  background: var(--hub-primary-light);
+}
+
+/* Section Headers */
+.hub-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--hub-space-md);
+}
+
+/* KPI Display */
+.hub-kpi {
+  text-align: center;
+  padding: var(--hub-space-md);
+}
+
+.hub-kpi__value {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--hub-text);
+}
+
+.hub-kpi__label {
+  font-size: 12px;
+  color: var(--hub-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: var(--hub-space-xs);
+}
+
+.hub-kpi--success .hub-kpi__value {
+  color: var(--hub-success);
+}
+
+.hub-kpi--warning .hub-kpi__value {
+  color: var(--hub-warning);
+}
+
+.hub-kpi--critical .hub-kpi__value {
+  color: var(--hub-critical);
+}
+
+/* ============================================
+   RESPONSIVE DESIGN
+   ============================================ */
+
+/* Tablet and below */
+@media (max-width: 1024px) {
+  .hub-grid--4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .hub-grid--3 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .Polaris-Page {
+    padding-left: var(--hub-space-md);
+    padding-right: var(--hub-space-md);
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  .hub-grid--4,
+  .hub-grid--3,
+  .hub-grid--2 {
+    grid-template-columns: 1fr;
+  }
+
+  .Polaris-DataTable {
+    overflow-x: auto;
+  }
+
+  .Polaris-DataTable__Table {
+    min-width: 600px;
+  }
+
+  .hub-kpi__value {
+    font-size: 24px;
+  }
+
+  /* Stack navigation header on mobile */
+  .Polaris-Page__Header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--hub-space-sm);
+  }
+
+  .Polaris-Modal-Dialog__Modal {
+    margin: var(--hub-space-sm);
+    max-height: calc(100vh - var(--hub-space-md));
+  }
+}
+
+/* Small Mobile */
+@media (max-width: 480px) {
+  .hub-stat-card {
+    padding: var(--hub-space-sm);
+  }
+
+  .Polaris-Card {
+    border-radius: var(--hub-radius-md);
+  }
+
+  .Polaris-LegacyCard__Section {
+    padding: var(--hub-space-sm);
+  }
+}
+
+/* ============================================
+   TRANSITIONS & ANIMATIONS
+   ============================================ */
+.Polaris-Page,
+.Polaris-Card,
+.Polaris-Frame__Content {
+  transition: opacity var(--hub-transition-fast);
+}
+
+/* Smooth loading fade */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.hub-fade-in {
+  animation: fadeIn var(--hub-transition-normal);
+}
+
+/* ============================================
+   HUB TABLE COMPONENT
+   ============================================ */
+
+/* Bulk Actions Bar */
+.hub-bulk-actions-bar {
+  background: var(--hub-primary-light);
+  border-radius: var(--hub-radius-md);
+  padding: var(--hub-space-sm) var(--hub-space-md);
+  border: 1px solid var(--hub-primary);
+  animation: slideDown 0.2s ease;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Filter Chips */
+.hub-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--hub-space-sm);
+  align-items: center;
+}
+
+.hub-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hub-space-xs);
+  padding: var(--hub-space-xs) var(--hub-space-sm);
+  background: var(--hub-surface-hover);
+  border: 1px solid var(--hub-border);
+  border-radius: var(--hub-radius-sm);
+  font-size: 13px;
+  color: var(--hub-text);
+  transition: all var(--hub-transition-fast);
+}
+
+.hub-filter-chip:hover {
+  background: var(--hub-border);
+}
+
+.hub-filter-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--hub-text-secondary);
+  border-radius: 50%;
+  transition: all var(--hub-transition-fast);
+}
+
+.hub-filter-chip__remove:hover {
+  background: var(--hub-critical-light);
+  color: var(--hub-critical);
+}
+
+/* Column Drag Handle */
+.hub-column-drag-handle {
+  cursor: grab;
+  padding: var(--hub-space-xs);
+  color: var(--hub-text-muted);
+  transition: color var(--hub-transition-fast);
+}
+
+.hub-column-drag-handle:hover {
+  color: var(--hub-text-secondary);
+}
+
+.hub-column-drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Dragging column state */
+.hub-column-dragging {
+  opacity: 0.5;
+  background: var(--hub-primary-light);
+}
+
+.hub-column-drag-over {
+  border-top: 2px solid var(--hub-primary);
+}
+
+/* Selection Rail */
+.hub-selection-rail {
+  display: flex;
+  align-items: center;
+  gap: var(--hub-space-md);
+  padding: var(--hub-space-sm) var(--hub-space-md);
+  background: linear-gradient(to right, var(--hub-primary-light), var(--hub-surface));
+  border-radius: var(--hub-radius-md);
+  border: 1px solid var(--hub-primary);
+}
+
+.hub-selection-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 var(--hub-space-sm);
+  background: var(--hub-primary);
+  color: #000;
+  font-weight: 600;
+  font-size: 13px;
+  border-radius: 12px;
+}
+
+/* Table Header Actions */
+.hub-table-header {
+  display: flex;
+  align-items: center;
+  gap: var(--hub-space-md);
+  padding: var(--hub-space-md);
+  border-bottom: 1px solid var(--hub-border);
+}
+
+.hub-table-search {
+  flex: 1;
+  max-width: 400px;
+}
+
+.hub-table-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--hub-space-sm);
+}
+
+/* View Selector Styles */
+.hub-view-selector {
+  position: relative;
+}
+
+.hub-view-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--hub-space-sm) var(--hub-space-md);
+  cursor: pointer;
+  transition: background var(--hub-transition-fast);
+}
+
+.hub-view-option:hover {
+  background: var(--hub-surface-hover);
+}
+
+.hub-view-option--active {
+  background: var(--hub-primary-light);
+  font-weight: 500;
+}
+
+.hub-view-option__badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--hub-info-light);
+  color: var(--hub-info);
+}
+
+/* Empty State Enhancement */
+.hub-table-empty {
+  text-align: center;
+  padding: var(--hub-space-2xl);
+}
+
+.hub-table-empty__icon {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto var(--hub-space-md);
+  color: var(--hub-text-muted);
+}
+
+.hub-table-empty__heading {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--hub-text);
+  margin-bottom: var(--hub-space-sm);
+}
+
+.hub-table-empty__description {
+  color: var(--hub-text-secondary);
+  margin-bottom: var(--hub-space-md);
+}
+
+/* Pagination Enhancement */
+.hub-table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--hub-space-md);
+  border-top: 1px solid var(--hub-border);
+}
+
+.hub-table-pagination__info {
+  font-size: 13px;
+  color: var(--hub-text-secondary);
+}
+
+.hub-table-pagination__controls {
+  display: flex;
+  align-items: center;
+  gap: var(--hub-space-md);
+}
+
+.hub-page-size-selector {
+  display: flex;
+  align-items: center;
+  gap: var(--hub-space-xs);
+}
+
+.hub-page-size-selector__label {
+  font-size: 13px;
+  color: var(--hub-text-secondary);
+}
+
+/* Sortable Header Enhancement */
+.hub-sortable-header {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--hub-space-xs);
+}
+
+.hub-sortable-header:hover {
+  color: var(--hub-primary);
+}
+
+.hub-sort-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--hub-text-muted);
+  transition: all var(--hub-transition-fast);
+}
+
+.hub-sort-indicator--active {
+  color: var(--hub-primary);
+}
+
+.hub-sort-indicator--asc {
+  transform: rotate(180deg);
+}
+
+/* Row Hover Enhancement for IndexTable */
+.Polaris-IndexTable__TableRow:hover {
+  background: var(--hub-surface-hover) !important;
+}
+
+.Polaris-IndexTable__TableRow--selected,
+.Polaris-IndexTable__TableRow--selected:hover {
+  background: var(--hub-primary-light) !important;
+}
+
+/* IndexTable Cell Padding */
+.Polaris-IndexTable__TableCell {
+  padding: var(--hub-space-sm) var(--hub-space-md);
+}
+
+/* Clickable Row Cursor */
+.Polaris-IndexTable__TableRow--clickable {
+  cursor: pointer;
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+@media print {
+  .Polaris-Navigation,
+  .Polaris-Frame__Navigation,
+  .Polaris-Button,
+  .Polaris-Tabs {
+    display: none !important;
+  }
+
+  .Polaris-Frame__Main {
+    margin-left: 0 !important;
+  }
+
+  .Polaris-Card {
+    box-shadow: none;
+    border: 1px solid #ddd;
+  }
+}

@@ -1,0 +1,32 @@
+// Standardized error codes for Amazon Hub
+export const ErrorCode = {
+  // Validation
+  BAD_REQUEST: 'BAD_REQUEST',
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+
+  // Stock-specific
+  INSUFFICIENT_STOCK: 'INSUFFICIENT_STOCK',
+  INVALID_STATUS: 'INVALID_STATUS',
+
+  // Shipping-specific
+  INELIGIBLE_FOR_LABELING: 'INELIGIBLE_FOR_LABELING',
+  BATCH_SIZE_EXCEEDED: 'BATCH_SIZE_EXCEEDED',
+
+  // External
+  ROYAL_MAIL_ERROR: 'ROYAL_MAIL_ERROR',
+  EXTERNAL_API_ERROR: 'EXTERNAL_API_ERROR',
+
+  // Server
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+  DUPLICATE_REQUEST: 'DUPLICATE_REQUEST'
+};
+
+export const ErrorCategory = {
+  VALIDATION: 'VALIDATION',
+  CONFLICT: 'CONFLICT',
+  RATE_LIMIT: 'RATE_LIMIT',
+  EXTERNAL: 'EXTERNAL',
+  INTERNAL: 'INTERNAL'
+};
+
+export default { ErrorCode, ErrorCategory };
