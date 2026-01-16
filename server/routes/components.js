@@ -13,9 +13,9 @@ const PAGE_SIZE = 1000;
  * GET /components
  * Returns components with proper server-side pagination
  * Uses single database query with offset/limit for efficiency
- * Requires STAFF or ADMIN role
+ * Requires authentication (all users)
  */
-router.get('/', requireStaff, async (req, res) => {
+router.get('/', async (req, res) => {
   const {
     active_only = 'true',
     limit = 100,  // Sensible default - don't load thousands at once
@@ -131,7 +131,7 @@ router.get('/', requireStaff, async (req, res) => {
  * Get a single component with stock and movement history
  * Requires STAFF or ADMIN role
  */
-router.get('/:id', requireStaff, async (req, res) => {
+router.get('/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
@@ -296,7 +296,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
  * Get stock movements for a component
  * Requires STAFF or ADMIN role
  */
-router.get('/:id/movements', requireStaff, async (req, res) => {
+router.get('/:id/movements', async (req, res) => {
   const { id } = req.params;
   const { limit = 100, offset = 0 } = req.query;
 
@@ -331,7 +331,7 @@ router.get('/:id/movements', requireStaff, async (req, res) => {
  * Shows impact analysis when component stock is low
  * Requires STAFF or ADMIN role
  */
-router.get('/:id/dependent-listings', requireStaff, async (req, res) => {
+router.get('/:id/dependent-listings', async (req, res) => {
   const { id } = req.params;
   const { location = 'Warehouse' } = req.query;
 

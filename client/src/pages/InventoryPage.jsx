@@ -26,6 +26,7 @@ import { PlusIcon, DeleteIcon, EditIcon } from '@shopify/polaris-icons';
 import { getComponents, createComponent, adjustStock, getStockMovements, updateComponent, generateIdempotencyKey, undoStockAdjustment } from '../utils/api.jsx';
 import { useUserPreferences } from '../hooks/useUserPreferences.jsx';
 import { ADJUSTMENT_REASON, getReasonOptions } from '../constants/terminology';
+import { logError, getErrorMessage } from '../utils/errorLogger.js';
 
 /**
  * Format price from pence to pounds
@@ -157,9 +158,9 @@ export default function InventoryPage() {
       if (err.code === 'CANCELLED' || err.name === 'AbortError') {
         return;
       }
-      console.error(err);
+      logError('Failed to load inventory', err);
       if (mountedRef.current) {
-        setError(err.message || 'Failed to load inventory');
+        setError(getErrorMessage(err) || 'Failed to load inventory');
       }
     } finally {
       if (mountedRef.current) {
