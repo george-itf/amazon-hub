@@ -315,8 +315,10 @@ export async function getStockHeatmap() {
 // ============ Components API ============
 
 export async function getComponents(params = {}) {
-  const query = new URLSearchParams(params).toString();
-  return request(`/components${query ? `?${query}` : ''}`);
+  // Extract signal from params (it shouldn't be in the URL query string)
+  const { signal, ...queryParams } = params;
+  const query = new URLSearchParams(queryParams).toString();
+  return request(`/components${query ? `?${query}` : ''}`, signal ? { signal } : {});
 }
 
 export async function getComponent(id) {
