@@ -73,6 +73,9 @@ import { authMiddleware, requireAdmin, requireStaff } from './middleware/auth.js
 import { idempotencyMiddleware } from './middleware/idempotency.js';
 import { standardLimiter, heavyOpLimiter, authLimiter } from './middleware/rateLimit.js';
 
+// Service imports (for public endpoints)
+import supabase from './services/supabase.js';
+
 // Route imports
 import authRoutes from './routes/auth.js';
 import componentsRoutes from './routes/components.js';
