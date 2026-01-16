@@ -27,6 +27,16 @@ router.get('/', async (req, res) => {
   const requestedLimit = Math.min(parseInt(limit) || 100, 500);
   const requestedOffset = parseInt(offset) || 0;
 
+  console.log('[Components GET /] Request params:', {
+    active_only,
+    limit,
+    offset,
+    search,
+    usage_filter,
+    requestedLimit,
+    requestedOffset
+  });
+
   try {
     // Build base query for counting
     let countQuery = supabase
@@ -112,6 +122,13 @@ router.get('/', async (req, res) => {
     } else if (usage_filter === 'unassigned') {
       componentsWithAvailable = componentsWithAvailable.filter(c => c.active_bom_count === 0);
     }
+
+    console.log('[Components GET /] Returning response:', {
+      componentsCount: componentsWithAvailable.length,
+      total: totalCount,
+      limit: requestedLimit,
+      offset: requestedOffset
+    });
 
     sendSuccess(res, {
       components: componentsWithAvailable,

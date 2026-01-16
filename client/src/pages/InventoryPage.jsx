@@ -141,6 +141,10 @@ export default function InventoryPage() {
 
     setLoading(true);
     setError(null);
+    console.log('[InventoryPage] Loading components with params:', {
+      limit: 500,
+      search: debouncedSearchQuery || undefined,
+    });
     try {
       // Use sensible pagination - load first 500 items
       // Client-side filtering works on paginated results
@@ -150,14 +154,20 @@ export default function InventoryPage() {
         search: debouncedSearchQuery || undefined,
         signal: abortControllerRef.current.signal
       });
+      console.log('[InventoryPage] Received data:', data);
+      console.log('[InventoryPage] Components array:', data?.components);
+      console.log('[InventoryPage] Components count:', data?.components?.length);
       if (mountedRef.current) {
         setComponents(data.components || []);
+        console.log('[InventoryPage] Set components state to:', data.components || []);
       }
     } catch (err) {
       // Don't set error state if request was cancelled
       if (err.code === 'CANCELLED' || err.name === 'AbortError') {
+        console.log('[InventoryPage] Request was cancelled');
         return;
       }
+      console.error('[InventoryPage] Error loading inventory:', err);
       logError('Failed to load inventory', err);
       if (mountedRef.current) {
         setError(getErrorMessage(err) || 'Failed to load inventory');
