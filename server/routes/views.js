@@ -52,32 +52,46 @@ router.get('/', async (req, res) => {
   const userId = getUserId(req);
 
   try {
-    // First, check if user_id column exists (for migration compatibility)
-    const { data: columnCheck, error: columnError } = await supabase
-      .from('ui_views')
-      .select('*')
-      .limit(1);
+    // Try modern schema first (page, user_id, filters columns)
+    // Fall back to legacy schema (context, config) if needed
+    let data, error;
+    let hasUserIdColumn = true;
 
-    const hasUserIdColumn = columnCheck && columnCheck.length > 0 ? 'user_id' in columnCheck[0] : false;
-    const hasPageColumn = columnCheck && columnCheck.length > 0 ? 'page' in columnCheck[0] : false;
-    const contextColumn = hasPageColumn ? 'page' : 'context';
+    // Attempt 1: Try with 'page' column (modern schema)
+    try {
+      let query = supabase
+        .from('ui_views')
+        .select('*')
+        .eq('page', page);
 
-    // Build query based on schema
-    let query = supabase
-      .from('ui_views')
-      .select('*')
-      .eq(contextColumn, page);
-
-    // Filter by user_id and is_shared only if columns exist
-    if (hasUserIdColumn) {
       if (userId) {
         query = query.or(`user_id.eq.${userId},is_shared.eq.true`);
       } else {
         query = query.eq('is_shared', true);
       }
-    }
 
-    const { data, error } = await query.order('sort_order', { ascending: true });
+      const result = await query.order('sort_order', { ascending: true });
+      data = result.data;
+      error = result.error;
+    } catch (modernError) {
+      console.log('Modern schema query failed, trying legacy:', modernError.message);
+      // Attempt 2: Try with 'context' column (legacy schema)
+      try {
+        const legacyQuery = supabase
+          .from('ui_views')
+          .select('*')
+          .eq('context', page)
+          .order('sort_order', { ascending: true });
+
+        const legacyResult = await legacyQuery;
+        data = legacyResult.data;
+        error = legacyResult.error;
+        hasUserIdColumn = false;
+      } catch (legacyError) {
+        console.error('Both modern and legacy schema queries failed:', legacyError);
+        error = legacyError;
+      }
+    }
 
     if (error) {
       console.error('Views fetch error:', error);
