@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, memo } from 'react';
+import { useDebounce } from '../hooks/useDebounce.js';
 import {
   Page,
   Layout,
@@ -52,8 +53,9 @@ export default function ShippingPage() {
   const [batchDryRun, setBatchDryRun] = useState(false);
   const [selectedServiceCode, setSelectedServiceCode] = useState('');
 
-  // Filters
+  // Filters - debounce search for smoother filtering
   const [searchQuery, setSearchQuery] = useState('');
+  const debouncedSearchQuery = useDebounce(searchQuery, 200);
 
   // Sync tracking loading
   const [syncing, setSyncing] = useState(false);
@@ -89,12 +91,12 @@ export default function ShippingPage() {
     loadData();
   }, [loadData]);
 
-  // Filter orders
+  // Filter orders - use debounced search for smoother UX
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
-      // Search filter
-      if (searchQuery) {
-        const query = searchQuery.toLowerCase();
+      // Search filter using debounced query
+      if (debouncedSearchQuery) {
+        const query = debouncedSearchQuery.toLowerCase();
         const matches =
           order.order_number?.toLowerCase().includes(query) ||
           order.external_order_id?.toLowerCase().includes(query) ||
@@ -106,7 +108,7 @@ export default function ShippingPage() {
 
       return true;
     });
-  }, [orders, searchQuery]);
+  }, [orders, debouncedSearchQuery]);
 
   // Selection handlers
   const handleSelectOrder = (orderId) => {
