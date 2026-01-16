@@ -31,6 +31,7 @@ import {
   getDemandModelStatus,
   trainDemandModel,
   getDemandModelHistory,
+  resetAllBomAssignments,
 } from '../utils/api.jsx';
 import { useUserPreferences } from '../hooks/useUserPreferences.jsx';
 
@@ -650,6 +651,8 @@ function DemandModelCard() {
 function DataManagementCard() {
   const { deletePreference, isLoggedIn } = useUserPreferences();
   const [clearing, setClearing] = useState(false);
+  const [resettingBoms, setResettingBoms] = useState(false);
+  const [bomResetResult, setBomResetResult] = useState(null);
 
   const handleClearPreferences = async () => {
     const message = isLoggedIn
@@ -682,6 +685,43 @@ function DataManagementCard() {
     }
   };
 
+  const handleResetAllBoms = async () => {
+    const message =
+      'WARNING: This will clear ALL BOM assignments from every listing.\n\n' +
+      'All listings will be flagged for BOM review. This action cannot be undone.\n\n' +
+      'Are you sure you want to continue?';
+
+    if (!confirm(message)) return;
+
+    // Double confirmation for safety
+    const confirmText = prompt(
+      'Type "RESET ALL BOMS" to confirm this action:'
+    );
+    if (confirmText !== 'RESET ALL BOMS') {
+      alert('Reset cancelled - confirmation text did not match.');
+      return;
+    }
+
+    setResettingBoms(true);
+    setBomResetResult(null);
+
+    try {
+      const result = await resetAllBomAssignments();
+      setBomResetResult({
+        success: true,
+        message: `Successfully reset ${result.affected || 'all'} BOM assignments. All listings are now flagged for review.`,
+      });
+    } catch (err) {
+      console.error('Failed to reset BOM assignments:', err);
+      setBomResetResult({
+        success: false,
+        message: err.message || 'Failed to reset BOM assignments. Check console for details.',
+      });
+    } finally {
+      setResettingBoms(false);
+    }
+  };
+
   return (
     <Card>
       <BlockStack gap="400">
@@ -706,6 +746,34 @@ function DataManagementCard() {
               Clear Preferences
             </Button>
           </InlineStack>
+
+          <Divider />
+
+          <InlineStack align="space-between" blockAlign="center">
+            <BlockStack gap="100">
+              <Text variant="bodyMd" fontWeight="semibold">Reset All BOM Assignments</Text>
+              <Text variant="bodySm" tone="subdued">
+                Clears all BOM assignments from every listing, flagging them for manual review.
+                Use this to start fresh with BOM assignments.
+              </Text>
+            </BlockStack>
+            <Button
+              tone="critical"
+              onClick={handleResetAllBoms}
+              loading={resettingBoms}
+            >
+              Reset All BOMs
+            </Button>
+          </InlineStack>
+
+          {bomResetResult && (
+            <Banner
+              tone={bomResetResult.success ? 'success' : 'critical'}
+              onDismiss={() => setBomResetResult(null)}
+            >
+              {bomResetResult.message}
+            </Banner>
+          )}
         </BlockStack>
       </BlockStack>
     </Card>

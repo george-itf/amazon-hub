@@ -437,6 +437,17 @@ export async function getComponentDependentListings(componentId, params = {}) {
   return request(`/components/${componentId}/dependent-listings${query ? `?${query}` : ''}`);
 }
 
+/**
+ * Reset all BOM assignments - clears bom_id from all listing_memory records
+ * Requires admin role and confirmation string
+ */
+export async function resetAllBomAssignments() {
+  return request('/listings/admin/reset-all-boms', {
+    method: 'POST',
+    body: { confirm: 'RESET_ALL_BOMS' },
+  });
+}
+
 // ============ Orders API ============
 
 export async function getOrders(params = {}) {

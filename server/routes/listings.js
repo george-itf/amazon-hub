@@ -823,4 +823,54 @@ router.get('/search/query', async (req, res) => {
   }
 });
 
+/**
+ * POST /listings/admin/reset-all-boms
+ * Admin-only endpoint to clear all BOM assignments from listings
+ * Marks all listings for manual review and BOM assignment
+ * ADMIN role required
+ */
+router.post('/admin/reset-all-boms', requireAdmin, async (req, res) => {
+  const { confirm } = req.body;
+
+  if (confirm !== 'RESET_ALL_BOMS') {
+    return errors.badRequest(res, 'Must provide confirm: "RESET_ALL_BOMS" to proceed');
+  }
+
+  try {
+    // Get count before reset for audit
+    const { count: beforeCount } = await supabase
+      .from('listing_memory')
+      .select('id', { count: 'exact', head: true })
+      .not('bom_id', 'is', null);
+
+    // Clear all BOM assignments
+    const { error } = await supabase
+      .from('listing_memory')
+      .update({ bom_id: null })
+      .not('bom_id', 'is', null);
+
+    if (error) {
+      console.error('Reset all BOMs error:', error);
+      return errors.internal(res, 'Failed to reset BOM assignments');
+    }
+
+    // Audit log
+    await auditLog({
+      entityType: 'LISTING_MEMORY',
+      entityId: 'ALL',
+      action: 'BULK_UPDATE',
+      changesSummary: `Reset all BOM assignments. ${beforeCount} listings cleared for review.`,
+      ...getAuditContext(req)
+    });
+
+    sendSuccess(res, {
+      message: 'All BOM assignments have been cleared',
+      affected: beforeCount,
+    });
+  } catch (err) {
+    console.error('Reset all BOMs error:', err);
+    errors.internal(res, 'Failed to reset BOM assignments');
+  }
+});
+
 export default router;
