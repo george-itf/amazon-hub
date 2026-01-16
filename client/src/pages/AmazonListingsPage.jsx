@@ -41,6 +41,9 @@ import {
   getListingSettings,
   updateListingSettings,
   getShippingOptions,
+  getComponents,
+  createBom,
+  updateBom,
 } from '../utils/api.jsx';
 import { useUserPreferences } from '../hooks/useUserPreferences.jsx';
 import HubTable, { useHubTableState, useColumnManagement } from '../components/HubTable.jsx';
@@ -92,6 +95,7 @@ export default function AmazonListingsPage() {
   const [error, setError] = useState(null);
   const [listings, setListings] = useState([]);
   const [boms, setBoms] = useState([]);
+  const [components, setComponents] = useState([]);
   const [listingSettingsMap, setListingSettingsMap] = useState({});
   const [shippingOptions, setShippingOptions] = useState([]);
   const [successMessage, setSuccessMessage] = useState(null);
@@ -309,6 +313,8 @@ export default function AmazonListingsPage() {
   const [detailModal, setDetailModal] = useState({ open: false, listing: null });
   const [detailForm, setDetailForm] = useState({
     bom_id: '',
+    bom_sku: '',
+    bom_components: [],
     price_override_pence: '',
     quantity_override: '',
     quantity_cap: '',
@@ -347,14 +353,16 @@ export default function AmazonListingsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [listingData, bomData, shippingData] = await Promise.all([
+      const [listingData, bomData, shippingData, componentData] = await Promise.all([
         getListings(),
         getBoms(),
         getShippingOptions().catch(() => ({ options: [] })),
+        getComponents({ active_only: 'true' }).catch(() => ({ components: [] })),
       ]);
       setListings(listingData.listings || []);
       setBoms(bomData.boms || []);
       setShippingOptions(shippingData.options || []);
+      setComponents(componentData.components || []);
 
       // Load settings for all listings
       if (listingData.listings?.length > 0) {
@@ -687,11 +695,61 @@ export default function AmazonListingsPage() {
     }
   }
 
+  // Add component to BOM
+  function handleAddComponent(componentId) {
+    const component = components.find(c => c.id === componentId);
+    if (!component) return;
+
+    setDetailForm(prev => ({
+      ...prev,
+      bom_components: [
+        ...prev.bom_components,
+        {
+          component_id: component.id,
+          qty_required: 1,
+          internal_sku: component.internal_sku,
+          description: component.description,
+        },
+      ],
+    }));
+  }
+
+  // Remove component from BOM
+  function handleRemoveComponent(componentId) {
+    setDetailForm(prev => ({
+      ...prev,
+      bom_components: prev.bom_components.filter(bc => bc.component_id !== componentId),
+    }));
+  }
+
+  // Update component quantity
+  function handleUpdateComponentQty(componentId, qty) {
+    const qtyNum = parseInt(qty) || 1;
+    setDetailForm(prev => ({
+      ...prev,
+      bom_components: prev.bom_components.map(bc =>
+        bc.component_id === componentId ? { ...bc, qty_required: Math.max(1, qtyNum) } : bc
+      ),
+    }));
+  }
+
   // Open listing detail modal
   function openDetailModal(listing) {
     const settings = listingSettingsMap[listing.id] || {};
+
+    // Load BOM components if a BOM is assigned
+    const assignedBom = listing.bom_id ? boms.find(b => b.id === listing.bom_id) : null;
+    const bomComponents = assignedBom?.bom_components?.map(bc => ({
+      component_id: bc.component_id,
+      qty_required: bc.qty_required,
+      internal_sku: bc.components?.internal_sku || '',
+      description: bc.components?.description || '',
+    })) || [];
+
     setDetailForm({
       bom_id: listing.bom_id || '',
+      bom_sku: assignedBom?.bundle_sku || '',
+      bom_components: bomComponents,
       price_override_pence: settings.price_override_pence ? (settings.price_override_pence / 100).toFixed(2) : '',
       quantity_override: settings.quantity_override?.toString() || '',
       quantity_cap: settings.quantity_cap?.toString() || '',
@@ -709,14 +767,52 @@ export default function AmazonListingsPage() {
     setSavingDetail(true);
     try {
       const listing = detailModal.listing;
+      let bomId = detailForm.bom_id;
 
-      // Update BOM if changed
-      if (detailForm.bom_id !== (listing.bom_id || '')) {
+      // Handle BOM creation/update if components have changed
+      if (detailForm.bom_components.length > 0) {
+        const componentsPayload = detailForm.bom_components.map(bc => ({
+          component_id: bc.component_id,
+          qty_required: bc.qty_required,
+        }));
+
+        // Generate BOM SKU from listing SKU or ASIN if not set
+        const bomSku = detailForm.bom_sku || listing.sku || listing.asin;
+
+        if (detailForm.bom_id) {
+          // Update existing BOM
+          await updateBom(detailForm.bom_id, {
+            components: componentsPayload,
+            description: listing.title_fingerprint,
+          });
+          bomId = detailForm.bom_id;
+        } else {
+          // Create new BOM
+          const newBom = await createBom({
+            bundle_sku: bomSku,
+            description: listing.title_fingerprint,
+            components: componentsPayload,
+          });
+          bomId = newBom.id;
+
+          // Add to local BOMs list
+          setBoms(prev => [...prev, newBom]);
+        }
+
+        // Assign BOM to listing
         await updateListing(listing.id, {
-          bom_id: detailForm.bom_id || null,
+          bom_id: bomId,
         });
         setListings(prev => prev.map(l =>
-          l.id === listing.id ? { ...l, bom_id: detailForm.bom_id || null } : l
+          l.id === listing.id ? { ...l, bom_id: bomId } : l
+        ));
+      } else if (!detailForm.bom_id && listing.bom_id) {
+        // Remove BOM assignment if all components were removed
+        await updateListing(listing.id, {
+          bom_id: null,
+        });
+        setListings(prev => prev.map(l =>
+          l.id === listing.id ? { ...l, bom_id: null } : l
         ));
       }
 
@@ -803,10 +899,6 @@ export default function AmazonListingsPage() {
   }, [savedViewsHook, tableState.activeFilters, tableState.sortColumn, tableState.sortDirection, columns]);
 
   // Get BOM details for modal
-  const selectedBom = useMemo(() => {
-    if (!detailModal.listing || !detailForm.bom_id) return null;
-    return boms.find(b => b.id === detailForm.bom_id);
-  }, [detailModal.listing, detailForm.bom_id, boms]);
 
   return (
     <Page
@@ -1199,29 +1291,83 @@ export default function AmazonListingsPage() {
 
               <Divider />
 
-              {/* BOM Assignment */}
+              {/* BOM Components */}
               <BlockStack gap="400">
-                <Text variant="headingSm">BOM Assignment</Text>
-                <Select
-                  label="Assigned BOM"
-                  options={bomOptions}
-                  value={detailForm.bom_id}
-                  onChange={(v) => setDetailForm(f => ({ ...f, bom_id: v }))}
-                  helpText="Assign the BOM that defines what components are included in this listing"
-                />
-                {selectedBom && (
+                <InlineStack align="space-between" blockAlign="center">
+                  <Text variant="headingSm">Bill of Materials</Text>
+                  {detailForm.bom_components.length > 0 && (
+                    <Badge tone="info">{detailForm.bom_components.length} component{detailForm.bom_components.length !== 1 ? 's' : ''}</Badge>
+                  )}
+                </InlineStack>
+                <Text variant="bodySm" tone="subdued">
+                  Add components to define what items are included in this listing
+                </Text>
+
+                {/* Component List */}
+                {detailForm.bom_components.length > 0 && (
                   <Card>
-                    <BlockStack gap="200">
-                      <InlineStack gap="200" blockAlign="center">
-                        <Text variant="bodyMd" fontWeight="semibold">{selectedBom.bundle_sku}</Text>
-                        {selectedBom.review_status === 'APPROVED' && <Badge tone="success">Approved</Badge>}
-                        {selectedBom.review_status === 'PENDING_REVIEW' && <Badge tone="warning">Pending</Badge>}
-                      </InlineStack>
-                      {selectedBom.description && (
-                        <Text variant="bodySm" tone="subdued">{selectedBom.description}</Text>
-                      )}
+                    <BlockStack gap="300">
+                      {detailForm.bom_components.map((bc, index) => (
+                        <div key={bc.component_id}>
+                          {index > 0 && <Divider />}
+                          <InlineStack align="space-between" blockAlign="center" gap="400">
+                            <div style={{ flex: 1 }}>
+                              <BlockStack gap="100">
+                                <Text variant="bodyMd" fontWeight="semibold">{bc.internal_sku}</Text>
+                                <Text variant="bodySm" tone="subdued">{bc.description}</Text>
+                              </BlockStack>
+                            </div>
+                            <InlineStack gap="200" blockAlign="center">
+                              <div style={{ width: 80 }}>
+                                <TextField
+                                  label=""
+                                  type="number"
+                                  value={bc.qty_required.toString()}
+                                  onChange={(v) => handleUpdateComponentQty(bc.component_id, v)}
+                                  min={1}
+                                  autoComplete="off"
+                                  prefix="Qty:"
+                                />
+                              </div>
+                              <Button
+                                icon={DeleteIcon}
+                                onClick={() => handleRemoveComponent(bc.component_id)}
+                                tone="critical"
+                                variant="plain"
+                              />
+                            </InlineStack>
+                          </InlineStack>
+                        </div>
+                      ))}
                     </BlockStack>
                   </Card>
+                )}
+
+                {/* Add Component Selector */}
+                <Select
+                  label="Add Component"
+                  options={[
+                    { label: '-- Select a component to add --', value: '' },
+                    ...components
+                      .filter(c => !detailForm.bom_components.some(bc => bc.component_id === c.id))
+                      .map(c => ({
+                        label: `${c.internal_sku} - ${truncate(c.description || '', 40)}`,
+                        value: c.id
+                      }))
+                  ]}
+                  value=""
+                  onChange={(v) => {
+                    if (v) handleAddComponent(v);
+                  }}
+                  helpText="Select a component to add to this listing's BOM"
+                />
+
+                {detailForm.bom_components.length === 0 && (
+                  <Banner tone="info">
+                    <Text variant="bodyMd">
+                      No components added yet. Use the dropdown above to add components to create a Bill of Materials for this listing.
+                    </Text>
+                  </Banner>
                 )}
               </BlockStack>
 
